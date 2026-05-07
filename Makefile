@@ -20,6 +20,11 @@ test:
 test-verbose:
 	go test -v ./tests/...
 
+# Narrative output: scenarios print what they are doing at every step.
+# Useful for understanding what the integration suite covers.
+test-debug:
+	go test -v -run "TestIntegration|TestProvenance" ./...
+
 # Static checks.
 vet:
 	go vet ./...

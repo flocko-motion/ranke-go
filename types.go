@@ -10,9 +10,9 @@ import "time"
 //  1. Closed-vocabulary enums (NodeClass, EdgeClass, EncodingClass,
 //     RelationDirection) and config structs (ClaimConfig, EdgeConfig)
 //     — public, used at the API boundary.
-//  2. Concrete unexported types (hash, edge, node, claim, store,
-//     graph, branch, branchEntry, memoryPersistence) — implementation,
-//     never returned bare; constructors return interface types.
+//  2. Concrete unexported types (hash, edge, node, claim, archive,
+//     graph, branch, branchEntry) — implementation, never returned
+//     bare; constructors return interface types.
 //
 // Internal storage convention: Type and Encoding are stored split
 // into class + sub fields. The combined "class/sub" string is
@@ -227,9 +227,9 @@ type claim struct {
 	contributor Contributor
 }
 
-// store is the concrete implementation of Store (= (U, B) from §4.6).
+// archive is the concrete implementation of Archive (= (U, B) from §4.6).
 //
-// U contains all graphs the store knows about, and graphs consist of
+// U contains all graphs the archive knows about, and graphs consist of
 // claims, so U transitively contains all claims. Internally we
 // deduplicate: claims (keyed by Id.String()) backs every graph;
 // graphs indexes registered graphs by head id; content holds the
@@ -241,22 +241,22 @@ type claim struct {
 // map; branches just provides the name → latest-claim-id index.
 //
 // The public API never exposes the claims map directly — claim-level
-// operations live on Graph, not on Store. Listing of U is not
+// operations live on Graph, not on Archive. Listing of U is not
 // possible; only graph-by-head, content-by-id, and branch-by-name
 // lookups are.
-type store struct {
+type archive struct {
 	claims   map[string]*claim // cache when backend != nil; source of truth otherwise
 	content  map[string][]byte // same: cache + truth
 	branches map[string]Id     // always full in memory (B is small)
-	backend  storeBackend      // nil ⇒ pure in-memory; non-nil ⇒ persistent
+	backend  archiveBackend      // nil ⇒ pure in-memory; non-nil ⇒ persistent
 }
 
 // branch is the concrete implementation of Branch — a thin
 // projection of a contribution/branch claim. Constructed by
 // GetBranch / Branches() from the underlying claim referenced by
-// store.branches. The provenance chain is pre-fetched eagerly so
-// that the Branch value is self-contained and survives Store reload
-// (no back-pointer to the Store).
+// archive.branches. The provenance chain is pre-fetched eagerly so
+// that the Branch value is self-contained and survives Archive reload
+// (no back-pointer to the Archive).
 //
 // claim is the current contribution/branch claim; chain is the
 // pre-walked provenance (most-recent first), excluding the current

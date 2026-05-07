@@ -5,16 +5,16 @@ import (
 	"fmt"
 )
 
-// storeBackend is the internal hook between *store and its persistence
-// layer. NewMemStore uses backend == nil (cache IS the source of
-// truth). NewFsStore wires in an fsBackend that reads/writes the
+// archiveBackend is the internal hook between *archive and its persistence
+// layer. NewMemArchive uses backend == nil (cache IS the source of
+// truth). NewFsArchive wires in an fsBackend that reads/writes the
 // filesystem on cache miss/write.
 //
 // Read paths consult the cache first, then fall back to the backend
 // on miss. Write paths populate the cache and, when a backend is
 // present, persist through it. Branches are always held fully in
 // memory (B is small) and rewritten via saveBranches on change.
-type storeBackend interface {
+type archiveBackend interface {
 	loadClaim(idStr string) (*claim, error)
 	saveClaim(c *claim) error
 	loadContent(idStr string) ([]byte, error)
@@ -22,7 +22,7 @@ type storeBackend interface {
 	saveBranches(b map[string]Id) error
 }
 
-// errNotFound is returned by storeBackend implementations when a
+// errNotFound is returned by archiveBackend implementations when a
 // requested record is not present.
 var errNotFound = errors.New("not found")
 
@@ -31,7 +31,7 @@ var errNotFound = errors.New("not found")
 // lookupClaim returns the claim for id, consulting the cache first
 // and falling back to the backend. Wires the contributor field
 // (recursively, if needed) before returning.
-func (s *store) lookupClaim(id Id) (*claim, error) {
+func (s *archive) lookupClaim(id Id) (*claim, error) {
 	if id == nil {
 		return nil, errors.New("nil id")
 	}
@@ -60,7 +60,7 @@ func (s *store) lookupClaim(id Id) (*claim, error) {
 // wireContributor sets c.contributor based on c's
 // contribution/contributor edge, or self-attributes if c is the
 // root (no edges).
-func (s *store) wireContributor(c *claim) error {
+func (s *archive) wireContributor(c *claim) error {
 	if len(c.edges) == 0 {
 		// Root contributor: self-attribute.
 		c.contributor = c
@@ -81,7 +81,7 @@ func (s *store) wireContributor(c *claim) error {
 }
 
 // putClaim writes c to cache and (if backend) persists it.
-func (s *store) putClaim(c *claim) error {
+func (s *archive) putClaim(c *claim) error {
 	k := c.node.id.String()
 	if _, exists := s.claims[k]; !exists {
 		s.claims[k] = c
@@ -97,7 +97,7 @@ func (s *store) putClaim(c *claim) error {
 }
 
 // putContent writes content bytes to cache and (if backend) persists.
-func (s *store) putContent(id Id, b []byte) error {
+func (s *archive) putContent(id Id, b []byte) error {
 	if id == nil || b == nil {
 		return nil
 	}
@@ -112,16 +112,16 @@ func (s *store) putContent(id Id, b []byte) error {
 }
 
 // persistBranches writes the current B map via the backend.
-func (s *store) persistBranches() error {
+func (s *archive) persistBranches() error {
 	if s.backend == nil {
 		return nil
 	}
 	return s.backend.saveBranches(s.branches)
 }
 
-// --- Store interface methods ---
+// --- Archive interface methods ---
 
-func (s *store) HasGraph(head Id) bool {
+func (s *archive) HasGraph(head Id) bool {
 	if head == nil {
 		return false
 	}
@@ -129,13 +129,13 @@ func (s *store) HasGraph(head Id) bool {
 	return err == nil
 }
 
-func (s *store) GetGraph(head Id) (Graph, error) {
+func (s *archive) GetGraph(head Id) (Graph, error) {
 	if head == nil {
-		return nil, errors.New("ranke.Store.GetGraph: nil head")
+		return nil, errors.New("ranke.Archive.GetGraph: nil head")
 	}
 	root, err := s.lookupClaim(head)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Store.GetGraph: head %s: %w", head.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetGraph: head %s: %w", head.String(), err)
 	}
 
 	g := &graph{
@@ -156,7 +156,7 @@ func (s *store) GetGraph(head Id) (Graph, error) {
 			g.referenced[refKey] = struct{}{}
 			next, err := s.lookupClaim(e.reference)
 			if err != nil {
-				return nil, fmt.Errorf("ranke.Store.GetGraph: missing claim %s referenced by %s: %w", refKey, k, err)
+				return nil, fmt.Errorf("ranke.Archive.GetGraph: missing claim %s referenced by %s: %w", refKey, k, err)
 			}
 			queue = append(queue, next)
 		}
@@ -164,24 +164,24 @@ func (s *store) GetGraph(head Id) (Graph, error) {
 	return g, nil
 }
 
-func (s *store) HasBranch(name string) bool {
+func (s *archive) HasBranch(name string) bool {
 	_, ok := s.branches[name]
 	return ok
 }
 
-func (s *store) GetBranch(name string) (Branch, error) {
+func (s *archive) GetBranch(name string) (Branch, error) {
 	id, ok := s.branches[name]
 	if !ok {
-		return nil, fmt.Errorf("ranke.Store.GetBranch: branch %q not found", name)
+		return nil, fmt.Errorf("ranke.Archive.GetBranch: branch %q not found", name)
 	}
 	bc, err := s.lookupClaim(id)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Store.GetBranch: branch claim %s: %w", id.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetBranch: branch claim %s: %w", id.String(), err)
 	}
 	return s.buildBranchView(bc)
 }
 
-func (s *store) buildBranchView(bc *claim) (Branch, error) {
+func (s *archive) buildBranchView(bc *claim) (Branch, error) {
 	chain := make([]*branchEntry, 0)
 	cur := bc
 	for {
@@ -205,36 +205,36 @@ func (s *store) buildBranchView(bc *claim) (Branch, error) {
 	return &branch{claim: bc, chain: chain}, nil
 }
 
-func (s *store) SetBranch(name string, g Graph, contributor Contributor) error {
+func (s *archive) SetBranch(name string, g Graph, contributor Contributor) error {
 	if g == nil {
-		return errors.New("ranke.Store.SetBranch: nil graph")
+		return errors.New("ranke.Archive.SetBranch: nil graph")
 	}
 	if !g.IsConsolidated() {
-		return fmt.Errorf("ranke.Store.SetBranch: graph must be single-headed (Heads()=%d); consolidate first via a contribution/head claim", len(g.Heads()))
+		return fmt.Errorf("ranke.Archive.SetBranch: graph must be single-headed (Heads()=%d); consolidate first via a contribution/head claim", len(g.Heads()))
 	}
 	if contributor == nil {
-		return errors.New("ranke.Store.SetBranch: contributor required")
+		return errors.New("ranke.Archive.SetBranch: contributor required")
 	}
 	cg, ok := g.(*graph)
 	if !ok {
-		return errors.New("ranke.Store.SetBranch: graph from foreign implementation")
+		return errors.New("ranke.Archive.SetBranch: graph from foreign implementation")
 	}
 	head := g.Heads()[0]
 
 	// Absorb every claim and content blob.
 	for _, c := range cg.claims {
 		if err := s.putClaim(c); err != nil {
-			return fmt.Errorf("ranke.Store.SetBranch: persist claim: %w", err)
+			return fmt.Errorf("ranke.Archive.SetBranch: persist claim: %w", err)
 		}
 		if c.node.content != nil && c.node.contentHash != nil {
 			if err := s.putContent(c.node.contentHash, c.node.content); err != nil {
-				return fmt.Errorf("ranke.Store.SetBranch: persist node content: %w", err)
+				return fmt.Errorf("ranke.Archive.SetBranch: persist node content: %w", err)
 			}
 		}
 		for _, e := range c.edges {
 			if e.content != nil && e.contentHash != nil {
 				if err := s.putContent(e.contentHash, e.content); err != nil {
-					return fmt.Errorf("ranke.Store.SetBranch: persist edge content: %w", err)
+					return fmt.Errorf("ranke.Archive.SetBranch: persist edge content: %w", err)
 				}
 			}
 		}
@@ -248,7 +248,7 @@ func (s *store) SetBranch(name string, g Graph, contributor Contributor) error {
 		TypeSub:   "head",
 	})
 	if err != nil {
-		return fmt.Errorf("ranke.Store.SetBranch: build head edge: %w", err)
+		return fmt.Errorf("ranke.Archive.SetBranch: build head edge: %w", err)
 	}
 	edges = append(edges, headEdge)
 	if prevID, ok := s.branches[name]; ok {
@@ -258,7 +258,7 @@ func (s *store) SetBranch(name string, g Graph, contributor Contributor) error {
 			TypeSub:   "branch",
 		})
 		if err != nil {
-			return fmt.Errorf("ranke.Store.SetBranch: build prev edge: %w", err)
+			return fmt.Errorf("ranke.Archive.SetBranch: build prev edge: %w", err)
 		}
 		edges = append(edges, prevEdge)
 	}
@@ -273,26 +273,26 @@ func (s *store) SetBranch(name string, g Graph, contributor Contributor) error {
 		Edges:         edges,
 	})
 	if err != nil {
-		return fmt.Errorf("ranke.Store.SetBranch: build branch claim: %w", err)
+		return fmt.Errorf("ranke.Archive.SetBranch: build branch claim: %w", err)
 	}
 	bc := branchClaim.(*claim)
 	if err := s.putClaim(bc); err != nil {
-		return fmt.Errorf("ranke.Store.SetBranch: persist branch claim: %w", err)
+		return fmt.Errorf("ranke.Archive.SetBranch: persist branch claim: %w", err)
 	}
 	if bc.node.content != nil && bc.node.contentHash != nil {
 		if err := s.putContent(bc.node.contentHash, bc.node.content); err != nil {
-			return fmt.Errorf("ranke.Store.SetBranch: persist branch content: %w", err)
+			return fmt.Errorf("ranke.Archive.SetBranch: persist branch content: %w", err)
 		}
 	}
 
 	s.branches[name] = bc.node.id
 	if err := s.persistBranches(); err != nil {
-		return fmt.Errorf("ranke.Store.SetBranch: persist branches: %w", err)
+		return fmt.Errorf("ranke.Archive.SetBranch: persist branches: %w", err)
 	}
 	return nil
 }
 
-func (s *store) Branches() []Branch {
+func (s *archive) Branches() []Branch {
 	out := make([]Branch, 0, len(s.branches))
 	for _, id := range s.branches {
 		bc, err := s.lookupClaim(id)

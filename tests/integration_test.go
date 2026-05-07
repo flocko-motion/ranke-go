@@ -1,6 +1,6 @@
 // Integration tests — drive ranke.IntegrationTest against every
-// Store backend the library ships, plus reload checkpoints. The same
-// scenario suite is what 3rd-party Store implementations use to
+// Archive backend the library ships, plus reload checkpoints. The same
+// scenario suite is what 3rd-party Archive implementations use to
 // confirm conformance.
 package ranke_test
 
@@ -12,10 +12,10 @@ import (
 )
 
 func TestIntegrationMem(t *testing.T) {
-	// Mem: the factory returns the same Store every call, so Reset
+	// Mem: the factory returns the same Archive every call, so Reset
 	// is a no-op (state cannot be lost because nothing leaves memory).
-	s := ranke.NewMemStore()
-	ranke.IntegrationTest(t, func() ranke.Store { return s })
+	s := ranke.NewMemArchive()
+	ranke.IntegrationTest(t, func() ranke.Archive { return s })
 }
 
 func TestIntegrationFs(t *testing.T) {
@@ -23,8 +23,8 @@ func TestIntegrationFs(t *testing.T) {
 	// call. Reset drops in-memory caches and re-reads branches.json;
 	// the next claim/content access fetches from disk.
 	dir := t.TempDir()
-	ranke.IntegrationTest(t, func() ranke.Store {
-		s, err := ranke.NewFsStore(dir)
+	ranke.IntegrationTest(t, func() ranke.Archive {
+		s, err := ranke.NewFsArchive(dir)
 		require.NoError(t, err)
 		return s
 	})

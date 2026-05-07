@@ -10,7 +10,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-// NewFsStore opens (or creates) a filesystem-backed Store at dir.
+// NewFsArchive opens (or creates) a filesystem-backed Archive at dir.
 //
 // Layout:
 //
@@ -22,30 +22,30 @@ import (
 // On open: dir is created if missing; subdirs created on demand;
 // branches.json is read eagerly into memory (small). Claims and
 // content are fetched lazily from disk on first reference and
-// cached in memory for the lifetime of this Store handle.
+// cached in memory for the lifetime of this Archive handle.
 //
-// Reload: drop this Store and call NewFsStore(dir) again. Caches
+// Reload: drop this Archive and call NewFsArchive(dir) again. Caches
 // reset; persisted state on disk is the source of truth. Returned
 // values from the previous handle remain valid (self-contained).
-func NewFsStore(dir string) (Store, error) {
+func NewFsArchive(dir string) (Archive, error) {
 	if dir == "" {
-		return nil, errors.New("ranke.NewFsStore: empty directory path")
+		return nil, errors.New("ranke.NewFsArchive: empty directory path")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("ranke.NewFsStore: mkdir %s: %w", dir, err)
+		return nil, fmt.Errorf("ranke.NewFsArchive: mkdir %s: %w", dir, err)
 	}
 	for _, sub := range []string{"claims", "content"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
-			return nil, fmt.Errorf("ranke.NewFsStore: mkdir %s/%s: %w", dir, sub, err)
+			return nil, fmt.Errorf("ranke.NewFsArchive: mkdir %s/%s: %w", dir, sub, err)
 		}
 	}
 
 	branches, err := loadBranchesFile(dir)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewFsStore: load branches: %w", err)
+		return nil, fmt.Errorf("ranke.NewFsArchive: load branches: %w", err)
 	}
 
-	return &store{
+	return &archive{
 		claims:   make(map[string]*claim),
 		content:  make(map[string][]byte),
 		branches: branches,
@@ -55,7 +55,7 @@ func NewFsStore(dir string) (Store, error) {
 
 // --- fsBackend ---
 
-// fsBackend implements storeBackend over the filesystem.
+// fsBackend implements archiveBackend over the filesystem.
 type fsBackend struct {
 	dir string
 }
@@ -199,7 +199,7 @@ func atomicWrite(path string, data []byte) error {
 }
 
 // loadBranchesFile reads branches.json into a name → Id map. Returns
-// an empty map if the file doesn't exist (fresh store).
+// an empty map if the file doesn't exist (fresh archive).
 func loadBranchesFile(dir string) (map[string]Id, error) {
 	path := filepath.Join(dir, "branches.json")
 	data, err := os.ReadFile(path)

@@ -8,23 +8,23 @@ import (
 )
 
 // IntegrationTest runs the full Ranke-Graph integration suite against
-// the Store returned by factory. Use it from your own _test.go to
-// confirm a custom Store backend conforms to the ADT:
+// the Archive returned by factory. Use it from your own _test.go to
+// confirm a custom Archive backend conforms to the ADT:
 //
 //	func TestMyStore(t *testing.T) {
 //	    dir := t.TempDir()
-//	    ranke.IntegrationTest(t, func() ranke.Store {
+//	    ranke.IntegrationTest(t, func() ranke.Archive {
 //	        s, err := mystore.New(dir)
 //	        if err != nil { t.Fatal(err) }
 //	        return s
 //	    })
 //	}
 //
-// factory is called once eagerly to obtain the initial Store handle,
+// factory is called once eagerly to obtain the initial Archive handle,
 // and again at every Reset checkpoint inside a scenario. Implementors
 // should make factory return:
 //
-//   - the same Store instance every call, for in-memory backends —
+//   - the same Archive instance every call, for in-memory backends —
 //     Reset is then a pointer-equality no-op;
 //   - a fresh handle backed by the same durable storage, for fs/S3/...
 //     backends — Reset re-reads from durable state and clears caches.
@@ -33,28 +33,28 @@ import (
 // suite is correct iff each Reset is observably a no-op: the handle
 // changes, but values previously returned remain valid (claims,
 // graphs, branches, branch entries are self-contained).
-func IntegrationTest(t *testing.T, factory func() Store) {
+func IntegrationTest(t *testing.T, factory func() Archive) {
 	t.Helper()
 	t.Run("AliceEmail", func(t *testing.T) {
-		runAliceEmail(t, newTestStore(factory))
+		runAliceEmail(t, newTestArchive(factory))
 	})
 	t.Run("AgentAnalyzesEmails", func(t *testing.T) {
-		runAgentAnalyzes(t, newTestStore(factory))
+		runAgentAnalyzes(t, newTestArchive(factory))
 	})
 }
 
-// --- testStore wrapper ---
+// --- testArchive wrapper ---
 
-type testStore struct {
-	Store
-	open func() Store
+type testArchive struct {
+	Archive
+	open func() Archive
 }
 
-func newTestStore(open func() Store) *testStore {
-	return &testStore{Store: open(), open: open}
+func newTestArchive(open func() Archive) *testArchive {
+	return &testArchive{Archive: open(), open: open}
 }
 
-func (s *testStore) Reset() { s.Store = s.open() }
+func (s *testArchive) Reset() { s.Archive = s.open() }
 
 // --- helpers (build canonical actors and artifacts) ---
 
@@ -215,23 +215,26 @@ func mkSymmetricRelation(t *testing.T, contributor Contributor, sub, content str
 
 // commit takes a graph (single- or multi-headed) and SetBranches it
 // under "main", consolidating first if needed. After commit, the
-// store is Reset — the work has been "persisted" (or no-op'd on mem)
+// archive is Reset — the work has been "persisted" (or no-op'd on mem)
 // and the test handle is fresh.
-func commit(t *testing.T, ts *testStore, g Graph, contributor Contributor) {
+func commit(t *testing.T, ts *testArchive, g Graph, contributor Contributor) {
 	t.Helper()
 	if !g.IsConsolidated() {
+		t.Logf("    consolidating %d open heads", len(g.Heads()))
 		head, err := g.Consolidate(contributor)
 		require.NoError(t, err, "consolidate before commit")
 		_, err = g.AddClaim(head)
 		require.NoError(t, err, "add consolidation claim")
 	}
+	t.Logf("    SetBranch main → %s", g.Heads()[0].String()[:16]+"…")
 	require.NoError(t, ts.SetBranch("main", g, contributor), "SetBranch main")
+	t.Logf("    [Reset] drop handle, reload from backend")
 	ts.Reset()
 }
 
 // fetchMain returns the current state of branch "main" as a fresh
 // Graph plus the bound head id.
-func fetchMain(t *testing.T, ts *testStore) (Graph, Id) {
+func fetchMain(t *testing.T, ts *testArchive) (Graph, Id) {
 	t.Helper()
 	require.True(t, ts.HasBranch("main"), "branch main exists after reset")
 	b, err := ts.GetBranch("main")
@@ -239,15 +242,32 @@ func fetchMain(t *testing.T, ts *testStore) (Graph, Id) {
 	head := b.Latest().Head()
 	g, err := ts.GetGraph(head)
 	require.NoError(t, err, "GetGraph head")
+	t.Logf("    fetched main → head %s (%d claims in closure)",
+		head.String()[:16]+"…", countClaims(g))
 	return g, head
+}
+
+// countClaims reports how many claims the graph holds (handy for
+// narrative output; not part of the public API).
+func countClaims(g Graph) int {
+	cg, ok := g.(*graph)
+	if !ok {
+		return -1
+	}
+	return len(cg.claims)
 }
 
 // --- Scenario: AliceEmail ---
 
-func runAliceEmail(t *testing.T, ts *testStore) {
-	operator := mkContributor(t, "operator@example.com")
+func runAliceEmail(t *testing.T, ts *testArchive) {
+	t.Logf("Scenario: a single email is ingested as a source claim.")
+	t.Logf("  Paper §1 — 'A file exists, attributed to Alice by its")
+	t.Logf("             headers, that appears to be a copy of an email")
+	t.Logf("             to Bob in which Alice claims to like apples.'")
 
-	// Stage 1: bootstrap with operator as the only claim.
+	operator := mkContributor(t, "operator@example.com")
+	t.Logf("[Stage 1] bootstrap with operator (the only no-edge claim, §4.3)")
+	t.Logf("    operator id: %s", operator.ID().String()[:16]+"…")
 	g := NewGraph(operator)
 	commit(t, ts, g, operator)
 
@@ -255,21 +275,23 @@ func runAliceEmail(t *testing.T, ts *testStore) {
 	require.True(t, head1.Equal(operator.ID()),
 		"after bootstrap, head is operator")
 
-	// Stage 2: add Alice's email.
+	t.Logf("[Stage 2] add Alice's email as a source/email claim")
 	g2, _ := fetchMain(t, ts)
 	email := mkEmail(t, operator,
 		"alice@example.com", "bob@example.com",
 		"Bob, just so you know, I really do like apples.\r\n— Alice\r\n")
+	t.Logf("    email id: %s", email.ID().String()[:16]+"…")
 	_, err := g2.AddClaim(email)
 	require.NoError(t, err)
 	commit(t, ts, g2, operator)
 
+	t.Logf("[Verify] reload, walk closure, validate")
 	g3, _ := fetchMain(t, ts)
 	require.True(t, g3.ContainsClaim(email.ID()), "email survived reset")
 	require.True(t, g3.ContainsClaim(operator.ID()), "operator survived reset")
 	require.NoError(t, g3.Validate(), "graph validates after reload")
 
-	// Mid-fetch reload: drop and refetch.
+	t.Logf("[Verify] mid-fetch reload: drop handle, refetch, head id must be stable")
 	ts.Reset()
 	g4, _ := fetchMain(t, ts)
 	require.True(t, g4.Heads()[0].Equal(g3.Heads()[0]), "head id stable across reset")
@@ -277,11 +299,20 @@ func runAliceEmail(t *testing.T, ts *testStore) {
 
 // --- Scenario: AgentAnalyzesEmails ---
 
-func runAgentAnalyzes(t *testing.T, ts *testStore) {
+func runAgentAnalyzes(t *testing.T, ts *testArchive) {
+	t.Logf("Scenario: an agent contributor analyzes two emails, extracting")
+	t.Logf("  derivations, entities, and semantic relations (paper §3.5,")
+	t.Logf("  §4.7). Two Bobs from two sources get distinct ids by")
+	t.Logf("  content-addressing; the structural reading stays acyclic")
+	t.Logf("  even though Alice—knows→Bob + Bob—ignores→Alice would")
+	t.Logf("  cycle in the semantic reading.")
+
 	operator := mkContributor(t, "operator@example.com")
 	agent := mkAgent(t, operator, "extraction-agent-v1")
+	t.Logf("[Stage 1] bootstrap operator + agent (agent's contributor is operator)")
+	t.Logf("    operator id: %s", operator.ID().String()[:16]+"…")
+	t.Logf("    agent    id: %s", agent.ID().String()[:16]+"…")
 
-	// Stage 1: bootstrap operator + agent.
 	g := NewGraph(operator)
 	_, err := g.AddClaim(agent)
 	require.NoError(t, err)
@@ -289,7 +320,7 @@ func runAgentAnalyzes(t *testing.T, ts *testStore) {
 	g, _ = fetchMain(t, ts)
 	require.True(t, g.ContainsClaim(agent.ID()), "agent survived reset 1")
 
-	// Stage 2: add the two emails.
+	t.Logf("[Stage 2] add two source/email claims (Alice → Bob, ingested by operator)")
 	emailApples := mkEmail(t, operator,
 		"alice@example.com", "bob@example.com",
 		"Bob, just so you know, I really do like apples.\r\n— Alice\r\n")
@@ -305,7 +336,8 @@ func runAgentAnalyzes(t *testing.T, ts *testStore) {
 	require.True(t, g.ContainsClaim(emailApples.ID()))
 	require.True(t, g.ContainsClaim(emailFamily.ID()))
 
-	// Stage 3: agent extracts derivations + entities + relations.
+	t.Logf("[Stage 3] agent extracts derivations, entities, and relations")
+	t.Logf("    (every derived claim cites its source via a derivation/source edge — §3.5)")
 	summary := mkSummary(t, agent, emailApples, "Alice expresses preference for apples.")
 	alice := mkEntity(t, agent, "person", "Alice", emailApples)
 	apples := mkEntity(t, agent, "object", "apples", emailApples)
@@ -329,16 +361,20 @@ func runAgentAnalyzes(t *testing.T, ts *testStore) {
 		require.NoError(t, err)
 	}
 
+	t.Logf("    bob_sr id: %s", bobSr.ID().String()[:16]+"…")
+	t.Logf("    bob_jr id: %s — distinct from bob_sr (different sources)",
+		bobJr.ID().String()[:16]+"…")
 	require.False(t, bobSr.ID().Equal(bobJr.ID()),
 		"two Bob entities from different sources have distinct ids")
 
 	commit(t, ts, g, operator)
 
-	// Final reload: walk the closure end-to-end and validate.
+	t.Logf("[Verify] final reload: walk closure end-to-end and validate")
 	g, _ = fetchMain(t, ts)
 	for _, c := range []Claim{summary, alice, apples, bobSr, bobJr, likes, knows, ignores, family} {
 		require.True(t, g.ContainsClaim(c.ID()),
 			"%s/%s survived final reset", c.Node().TypeClass(), c.Node().TypeSub())
 	}
 	require.NoError(t, g.Validate(), "full graph validates after final reset")
+	t.Logf("    closure intact, integrity verified ✓")
 }

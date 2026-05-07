@@ -7,11 +7,11 @@
 // data-only config structs (ClaimConfig, EdgeConfig) used to pass
 // arguments into the constructors.
 //
-// Backend scope: this library ships two example Store
-// implementations — NewMemStore (in-memory, ephemeral) and
-// NewFsStore (filesystem, durable). Other backends (S3, IPFS,
+// Backend scope: this library ships two example Archive
+// implementations — NewMemArchive (in-memory, ephemeral) and
+// NewFsArchive (filesystem, durable). Other backends (S3, IPFS,
 // Neo4j, content-addressed databases, ...) belong in downstream
-// packages and need only satisfy the Store interface.
+// packages and need only satisfy the Archive interface.
 //
 // Access model: dark, content-addressed (IPFS-style). Every record
 // operation is keyed on an explicit hash — you can try to fetch by
@@ -24,8 +24,8 @@
 // Public constructors (defined elsewhere in this package):
 //
 //	func NewGraph(root Contributor) Graph
-//	func NewMemStore(root Contributor) Store               // in-memory backend
-//	func NewFsStore(path string, root Contributor) (Store, error) // file-backed backend (planned)
+//	func NewMemArchive(root Contributor) Archive               // in-memory backend
+//	func NewFsArchive(path string, root Contributor) (Archive, error) // file-backed backend (planned)
 //	func NewClaim(cfg ClaimConfig) (Claim, error)
 //	func NewEdge(cfg EdgeConfig) (Edge, error)
 //	func NewTypeFilter(class *EdgeClass, sub *string) Filter
@@ -51,7 +51,7 @@ type Filter interface {
 //
 // Id is the universal name in the system: it identifies a node, an
 // edge, or a hash-rooted graph instance (§4.5). What you can do with
-// an Id depends on the API you pass it to (Store.GetClaim,
+// an Id depends on the API you pass it to (Archive.GetClaim,
 // Persistence.Read, ...).
 //
 // Per §4 of the paper, id(v) = H(S(v)) for nodes and id(e) = H(S(e))
@@ -74,7 +74,7 @@ type Id interface {
 	// Algorithm returns the human-readable name of the hash
 	// algorithm used to build this id (e.g. "sha2-256"). The
 	// reference implementation produces "sha2-256" for every id,
-	// but a Store may receive ids built with other algorithms
+	// but a Archive may receive ids built with other algorithms
 	// from external sources.
 	Algorithm() string
 }
@@ -101,7 +101,7 @@ type Edge interface {
 	ContentHash() Id
 	// Content returns the edge's content bytes. Returns (nil, nil)
 	// if the edge has no content. The bytes travel with the claim
-	// the edge belongs to; no Store lookup is required.
+	// the edge belongs to; no Archive lookup is required.
 	Content() ([]byte, error)
 	// Encoding is the full MIME media type of the edge content
 	// (RFC 6838), e.g. "text/plain". Empty when the edge carries no
@@ -150,7 +150,7 @@ type Node interface {
 	ContentHash() Id
 	// Content returns the node's content bytes. Returns (nil, nil)
 	// if the node has no content. The bytes travel with the claim;
-	// no Store lookup is required.
+	// no Archive lookup is required.
 	Content() ([]byte, error)
 	// Encoding is the full MIME media type (RFC 6838) telling
 	// consumers how to interpret the content bytes (§4.9), e.g.
@@ -251,48 +251,48 @@ type Contributor interface {
 	Claim
 }
 
-// Store is one physical instance of (U, B) from §4.6. A Store holds
+// Archive is one physical instance of (U, B) from §4.6. A Archive holds
 // graphs (the U side) and branches (the B side) — claims live inside
-// graphs, not directly in the Store.
+// graphs, not directly in the Archive.
 //
-// The Store API operates at the graph and branch granularity:
+// The Archive API operates at the graph and branch granularity:
 // fetching a graph by the id of its head, putting a graph (binding
 // it to a branch), naming and history. Claim-level operations
 // (AddClaim, ContainsClaim, GetClaim) belong on Graph — that is where
-// claims actually live. Internally, a Store typically deduplicates
+// claims actually live. Internally, a Archive typically deduplicates
 // claims across graphs, but that is an implementation detail not
 // exposed by the interface.
 //
-// Listability is deliberately not part of the Store API. The
+// Listability is deliberately not part of the Archive API. The
 // universe U is unenumerable in principle. The only listing-style
 // call is Branches, which is explicitly the local B side, not U.
 //
-// Backends. This library ships two example Store implementations:
+// Backends. This library ships two example Archive implementations:
 //
-//   - NewMemStore — in-memory, ephemeral. Useful for tests, scratch
+//   - NewMemArchive — in-memory, ephemeral. Useful for tests, scratch
 //     work, the conformance suite, and any short-lived process.
-//   - NewFsStore — filesystem-backed, durable. Loads B eagerly,
+//   - NewFsArchive — filesystem-backed, durable. Loads B eagerly,
 //     fetches claims and content lazily on demand.
 //
 // Other backends (S3, IPFS, Neo4j, content-addressed databases) are
 // out of scope for this library — they live in downstream packages
-// and need only satisfy the Store interface.
-type Store interface {
+// and need only satisfy the Archive interface.
+type Archive interface {
 	// --- Graphs (the U side) ---
 
-	// HasGraph reports whether the Store holds a graph identified by
+	// HasGraph reports whether the Archive holds a graph identified by
 	// the given head id (i.e. a graph rooted at this head is present
 	// and complete).
 	HasGraph(head Id) bool
 
 	// GetGraph retrieves the hash-rooted graph instance RG_h
-	// identified by head (§4.5). Returns an error if the Store does
+	// identified by head (§4.5). Returns an error if the Archive does
 	// not hold this graph or any required claim is missing.
 	GetGraph(head Id) (Graph, error)
 
 	// --- Content (addressed by ContentHash on nodes and edges) ---
 	//
-	// Content has no fetcher on the public Store interface. Claims
+	// Content has no fetcher on the public Archive interface. Claims
 	// are the atomic unit exposed to users; content is reachable
 	// only through the claim that names it (Node.Content,
 	// Edge.Content). Adding HasContent/GetContent here would let
@@ -363,7 +363,7 @@ type Store interface {
 //
 // Branch is a read-only projection of that claim, exposing Name,
 // the Latest binding (as a BranchEntry), and the Provenance chain
-// of prior bindings. Mutation goes through Store.SetBranch, which
+// of prior bindings. Mutation goes through Archive.SetBranch, which
 // builds and appends a new contribution/branch claim and updates
 // B[name].
 type Branch interface {
@@ -417,7 +417,7 @@ type BranchEntry interface {
 // Graphs are where claims actually live: AddClaim grows the subset,
 // ContainsClaim and GetClaim look up claims in it. A Graph can be built
 // standalone (NewGraph, add claims, consolidate, persist via
-// Persistence) or fetched from a Store (Store.GetGraph(head)).
+// Persistence) or fetched from a Archive (Archive.GetGraph(head)).
 //
 // Validation lives here because validation is bounded — Merkle
 // integrity holds across a closure, not over the unenumerable U.

@@ -5,7 +5,7 @@ import "time"
 // branch / branchEntry are projections of contribution/branch claims.
 // All interface methods derive their answers from the underlying
 // claim (and chain, for Branch), so the values are self-contained
-// and survive Store reload.
+// and survive Archive reload.
 
 // --- Branch ---
 
