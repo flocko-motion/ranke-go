@@ -4,6 +4,7 @@
 package tests
 
 import (
+	"os"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
@@ -21,7 +22,14 @@ func TestIntegrationFs(t *testing.T) {
 	// Fs: the factory builds a fresh handle at the same dir each
 	// call. Reset drops in-memory caches and re-reads branches.json;
 	// the next claim/content access fetches from disk.
-	dir := t.TempDir()
+	//
+	// The directory is intentionally NOT auto-cleaned (no t.TempDir):
+	// after the test we want to inspect branches.json, claims/*, and
+	// content/* to verify on-disk shape. The path is logged below.
+	dir, err := os.MkdirTemp("", "ranke-test-fs-")
+	require.NoError(t, err)
+	t.Logf("fs archive directory (preserved for inspection): %s", dir)
+
 	IntegrationTest(t, func() ranke.Archive {
 		a, err := ranke.NewFsArchive(dir)
 		require.NoError(t, err)
