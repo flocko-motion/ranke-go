@@ -9,9 +9,10 @@
 # Default target: run the tests.
 all: test
 
-# Verify the library compiles. No binary output.
+# Build the ranke CLI into bin/ranke.
 build:
-	go build ./...
+	@mkdir -p bin
+	go build -o bin/ranke ./cmd/ranke
 
 # Run user-perspective tests in /tests. The fs integration test
 # uses a fixed directory (RANKE_FS_DIR, default /tmp/ranke-go-test)

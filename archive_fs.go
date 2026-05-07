@@ -12,22 +12,18 @@ import (
 
 // NewFsArchive opens (or creates) a filesystem-backed Archive at dir.
 //
-// Layout — flat content-addressed store, plus one mutable handle:
+// Layout — separate subdirs for transparency, since the FS backend
+// is intended for development and inspection. Production backends
+// (S3, IPFS, ...) can store flat if they prefer; only this backend
+// commits to the layout below.
 //
 //	dir/
 //	├── B_h                // current contribution/branches claim id (text)
-//	├── <id>               // canonical CBOR of a claim, OR raw content blob
-//	├── <id>
-//	└── ...
+//	├── claims/<id>        // canonical CBOR of a claim
+//	└── content/<id>       // raw content bytes
 //
-// Both claims and content blobs are addressed by their multihash id;
-// they share the same flat directory because they're both content-
-// addressed records and ids never collide. Whether a given file is
-// "a claim" or "a content blob" is decided by who's asking — claim
-// fetchers try CBOR-decoding; content fetchers return raw bytes.
-//
-// On open: dir is created if missing; B_h is read eagerly if present.
-// Claims and content are fetched lazily on first reference.
+// On open: dir + subdirs are created if missing; B_h is read eagerly
+// if present; claims and content are fetched lazily on first reference.
 //
 // Reload: drop this Archive and call NewFsArchive(dir) again. Caches
 // reset; persisted state on disk is the source of truth. Returned
@@ -38,6 +34,11 @@ func NewFsArchive(dir string) (Archive, error) {
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("ranke.NewFsArchive: mkdir %s: %w", dir, err)
+	}
+	for _, sub := range []string{"claims", "content"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return nil, fmt.Errorf("ranke.NewFsArchive: mkdir %s/%s: %w", dir, sub, err)
+		}
 	}
 
 	branchesHead, err := loadBranchesHeadFile(dir)
@@ -60,8 +61,9 @@ type fsBackend struct {
 	dir string
 }
 
-func (b *fsBackend) blobPath(id string) string { return filepath.Join(b.dir, id) }
-func (b *fsBackend) bhPath() string            { return filepath.Join(b.dir, "B_h") }
+func (b *fsBackend) claimPath(id string) string   { return filepath.Join(b.dir, "claims", id) }
+func (b *fsBackend) contentPath(id string) string { return filepath.Join(b.dir, "content", id) }
+func (b *fsBackend) bhPath() string               { return filepath.Join(b.dir, "B_h") }
 
 // encClaimFile is the on-disk shape for a single claim file: the
 // node plus the full edge records. Not part of any canonical-hash
@@ -72,7 +74,7 @@ type encClaimFile struct {
 }
 
 func (b *fsBackend) loadClaim(idStr string) (*claim, error) {
-	data, err := os.ReadFile(b.blobPath(idStr))
+	data, err := os.ReadFile(b.claimPath(idStr))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, errNotFound
@@ -111,7 +113,7 @@ func (b *fsBackend) loadClaim(idStr string) (*claim, error) {
 
 func (b *fsBackend) saveClaim(c *claim) error {
 	idStr := c.node.id.String()
-	path := b.blobPath(idStr)
+	path := b.claimPath(idStr)
 	if _, err := os.Stat(path); err == nil {
 		return nil // already on disk; immutable
 	}
@@ -135,7 +137,7 @@ func (b *fsBackend) saveClaim(c *claim) error {
 }
 
 func (b *fsBackend) loadContent(idStr string) ([]byte, error) {
-	data, err := os.ReadFile(b.blobPath(idStr))
+	data, err := os.ReadFile(b.contentPath(idStr))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, errNotFound
@@ -146,7 +148,7 @@ func (b *fsBackend) loadContent(idStr string) ([]byte, error) {
 }
 
 func (b *fsBackend) saveContent(idStr string, data []byte) error {
-	path := b.blobPath(idStr)
+	path := b.contentPath(idStr)
 	if _, err := os.Stat(path); err == nil {
 		return nil // already on disk; immutable
 	}
