@@ -1,16 +1,14 @@
 // Guarantee tests — confirm the structural invariants the library
-// must enforce.
-//
-// Each test names an invariant from the paper and exercises the
-// failure mode: we try to construct something the library should
-// reject, and assert that NewClaim / NewEdge / etc. say no. These
-// are the rules the rest of the API can rely on.
-package ranke_test
+// must enforce. Each test names an invariant from the paper and
+// exercises the failure mode: we try to construct something the
+// library should reject, and assert that NewClaim / NewEdge / etc.
+// say no. Internal _test.go file: uses the private mk* helpers from
+// integration.go.
+package ranke
 
 import (
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,64 +18,64 @@ import (
 // of existing claims cites its sources. source/* and contribution/*
 // claims have no such requirement.
 func TestProvenanceRequired(t *testing.T) {
-	operator := makeContributor(t, "operator@example.com")
-	agent := makeAgent(t, operator, "extraction-agent")
+	operator := mkContributor(t, "operator@example.com")
+	agent := mkAgent(t, operator, "extraction-agent")
 	// We need entities to anchor the relation case — use ones that
 	// already have provenance, so only the relation under test is
 	// missing it.
-	emailApples := makeEmail(t, operator,
+	emailApples := mkEmail(t, operator,
 		"alice@example.com", "bob@example.com", "I like apples.")
-	alice := makeEntity(t, agent, "person", "Alice", emailApples)
-	apples := makeEntity(t, agent, "object", "apples", emailApples)
+	alice := mkEntity(t, agent, "person", "Alice", emailApples)
+	apples := mkEntity(t, agent, "object", "apples", emailApples)
 
 	// Build the relation/* edges that the relation node would carry.
 	// These are NOT derivation edges — the rule we're testing is
 	// that relation/* edges alone are insufficient; a derivation/*
 	// edge to the source must also be present.
-	fromEdge, err := ranke.NewEdge(ranke.EdgeConfig{
+	fromEdge, err := NewEdge(EdgeConfig{
 		Reference:         alice.ID(),
-		TypeClass:         ranke.EdgeRelation,
+		TypeClass:         EdgeRelation,
 		TypeSub:           "likes",
-		RelationDirection: ranke.RelationFrom,
+		RelationDirection: RelationFrom,
 	})
 	require.NoError(t, err)
-	toEdge, err := ranke.NewEdge(ranke.EdgeConfig{
+	toEdge, err := NewEdge(EdgeConfig{
 		Reference:         apples.ID(),
-		TypeClass:         ranke.EdgeRelation,
+		TypeClass:         EdgeRelation,
 		TypeSub:           "likes",
-		RelationDirection: ranke.RelationTo,
+		RelationDirection: RelationTo,
 	})
 	require.NoError(t, err)
 
 	cases := []struct {
 		name      string
-		typeClass ranke.NodeClass
+		typeClass NodeClass
 		typeSub   string
-		edges     []ranke.Edge
+		edges     []Edge
 	}{
 		{
 			name:      "derivation without source",
-			typeClass: ranke.NodeDerivation,
+			typeClass: NodeDerivation,
 			typeSub:   "summary",
 		},
 		{
 			name:      "entity without source",
-			typeClass: ranke.NodeEntity,
+			typeClass: NodeEntity,
 			typeSub:   "person",
 		},
 		{
 			name:      "relation without source — relation edges alone are not provenance",
-			typeClass: ranke.NodeRelation,
+			typeClass: NodeRelation,
 			typeSub:   "likes",
-			edges:     []ranke.Edge{fromEdge, toEdge},
+			edges:     []Edge{fromEdge, toEdge},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ranke.NewClaim(ranke.ClaimConfig{
+			_, err := NewClaim(ClaimConfig{
 				TypeClass:     tc.typeClass,
 				TypeSub:       tc.typeSub,
-				EncodingClass: ranke.EncodingText,
+				EncodingClass: EncodingText,
 				EncodingSub:   "plain",
 				Content:       []byte("..."),
 				Contributor:   agent,

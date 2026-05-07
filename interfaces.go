@@ -7,10 +7,11 @@
 // data-only config structs (ClaimConfig, EdgeConfig) used to pass
 // arguments into the constructors.
 //
-// All graphs live in memory by default. Durable save/load is opt-in
-// through the Persistence plugin interface; the library ships an
-// in-memory implementation only, with other backends left to
-// downstream packages.
+// Backend scope: this library ships two example Store
+// implementations — NewMemStore (in-memory, ephemeral) and
+// NewFsStore (filesystem, durable). Other backends (S3, IPFS,
+// Neo4j, content-addressed databases, ...) belong in downstream
+// packages and need only satisfy the Store interface.
 //
 // Access model: dark, content-addressed (IPFS-style). Every record
 // operation is keyed on an explicit hash — you can try to fetch by
@@ -23,14 +24,13 @@
 // Public constructors (defined elsewhere in this package):
 //
 //	func NewGraph(root Contributor) Graph
-//	func NewStore() Store
+//	func NewMemStore(root Contributor) Store               // in-memory backend
+//	func NewFsStore(path string, root Contributor) (Store, error) // file-backed backend (planned)
 //	func NewClaim(cfg ClaimConfig) (Claim, error)
 //	func NewEdge(cfg EdgeConfig) (Edge, error)
-//	func NewMemoryPersistence() Persistence
 //	func NewTypeFilter(class *EdgeClass, sub *string) Filter
 //	func NewEncodingFilter(class *EncodingClass, sub *string) Filter
 //	func ParseId(s string) (Id, error)
-//	func Load(head Id, p Persistence) (Graph, error)
 package ranke
 
 import "time"
@@ -266,6 +266,17 @@ type Contributor interface {
 // Listability is deliberately not part of the Store API. The
 // universe U is unenumerable in principle. The only listing-style
 // call is Branches, which is explicitly the local B side, not U.
+//
+// Backends. This library ships two example Store implementations:
+//
+//   - NewMemStore — in-memory, ephemeral. Useful for tests, scratch
+//     work, the conformance suite, and any short-lived process.
+//   - NewFsStore — filesystem-backed, durable. Loads B eagerly,
+//     fetches claims and content lazily on demand.
+//
+// Other backends (S3, IPFS, Neo4j, content-addressed databases) are
+// out of scope for this library — they live in downstream packages
+// and need only satisfy the Store interface.
 type Store interface {
 	// --- Graphs (the U side) ---
 

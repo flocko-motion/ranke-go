@@ -2,6 +2,7 @@ package ranke
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -59,6 +60,26 @@ type encEdge struct {
 
 // encodeNode serializes a node and returns its canonical bytes.
 func encodeNode(n *node) ([]byte, error) {
+	en, err := buildEncNode(n)
+	if err != nil {
+		return nil, err
+	}
+	return encodingMode.Marshal(en)
+}
+
+// encodeEdge serializes an edge and returns its canonical bytes.
+func encodeEdge(e *edge) ([]byte, error) {
+	ee, err := buildEncEdge(e)
+	if err != nil {
+		return nil, err
+	}
+	return encodingMode.Marshal(ee)
+}
+
+// buildEncNode constructs the encNode payload for a *node — used
+// both in id computation (encodeNode wraps this) and when persisting
+// claim files to disk.
+func buildEncNode(n *node) (encNode, error) {
 	en := encNode{
 		TypeClass:     string(n.typeClass),
 		TypeSub:       n.typeSub,
@@ -76,11 +97,11 @@ func encodeNode(n *node) ([]byte, error) {
 			en.Edges[i] = idBytes(e)
 		}
 	}
-	return encodingMode.Marshal(en)
+	return en, nil
 }
 
-// encodeEdge serializes an edge and returns its canonical bytes.
-func encodeEdge(e *edge) ([]byte, error) {
+// buildEncEdge constructs the encEdge payload for an *edge.
+func buildEncEdge(e *edge) (encEdge, error) {
 	ee := encEdge{
 		Reference:         idBytes(e.reference),
 		TypeClass:         string(e.typeClass),
@@ -93,7 +114,12 @@ func encodeEdge(e *edge) ([]byte, error) {
 	if e.contentHash != nil {
 		ee.ContentHash = idBytes(e.contentHash)
 	}
-	return encodingMode.Marshal(ee)
+	return ee, nil
+}
+
+// parseRFC3339Nano parses the timestamp format we emit for CreatedAt.
+func parseRFC3339Nano(s string) (time.Time, error) {
+	return time.Parse("2006-01-02T15:04:05.000000000Z", s)
 }
 
 // idBytes extracts the raw multihash bytes from an Id. Used only by

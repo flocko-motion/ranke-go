@@ -245,32 +245,31 @@ type claim struct {
 // possible; only graph-by-head, content-by-id, and branch-by-name
 // lookups are.
 type store struct {
-	claims   map[string]*claim
-	graphs   map[string]*graph
-	content  map[string][]byte
-	branches map[string]Id
+	claims   map[string]*claim // cache when backend != nil; source of truth otherwise
+	content  map[string][]byte // same: cache + truth
+	branches map[string]Id     // always full in memory (B is small)
+	backend  storeBackend      // nil ⇒ pure in-memory; non-nil ⇒ persistent
 }
 
 // branch is the concrete implementation of Branch — a thin
-// projection of a contribution/branch claim. Constructed lazily by
+// projection of a contribution/branch claim. Constructed by
 // GetBranch / Branches() from the underlying claim referenced by
-// store.branches.
+// store.branches. The provenance chain is pre-fetched eagerly so
+// that the Branch value is self-contained and survives Store reload
+// (no back-pointer to the Store).
 //
-// Only the claim is held. Name / Head / Time / Contributor are
-// derived in the accessor methods:
-//   - Name        ← claim content bytes (decoded as text/plain)
-//   - Head        ← contribution/head edge's reference
-//   - Time        ← claim.node.createdAt
-//   - Contributor ← claim.contributor
+// claim is the current contribution/branch claim; chain is the
+// pre-walked provenance (most-recent first), excluding the current
+// binding.
 type branch struct {
 	claim *claim
+	chain []*branchEntry
 }
 
 // branchEntry is the concrete implementation of BranchEntry — one
 // historical contribution/branch claim discovered by walking the
-// chain backwards from a branch's current claim. Same projection
-// pattern as branch: only the claim is held; every interface method
-// derives from it.
+// chain backwards from a branch's current claim. Self-contained:
+// holds only the claim, every interface method derives from it.
 type branchEntry struct {
 	claim *claim
 }
