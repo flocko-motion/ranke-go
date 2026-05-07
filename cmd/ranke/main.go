@@ -14,6 +14,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/flocko-motion/ranke-go"
@@ -116,18 +117,40 @@ func cmdBranches(args []string) error {
 }
 
 // --- show ---
-
+//
+// Accepts either:
+//
+//	ranke show <dir> <id>          load via the archive (full wiring)
+//	ranke show <file-path>         decode the file directly
+//
+// The single-arg form is for the common case of `ls claims/` then
+// pointing at a file — e.g.
+//   ranke show /tmp/ranke-go-test/claims/bciq...
+// We derive (dir, id) from the path: the parent of "claims" is the
+// archive dir, the basename is the id.
 func cmdShow(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("show: usage: ranke show <dir> <id>")
+	switch len(args) {
+	case 1:
+		dir, id, ok := splitClaimPath(args[0])
+		if !ok {
+			return fmt.Errorf("show: path %q does not look like <dir>/claims/<id>; use 2-arg form: ranke show <dir> <id>", args[0])
+		}
+		return showAt(dir, id)
+	case 2:
+		return showAt(args[0], args[1])
+	default:
+		return fmt.Errorf("show: usage: ranke show <file-path>  OR  ranke show <dir> <id>")
 	}
-	a, err := openArchive(args[0])
+}
+
+func showAt(dir, idStr string) error {
+	a, err := openArchive(dir)
 	if err != nil {
 		return err
 	}
-	id, err := ranke.ParseId(args[1])
+	id, err := ranke.ParseId(idStr)
 	if err != nil {
-		return fmt.Errorf("show: parse id: %w", err)
+		return fmt.Errorf("show: parse id %q: %w", idStr, err)
 	}
 	g, err := a.GetGraph(id)
 	if err != nil {
@@ -139,6 +162,19 @@ func cmdShow(args []string) error {
 	}
 	printClaim(c)
 	return nil
+}
+
+// splitClaimPath turns ".../foo/claims/bciq..." into ("foo", "bciq...", true).
+// Returns false if path doesn't have a "claims" parent.
+func splitClaimPath(p string) (dir, id string, ok bool) {
+	dir2, base := filepath.Split(p)
+	dir2 = strings.TrimRight(dir2, string(filepath.Separator))
+	parent, sub := filepath.Split(dir2)
+	parent = strings.TrimRight(parent, string(filepath.Separator))
+	if sub != "claims" {
+		return "", "", false
+	}
+	return parent, base, true
 }
 
 // --- validate ---
