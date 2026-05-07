@@ -13,9 +13,15 @@ all: test
 build:
 	go build ./...
 
-# Run user-perspective tests in /tests.
+# Run user-perspective tests in /tests. The fs integration test
+# preserves its on-disk layout for inspection — Make picks the dir
+# (so it's visible without `-v`) and echoes it after the run.
 test:
-	go test ./tests/...
+	@dir=$$(mktemp -d -t ranke-test-fs.XXXXXX) && \
+	RANKE_FS_DIR=$$dir go test ./tests/... && \
+	echo "" && \
+	echo "fs archive directory (preserved for inspection):" && \
+	echo "  $$dir"
 
 test-verbose:
 	go test -v ./tests/...
