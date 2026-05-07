@@ -59,9 +59,11 @@ func runAliceEmail(t *testing.T, ts *testArchive) {
 	g := ranke.NewGraph(operator)
 	commit(t, ts, g, operator)
 
-	_, head1 := fetchMain(t, ts)
-	require.True(t, head1.Equal(operator.ID()),
-		"after bootstrap, head is operator")
+	// Branch points at a contribution/head claim that wraps the
+	// graph's open head (operator), per §4.6 — not at operator itself.
+	g0, _ := fetchMain(t, ts)
+	require.True(t, g0.ContainsClaim(operator.ID()),
+		"operator reachable through new branch's head closure")
 
 	t.Logf("[Stage 2] add Alice's email as a source/email claim")
 	g2, _ := fetchMain(t, ts)

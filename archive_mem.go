@@ -7,8 +7,8 @@ package ranke
 // Use NewFsArchive for durable storage.
 func NewMemArchive() Archive {
 	return &archive{
-		claims:   make(map[string]*claim),
-		content:  make(map[string][]byte),
-		branches: make(map[string]Id),
+		claims:  make(map[string]*claim),
+		content: make(map[string][]byte),
+		// branchesHead nil: archive starts with no branches.
 	}
 }

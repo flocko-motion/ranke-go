@@ -2,19 +2,17 @@ package ranke
 
 import "time"
 
-// branch / branchEntry are projections of contribution/branch claims.
-// All interface methods derive their answers from the underlying
-// claim (and chain, for Branch), so the values are self-contained
-// and survive Archive reload.
+// branch / branchEntry are projections of one (name, head) binding
+// in a contribution/branches claim. All values are derived from the
+// underlying table claim, so they're self-contained and survive
+// Archive reload.
 
 // --- Branch ---
 
-func (b *branch) Name() string {
-	return string(b.claim.node.content)
-}
+func (b *branch) Name() string { return b.name }
 
 func (b *branch) Latest() BranchEntry {
-	return &branchEntry{claim: b.claim}
+	return &branchEntry{name: b.name, head: b.head, table: b.table}
 }
 
 func (b *branch) Provenance() []BranchEntry {
@@ -27,29 +25,15 @@ func (b *branch) Provenance() []BranchEntry {
 
 // --- BranchEntry ---
 
-func (e *branchEntry) Head() Id {
-	// The contribution/head edge points at the bound head; the
-	// contribution/branch edge (if any) points at the prior branch
-	// claim. Walk the claim's edges and pick the head one.
-	for _, edge := range e.claim.edges {
-		if edge.typeClass == EdgeContribution && edge.typeSub == "head" {
-			return edge.reference
-		}
-	}
-	return nil
-}
+func (e *branchEntry) Head() Id { return e.head }
 
-func (e *branchEntry) Time() time.Time {
-	return e.claim.node.createdAt
-}
+func (e *branchEntry) Time() time.Time { return e.table.node.createdAt }
 
 func (e *branchEntry) Contributor() Contributor {
-	if e.claim.contributor == nil {
+	if e.table.contributor == nil {
 		return nil
 	}
-	return e.claim.contributor
+	return e.table.contributor
 }
 
-func (e *branchEntry) Claim() Claim {
-	return e.claim
-}
+func (e *branchEntry) Claim() Claim { return e.table }

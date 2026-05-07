@@ -227,51 +227,51 @@ type claim struct {
 	contributor Contributor
 }
 
-// archive is the concrete implementation of Archive (= (U, B) from §4.6).
+// archive is the concrete implementation of Archive (= (U, B_h) from
+// the paper §4.6).
 //
-// U contains all graphs the archive knows about, and graphs consist of
-// claims, so U transitively contains all claims. Internally we
-// deduplicate: claims (keyed by Id.String()) backs every graph;
-// graphs indexes registered graphs by head id; content holds the
-// raw bytes addressed by ContentHash on nodes and edges.
+// U is content-addressed: claims map is keyed by Id.String() and
+// stores both ordinary record claims and structural ones
+// (contribution/head, contribution/branches). content holds the raw
+// bytes addressed by any node-or-edge ContentHash.
 //
-// branches is B: a map from branch name to the id of the most-recent
-// contribution/branch claim for that name (concept-team directive,
-// 2026-05-07). Branches themselves are ordinary claims in the claims
-// map; branches just provides the name → latest-claim-id index.
+// B is collapsed to a single hash B_h: branchesHead is the id of the
+// current contribution/branches claim in U. The branch table itself
+// (name → head bindings, plus chain to prior tables) lives inside U
+// like every other claim — only the *handle* B_h is kept here, and
+// only B_h is persisted by backends.
 //
-// The public API never exposes the claims map directly — claim-level
-// operations live on Graph, not on Archive. Listing of U is not
-// possible; only graph-by-head, content-by-id, and branch-by-name
-// lookups are.
+// The public API never exposes the claims map directly. Listing of U
+// is not possible; only graph-by-head, content-by-id, and branch-by-
+// name lookups are. branchesHead == nil ⇒ no branches yet (fresh
+// archive).
 type archive struct {
-	claims   map[string]*claim // cache when backend != nil; source of truth otherwise
-	content  map[string][]byte // same: cache + truth
-	branches map[string]Id     // always full in memory (B is small)
-	backend  archiveBackend      // nil ⇒ pure in-memory; non-nil ⇒ persistent
+	claims       map[string]*claim // cache when backend != nil; source of truth otherwise
+	content      map[string][]byte // same: cache + truth
+	branchesHead Id                // id of current contribution/branches claim, or nil
+	backend      archiveBackend    // nil ⇒ pure in-memory; non-nil ⇒ persistent
 }
 
-// branch is the concrete implementation of Branch — a thin
-// projection of a contribution/branch claim. Constructed by
-// GetBranch / Branches() from the underlying claim referenced by
-// archive.branches. The provenance chain is pre-fetched eagerly so
-// that the Branch value is self-contained and survives Archive reload
-// (no back-pointer to the Archive).
-//
-// claim is the current contribution/branch claim; chain is the
-// pre-walked provenance (most-recent first), excluding the current
-// binding.
+// branch is the concrete implementation of Branch — a projection of
+// one contribution/branch edge in the current branch table.
+// Constructed by GetBranch / Branches() and self-contained: stores
+// the resolved name + head + the table claim that binds them, plus
+// the eagerly-walked provenance chain (entries from prior tables).
 type branch struct {
-	claim *claim
-	chain []*branchEntry
+	name  string         // branch name (decoded from edge content)
+	head  Id             // id of the contribution/head claim this branch points at
+	table *claim         // contribution/branches claim that holds this binding
+	chain []*branchEntry // historical entries from prior tables, most-recent first
 }
 
 // branchEntry is the concrete implementation of BranchEntry — one
-// historical contribution/branch claim discovered by walking the
-// chain backwards from a branch's current claim. Self-contained:
-// holds only the claim, every interface method derives from it.
+// (name, head) binding read from a contribution/branches claim.
+// Multiple entries with the same name across different tables form
+// a branch's provenance.
 type branchEntry struct {
-	claim *claim
+	name  string
+	head  Id
+	table *claim // the contribution/branches claim that recorded this binding
 }
 
 // graph is the concrete implementation of Graph (= RG ⊆ U, §4.4).
