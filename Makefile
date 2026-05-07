@@ -14,14 +14,15 @@ build:
 	go build ./...
 
 # Run user-perspective tests in /tests. The fs integration test
-# preserves its on-disk layout for inspection — Make picks the dir
-# (so it's visible without `-v`) and echoes it after the run.
+# uses a fixed directory (RANKE_FS_DIR, default /tmp/ranke-go-test)
+# that TestMain wipes and recreates each run. Path echoed at end so
+# it's visible on plain `make test` without `-v`.
+RANKE_FS_DIR ?= /tmp/ranke-go-test
 test:
-	@dir=$$(mktemp -d -t ranke-test-fs.XXXXXX) && \
-	RANKE_FS_DIR=$$dir go test ./tests/... && \
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./tests/... && \
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
-	echo "  $$dir"
+	echo "  $(RANKE_FS_DIR)"
 
 test-verbose:
 	go test -v ./tests/...

@@ -13,29 +13,30 @@ import (
 )
 
 // fsTestDir is the on-disk location used by TestIntegrationFs.
-// Intentionally NOT cleaned up — branches.json / claims / content
-// stay around so the layout can be inspected.
+// Same path every run (default: /tmp/ranke-go-test) so the layout
+// is always at a predictable spot for inspection. The dir is
+// emptied before the run so prior state can't bleed in.
 //
-// If $RANKE_FS_DIR is set, that path is used (Makefile passes it in
-// and echoes it after the run, so it's visible on plain `go test`).
-// Otherwise we MkdirTemp with the conventional prefix and print via
-// TestMain — only surfaces with `go test -v`.
+// $RANKE_FS_DIR overrides the default; the Makefile sets it so the
+// Makefile can echo it after `go test` finishes (test stdout is
+// otherwise hidden without `-v`).
+const defaultFsTestDir = "/tmp/ranke-go-test"
+
 var fsTestDir string
 
 func TestMain(m *testing.M) {
-	if d := os.Getenv("RANKE_FS_DIR"); d != "" {
-		fsTestDir = d
-		if err := os.MkdirAll(fsTestDir, 0o755); err != nil {
-			fmt.Fprintln(os.Stderr, "tests/TestMain: MkdirAll:", err)
-			os.Exit(1)
-		}
-	} else {
-		var err error
-		fsTestDir, err = os.MkdirTemp("", "ranke-test-fs-")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "tests/TestMain: MkdirTemp:", err)
-			os.Exit(1)
-		}
+	fsTestDir = os.Getenv("RANKE_FS_DIR")
+	if fsTestDir == "" {
+		fsTestDir = defaultFsTestDir
+	}
+	// Empty + recreate so each run starts clean.
+	if err := os.RemoveAll(fsTestDir); err != nil {
+		fmt.Fprintln(os.Stderr, "tests/TestMain: RemoveAll:", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(fsTestDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "tests/TestMain: MkdirAll:", err)
+		os.Exit(1)
 	}
 	code := m.Run()
 	fmt.Printf("\nfs archive directory (preserved for inspection):\n  %s\n", fsTestDir)
