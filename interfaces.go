@@ -99,11 +99,10 @@ type Edge interface {
 	TypeSub() string
 	// ContentHash is H(content); nil if the edge carries no content.
 	ContentHash() Id
-	// Content fetches the edge's content bytes from the given store
-	// using ContentHash. Returns (nil, nil) if the edge has no
-	// content, or an error if the bytes are not available in the
-	// store.
-	Content(s Store) ([]byte, error)
+	// Content returns the edge's content bytes. Returns (nil, nil)
+	// if the edge has no content. The bytes travel with the claim
+	// the edge belongs to; no Store lookup is required.
+	Content() ([]byte, error)
 	// Encoding is the full MIME media type of the edge content
 	// (RFC 6838), e.g. "text/plain". Empty when the edge carries no
 	// content.
@@ -149,11 +148,10 @@ type Node interface {
 	// The bytes themselves live in implementation-defined storage,
 	// addressed by ContentHash.
 	ContentHash() Id
-	// Content fetches the node's content bytes from the given store
-	// using ContentHash. Returns (nil, nil) if the node has no
-	// content, or an error if the bytes are not available in the
-	// store.
-	Content(s Store) ([]byte, error)
+	// Content returns the node's content bytes. Returns (nil, nil)
+	// if the node has no content. The bytes travel with the claim;
+	// no Store lookup is required.
+	Content() ([]byte, error)
 	// Encoding is the full MIME media type (RFC 6838) telling
 	// consumers how to interpret the content bytes (§4.9), e.g.
 	// "message/rfc822".
@@ -260,7 +258,7 @@ type Contributor interface {
 // The Store API operates at the graph and branch granularity:
 // fetching a graph by the id of its head, putting a graph (binding
 // it to a branch), naming and history. Claim-level operations
-// (AddClaim, Contains, GetClaim) belong on Graph — that is where
+// (AddClaim, ContainsClaim, GetClaim) belong on Graph — that is where
 // claims actually live. Internally, a Store typically deduplicates
 // claims across graphs, but that is an implementation detail not
 // exposed by the interface.
@@ -283,19 +281,17 @@ type Store interface {
 
 	// --- Content (addressed by ContentHash on nodes and edges) ---
 	//
-	// Content enters a Store implicitly: when a Graph is bound to a
-	// branch via SetBranch, the Store absorbs the content bytes
-	// referenced by every node and edge in the graph. There is no
-	// public API for adding raw bytes directly — content is always
-	// gated by a claim that names it.
-
-	// HasContent reports whether the Store holds the content bytes
-	// addressed by id.
-	HasContent(id Id) bool
-
-	// GetContent fetches the content bytes addressed by id. Returns
-	// an error if the store does not hold them.
-	GetContent(id Id) ([]byte, error)
+	// Content has no fetcher on the public Store interface. Claims
+	// are the atomic unit exposed to users; content is reachable
+	// only through the claim that names it (Node.Content,
+	// Edge.Content). Adding HasContent/GetContent here would let
+	// callers probe content existence outside of any view they hold,
+	// which leaks past pruning. Internal access is still possible
+	// for implementations.
+	//
+	// TODO: revisit once pruning + scoped visibility (paper §5.6)
+	// land. The content layer needs to respect the same view filter
+	// as the claim layer; the interface design follows from that.
 
 	// --- Branches (the B side from §4.6) ---
 
@@ -408,7 +404,7 @@ type BranchEntry interface {
 // a contributor through its contribution/contributor edge.
 //
 // Graphs are where claims actually live: AddClaim grows the subset,
-// Contains and GetClaim look up claims in it. A Graph can be built
+// ContainsClaim and GetClaim look up claims in it. A Graph can be built
 // standalone (NewGraph, add claims, consolidate, persist via
 // Persistence) or fetched from a Store (Store.GetGraph(head)).
 //
@@ -423,15 +419,17 @@ type Graph interface {
 	// idempotent and returns the same id without error.
 	AddClaim(claim Claim) (Id, error)
 
-	// Contains reports whether this graph includes the given id,
-	// regardless of record kind. The graph's content-addressed
-	// records are exactly: claims, edges, and content blobs (the
-	// three things that take a hash id in §4.1, §4.2, and the
-	// content_hash field).
-	Contains(id Id) bool
-
 	// ContainsClaim reports whether this graph contains a claim with
 	// the given id.
+	//
+	// Note: there is intentionally no untyped Contains(id) and no
+	// ContainsEdge(id). Edges are addressable only through their
+	// parent claim's Edges() method — exposing them by id would
+	// leak the existence of pruned content, since a user could check
+	// whether an edge id is present even when the view they hold
+	// excludes the parent claim. Content is reachable via
+	// ContentHash on the records that name it; pruning visibility
+	// is enforced at that level.
 	ContainsClaim(id Id) bool
 
 	// GetClaim retrieves a claim from the graph by id.

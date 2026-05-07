@@ -80,16 +80,26 @@ const (
 
 // ClaimConfig is the data-only input to NewClaim.
 //
-// Required: Type. Content and ContentHash are mutually exclusive: set
-// Content to have NewClaim hash the bytes for you, or set ContentHash
-// directly when the content lives outside the graph. CreatedAt
-// defaults to time.Now().UTC() when zero.
+// Required: TypeClass and TypeSub. Content and ContentHash are
+// mutually exclusive: set Content to have NewClaim hash the bytes
+// for you, or set ContentHash directly when the content lives
+// outside the graph. CreatedAt defaults to time.Now().UTC() when
+// zero.
 //
 // Contributor is required for every claim except the root
 // contribution/contributor claim (§4.3). NewClaim auto-builds the
 // claim's contribution/contributor edge from this field; do not also
 // add it to Edges. For the root contribution/contributor claim, leave
 // Contributor nil — NewClaim recognizes the type and self-attributes.
+//
+// Provenance invariant (§3.5): derivation/*, entity/*, and
+// relation/* claims are by definition built from existing claims —
+// they MUST carry at least one derivation/* edge in Edges (or
+// otherwise reference their sources through derivation/* edges).
+// NewClaim rejects them with an error if no derivation/* edge is
+// present. source/* and contribution/* claims have no such
+// requirement (sources are externally captured; contribution/*
+// claims carry contribution/* edges instead).
 //
 // Edges holds the additional edges (provenance, relation, structural)
 // for the claim. The contribution/contributor edge is added by
@@ -179,7 +189,8 @@ type edge struct {
 	typeSub           string
 	encodingClass     EncodingClass
 	encodingSub       string
-	contentHash       Id // nil when no content
+	contentHash       Id     // nil when no content
+	content           []byte // raw content bytes, kept with the edge
 	relationDirection RelationDirection
 	fields            map[string]string // additional implementation-defined fields (§4.2)
 	id                Id                // = H(S(edge))
@@ -193,7 +204,8 @@ type node struct {
 	typeSub       string
 	encodingClass EncodingClass
 	encodingSub   string
-	contentHash   Id // nil when no content
+	contentHash   Id     // nil when no content
+	content       []byte // raw content bytes, kept with the node
 	createdAt     time.Time
 	edges         []Id              // edge ids, sorted canonically
 	fields        map[string]string // additional implementation-defined fields (§4.1)
