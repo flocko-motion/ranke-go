@@ -97,23 +97,13 @@ type Edge interface {
 	TypeClass() EdgeClass
 	// TypeSub is the second segment of Type — open vocabulary.
 	TypeSub() string
-	// ContentHash is H(content); nil if the edge carries no content.
-	ContentHash() Id
-	// Content returns the edge's content bytes. Returns (nil, nil)
-	// if the edge has no content. The bytes travel with the claim
-	// the edge belongs to; no Archive lookup is required.
-	Content() ([]byte, error)
-	// Encoding is the full MIME media type of the edge content
-	// (RFC 6838), e.g. "text/plain". Empty when the edge carries no
-	// content.
-	Encoding() string
-	// EncodingClass is the first segment of Encoding, from the
-	// closed RFC 6838 top-level type vocabulary.
-	EncodingClass() EncodingClass
-	// EncodingSub is the second segment of Encoding — open vocabulary.
-	EncodingSub() string
+	// Content is the edge's inline content (paper §4.2 simplified
+	// schema). Bytes travel with the edge — there is no separate
+	// content_hash for edges. Empty for edges that carry no content.
+	Content() []byte
 	// RelationDirection is RelationFrom (+1) or RelationTo (-1) on
-	// relation/* edges, and 0 on non-relation edges (§4.7).
+	// relation/* edges, and 0 on non-relation edges (§4.7). Stored
+	// as one of the additional implementation-defined fields.
 	RelationDirection() RelationDirection
 	// HasField reports whether an additional implementation-defined
 	// field with the given name is set on this edge (paper §4.2:

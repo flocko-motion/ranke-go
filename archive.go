@@ -71,15 +71,8 @@ func (a *archive) loadClaimContent(c *claim) error {
 		}
 		c.node.content = b
 	}
-	for _, e := range c.edges {
-		if e.contentHash != nil && e.content == nil {
-			b, err := a.fetchContent(e.contentHash)
-			if err != nil {
-				return fmt.Errorf("edge content %s: %w", e.contentHash.String(), err)
-			}
-			e.content = b
-		}
-	}
+	// Edge content is inline (paper §4.2 simplified schema) — already
+	// present after CBOR decode, no separate fetch needed.
 	return nil
 }
 
@@ -139,13 +132,8 @@ func (a *archive) absorbClaim(c *claim) error {
 			return err
 		}
 	}
-	for _, e := range c.edges {
-		if e.content != nil && e.contentHash != nil {
-			if err := a.absorbContent(e.contentHash, e.content); err != nil {
-				return err
-			}
-		}
-	}
+	// Edge content is inline (§4.2); persisted as part of the claim
+	// CBOR via saveClaim above. No separate content store entry.
 	return nil
 }
 
@@ -391,12 +379,10 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 					continue // updating this one
 				}
 				copyE, err := NewEdge(EdgeConfig{
-					Reference:     e.reference,
-					TypeClass:     EdgeContribution,
-					TypeSub:       "branch",
-					EncodingClass: EncodingText,
-					EncodingSub:   "plain",
-					Content:       e.content,
+					Reference: e.reference,
+					TypeClass: EdgeContribution,
+					TypeSub:   "branch",
+					Content:   e.content,
 				})
 				if err != nil {
 					return fmt.Errorf("ranke.Archive.SetBranch: copy branch edge: %w", err)
@@ -407,12 +393,10 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 	}
 	// New/updated branch edge.
 	newBranch, err := NewEdge(EdgeConfig{
-		Reference:     headC.node.id,
-		TypeClass:     EdgeContribution,
-		TypeSub:       "branch",
-		EncodingClass: EncodingText,
-		EncodingSub:   "plain",
-		Content:       []byte(name),
+		Reference: headC.node.id,
+		TypeClass: EdgeContribution,
+		TypeSub:   "branch",
+		Content:   []byte(name),
 	})
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build new branch edge: %w", err)

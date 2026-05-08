@@ -237,7 +237,7 @@ func printClaim(c ranke.Claim) {
 			fmt.Printf("  [%d] %s\n", i, e.Type())
 			fmt.Printf("      reference: %s\n", e.ID().String())
 			fmt.Printf("      → %s\n", e.Reference().String())
-			if eb, err := e.Content(); err == nil && eb != nil {
+			if eb := e.Content(); len(eb) > 0 {
 				fmt.Printf("      content:   %s\n", previewBytes(eb))
 			}
 			if e.RelationDirection() != 0 {

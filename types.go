@@ -140,10 +140,11 @@ type ClaimConfig struct {
 
 // EdgeConfig is the data-only input to NewEdge.
 //
-// Required: Reference, Type. Content and ContentHash are mutually
-// exclusive (same rule as ClaimConfig). RelationDirection must be set
-// (RelationFrom or RelationTo) for relation/* edges and left zero
-// otherwise; NewEdge enforces this.
+// Required: Reference, TypeClass, TypeSub. Content is the inline
+// edge content (paper §4.2: edge content is a string carried
+// directly on the edge — there is no separate content_hash for
+// edges). RelationDirection must be set (RelationFrom or RelationTo)
+// for relation/* edges and left zero otherwise; NewEdge enforces this.
 type EdgeConfig struct {
 	// Reference is the id of the older claim this edge points at.
 	// Required.
@@ -153,14 +154,9 @@ type EdgeConfig struct {
 	// TypeSub is the open-vocabulary subtype, e.g. "head", "branch".
 	// Required.
 	TypeSub string
-	// EncodingClass is the closed-vocabulary MIME top-level type (RFC 6838).
-	EncodingClass EncodingClass
-	// EncodingSub is the open-vocabulary subtype.
-	EncodingSub string
-	// Content and ContentHash are mutually exclusive (same rule as
-	// ClaimConfig).
-	Content     []byte
-	ContentHash Id
+	// Content is the edge's inline content. Empty if the edge
+	// carries no content.
+	Content []byte
 	// RelationDirection must be set (RelationFrom or RelationTo) for
 	// relation/* edges and left zero otherwise; NewEdge enforces this.
 	RelationDirection RelationDirection
@@ -187,10 +183,7 @@ type edge struct {
 	reference         Id
 	typeClass         EdgeClass
 	typeSub           string
-	encodingClass     EncodingClass
-	encodingSub       string
-	contentHash       Id     // nil when no content
-	content           []byte // raw content bytes, kept with the edge
+	content           []byte // inline content (§4.2 simplified schema); empty if none
 	relationDirection RelationDirection
 	fields            map[string]string // additional implementation-defined fields (§4.2)
 	id                Id                // = H(S(edge))

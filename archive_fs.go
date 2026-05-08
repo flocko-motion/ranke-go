@@ -230,26 +230,18 @@ func decodeNode(en encNode) (*node, error) {
 
 // decodeEdge rebuilds an *edge from its on-disk encoding. The edge's
 // id is set by the caller (from the corresponding entry in node.edges).
+// Edge content is inline in the wire form, so it's restored directly.
 func decodeEdge(ee encEdge) (*edge, error) {
 	ref, err := hashFromBytes(ee.Reference)
 	if err != nil {
 		return nil, err
 	}
-	e := &edge{
+	return &edge{
 		reference:         ref,
 		typeClass:         EdgeClass(ee.TypeClass),
 		typeSub:           ee.TypeSub,
-		encodingClass:     EncodingClass(ee.EncodingClass),
-		encodingSub:       ee.EncodingSub,
+		content:           ee.Content,
 		relationDirection: RelationDirection(ee.RelationDirection),
 		fields:            ee.Fields,
-	}
-	if len(ee.ContentHash) > 0 {
-		ch, err := hashFromBytes(ee.ContentHash)
-		if err != nil {
-			return nil, err
-		}
-		e.contentHash = ch
-	}
-	return e, nil
+	}, nil
 }

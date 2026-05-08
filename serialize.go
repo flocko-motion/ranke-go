@@ -46,16 +46,15 @@ type encNode struct {
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
 }
 
-// encEdge is the wire shape of an edge (§4.2).
+// encEdge is the wire shape of an edge (§4.2 simplified schema):
+// type + content (inline) + reference + additional fields.
 type encEdge struct {
 	Reference         []byte            `cbor:"1,keyasint"`
 	TypeClass         string            `cbor:"2,keyasint"`
 	TypeSub           string            `cbor:"3,keyasint"`
-	EncodingClass     string            `cbor:"4,keyasint,omitempty"`
-	EncodingSub       string            `cbor:"5,keyasint,omitempty"`
-	ContentHash       []byte            `cbor:"6,keyasint,omitempty"`
-	RelationDirection int8              `cbor:"7,keyasint,omitempty"`
-	Fields            map[string]string `cbor:"8,keyasint,omitempty"`
+	Content           []byte            `cbor:"4,keyasint,omitempty"`
+	RelationDirection int8              `cbor:"5,keyasint,omitempty"`
+	Fields            map[string]string `cbor:"6,keyasint,omitempty"`
 }
 
 // encodeNode serializes a node and returns its canonical bytes.
@@ -102,19 +101,14 @@ func buildEncNode(n *node) (encNode, error) {
 
 // buildEncEdge constructs the encEdge payload for an *edge.
 func buildEncEdge(e *edge) (encEdge, error) {
-	ee := encEdge{
+	return encEdge{
 		Reference:         idBytes(e.reference),
 		TypeClass:         string(e.typeClass),
 		TypeSub:           e.typeSub,
-		EncodingClass:     string(e.encodingClass),
-		EncodingSub:       e.encodingSub,
+		Content:           e.content,
 		RelationDirection: int8(e.relationDirection),
 		Fields:            e.fields,
-	}
-	if e.contentHash != nil {
-		ee.ContentHash = idBytes(e.contentHash)
-	}
-	return ee, nil
+	}, nil
 }
 
 // parseRFC3339Nano parses the timestamp format we emit for CreatedAt.
