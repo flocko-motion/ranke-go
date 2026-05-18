@@ -65,6 +65,8 @@ This scaffold ships the directory layout, the fixture inputs, scenario descripti
 
 ## Relation to `tests/`
 
-`tests/` holds classic Go unit tests — fast, granular, exercising individual functions and error paths.
+`tests/` holds classic Go unit tests **and tiny atomic scenarios** — fast, granular pieces, each focused on a single feature, run through the `testing.T` harness. They cover error paths, edge cases, and one-thing-at-a-time happy paths.
 
-`conformance/scenarios/` holds end-to-end usage programs — they tell a story, demonstrate the public API, and produce the byte-exact artifacts variants are graded against. They complement, not duplicate, the unit tests.
+`conformance/scenarios/` holds **end-to-end narrative programs** — each one a multi-step story, demonstrating the public API as a real consumer would call it, producing byte-exact outputs that variants are graded against.
+
+The split is by *scope*, not by *kind*: small atoms live in `tests/`, full stories live in `conformance/scenarios/`. They complement, never duplicate.
