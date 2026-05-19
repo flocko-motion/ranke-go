@@ -4,7 +4,9 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build test test-verbose vet fmt tidy clean
+.PHONY: all build test test-verbose vet fmt tidy clean scenarios verify-scenarios
+
+SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
 # Default target: run the tests.
 all: test
@@ -43,6 +45,32 @@ fmt:
 tidy:
 	go mod tidy
 
-# Remove future binary outputs (none yet).
+# Run every conformance scenario from a clean state.
+scenarios:
+	@for d in $(SCENARIO_DIRS); do \
+		echo "--- $$d ---"; \
+		"$$d/run.sh"; \
+	done
+
+# Re-run each scenario; assert outputs are byte-identical to what's
+# checked in (= the cross-implementation conformance promise — see
+# conformance/README.md). Fails on any drift.
+verify-scenarios:
+	@for d in $(SCENARIO_DIRS); do \
+		echo "--- verify $$d ---"; \
+		tmp=$$(mktemp -d); \
+		cp -r "$$d/archive" "$$tmp/before-archive"; \
+		cp "$$d/ids.txt"   "$$tmp/before-ids.txt"; \
+		"$$d/run.sh" >/dev/null; \
+		diff -r "$$tmp/before-archive" "$$d/archive" > /dev/null \
+			&& diff "$$tmp/before-ids.txt" "$$d/ids.txt" > /dev/null \
+			&& echo "$$d: DETERMINISTIC ✓" \
+			|| { echo "$$d: DRIFT — re-run produced different bytes"; exit 1; }; \
+		rm -rf "$$tmp"; \
+	done
+
 clean:
 	rm -rf bin/
+	@for d in $(SCENARIO_DIRS); do \
+		rm -rf "$$d/archive" "$$d/ids.txt"; \
+	done

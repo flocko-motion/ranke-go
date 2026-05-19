@@ -33,23 +33,22 @@ import (
 // time.
 var scenarioTime = time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
 
-const scenarioName = "01_alice_signs_a_source"
+// Paths are relative to the scenario directory. run.sh cd's here
+// before invoking `go run .` — keeps main.go free of path-walking
+// or repo-root detection. Fixtures live two levels up.
+const (
+	fixturesDir = "../../fixtures"
+	archiveDir  = "./archive"
+	idsPath     = "./ids.txt"
+)
 
 func main() {
-	cwd, err := os.Getwd()
-	must(err, "getwd")
-	repoRoot := findRepoRoot(cwd)
-	fixtures := filepath.Join(repoRoot, "conformance", "fixtures")
-	scenarioDir := filepath.Join(repoRoot, "conformance", "scenarios", scenarioName)
-	archiveDir := filepath.Join(scenarioDir, "archive")
-	idsPath := filepath.Join(scenarioDir, "ids.txt")
-
 	// Fresh archive: wipe the previous run's bytes so we generate
 	// from scratch every time.
 	must(os.RemoveAll(archiveDir), "wipe archive")
 
 	// --- 1. Alice as initial node, signed by her Ed25519 key. ---
-	alicePriv, err := ranke.LoadEd25519PrivateKeyPEM(filepath.Join(fixtures, "keys", "alice.pem"))
+	alicePriv, err := ranke.LoadEd25519PrivateKeyPEM(filepath.Join(fixturesDir, "keys", "alice.pem"))
 	must(err, "load alice.pem")
 	alicePubkey, err := ranke.EncodePublicKey(alicePriv.Public())
 	must(err, "encode alice pubkey")
@@ -74,8 +73,8 @@ func main() {
 	g := ranke.NewGraph(aliceSigned)
 
 	// --- 2. Ingest the two source emails. ---
-	apples := ok(ingestEmail(aliceSigned, filepath.Join(fixtures, "sources", "alice_to_bob__apples.eml")))
-	family := ok(ingestEmail(aliceSigned, filepath.Join(fixtures, "sources", "alice_to_bob__family.eml")))
+	apples := ok(ingestEmail(aliceSigned, filepath.Join(fixturesDir, "sources", "alice_to_bob__apples.eml")))
+	family := ok(ingestEmail(aliceSigned, filepath.Join(fixturesDir, "sources", "alice_to_bob__family.eml")))
 	mustAdd(g, apples)
 	mustAdd(g, family)
 
@@ -313,22 +312,6 @@ func collectIds(g ranke.Graph) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// findRepoRoot walks up from start until it finds the directory
-// containing the conformance/ folder — the repository root.
-func findRepoRoot(start string) string {
-	dir := start
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "conformance", "fixtures")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			log.Fatalf("scenario 01: cannot locate repo root from %s", start)
-		}
-		dir = parent
-	}
 }
 
 // --- error-checking shims that keep the main flow readable ---
