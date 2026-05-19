@@ -132,13 +132,17 @@ func main() {
 	must(arc.SetBranch("main", g, aliceSigned, scenarioTime), "SetBranch main")
 
 	// --- 7. Reload from disk and validate end-to-end. ---
+	fmt.Println("reloading archive from disk...")
 	arc2, err := ranke.NewFsArchive(archiveDir)
 	must(err, "reopen archive")
+
+	fmt.Println("verifying every claim's signature and integrity...")
 	branch, err := arc2.GetBranch("main")
 	must(err, "GetBranch main")
 	g2, err := arc2.GetGraph(branch.Latest().Head())
 	must(err, "GetGraph head")
 	must(g2.Validate(), "validate reloaded graph")
+	fmt.Println("  all claims valid ✓")
 
 	// --- 8. Dump sorted ids of every claim reachable from the head. ---
 	ids := collectIds(g2)
@@ -150,8 +154,15 @@ func main() {
 	}
 	must(os.WriteFile(idsPath, []byte(out.String()), 0o644), "write ids.txt")
 
-	fmt.Printf("scenario 01: wrote %d claim ids to %s\n", len(ids), idsPath)
-	fmt.Printf("scenario 01: archive at %s\n", archiveDir)
+	// --- 9. Final summary: archive location, branches, head ids. ---
+	fmt.Println()
+	fmt.Printf("archive:  %s  (%d claims)\n", archiveDir, len(ids))
+	fmt.Printf("ids.txt:  %s\n", idsPath)
+	fmt.Println()
+	fmt.Println("branches:")
+	for _, b := range arc2.Branches() {
+		fmt.Printf("  %s → %s\n", b.Name(), b.Latest().Head().String())
+	}
 }
 
 // ingestEmail builds a source/email claim from a .eml file attributed
