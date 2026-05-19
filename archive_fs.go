@@ -207,9 +207,10 @@ func decodeNode(en encNode) (*node, error) {
 		encodingSub:   en.EncodingSub,
 		createdAt:     createdAt,
 		fields:        en.Fields,
+		pubkey:        en.Pubkey,
 	}
 	if len(en.ContentHash) > 0 {
-		ch, err := hashFromBytes(en.ContentHash)
+		ch, err := hashFromMultihashBytes(en.ContentHash)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +219,7 @@ func decodeNode(en encNode) (*node, error) {
 	if len(en.Edges) > 0 {
 		n.edges = make([]Id, len(en.Edges))
 		for i, raw := range en.Edges {
-			h, err := hashFromBytes(raw)
+			h, err := idFromBytes(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -232,7 +233,7 @@ func decodeNode(en encNode) (*node, error) {
 // id is set by the caller (from the corresponding entry in node.edges).
 // Edge content is inline in the wire form, so it's restored directly.
 func decodeEdge(ee encEdge) (*edge, error) {
-	ref, err := hashFromBytes(ee.Reference)
+	ref, err := idFromBytes(ee.Reference)
 	if err != nil {
 		return nil, err
 	}

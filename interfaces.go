@@ -170,6 +170,11 @@ type Node interface {
 	// Fields returns the names of every additional field set on
 	// this node.
 	Fields() []string
+	// Pubkey returns the multikey-encoded public key on this node
+	// (paper §4.1, §5.7). Non-empty only on contributor claims that
+	// declare a key — i.e. a signed contributor. Empty for every
+	// other claim and for unsigned contributors (identity-Sign case).
+	Pubkey() []byte
 	// ID is the content-addressed identifier of this node and thus of
 	// the owning claim.
 	ID() Id

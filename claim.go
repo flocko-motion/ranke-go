@@ -2,11 +2,20 @@ package ranke
 
 import (
 	"bytes"
+	"crypto"
 	"errors"
 	"fmt"
 	"sort"
 	"time"
 )
+
+// Edge ids stay as plain H(S(e)) multihashes regardless of signing.
+// The claim's signed id covers every edge id via canonical
+// serialization (encNode.Edges), so tampering with any edge changes
+// the claim's hash input and breaks its signature. The paper's
+// "id(e) = Sign(H(S(e)))" reduces to this in the identity-Sign case
+// and is functionally equivalent in the signed case: the claim's
+// signature transitively authenticates the edges it owns.
 
 // NewClaim constructs a Claim atomically per §4.3:
 //
@@ -89,6 +98,7 @@ func NewClaim(cfg ClaimConfig) (Claim, error) {
 		createdAt:     createdAt,
 		fields:        cloneFields(cfg.Fields),
 		content:       cfg.Content,
+		pubkey:        cfg.Pubkey,
 	}
 
 	// Resolve content hash.
@@ -108,14 +118,38 @@ func NewClaim(cfg ClaimConfig) (Claim, error) {
 		n.edges[i] = e.id
 	}
 
-	// Compute the node id (= claim id).
+	// Resolve the pubkey that this claim's signature must match
+	// (paper §4.1, §5.7). For the initial contributor (no
+	// contribution/contributor edge), the pubkey is on this node
+	// itself. For every other claim, it is on the referenced
+	// contributor's node.
+	resolvedPubkey, err := resolveSigningPubkey(isRootContributor, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+	}
+	if err := checkSigningConsistency(cfg.SigningKey, resolvedPubkey); err != nil {
+		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+	}
+
+	// Compute the node id: Sign(H(S(node))). For the identity-Sign
+	// case (no signing key, empty pubkey) signHash returns the hash
+	// bytes unchanged, so id is just the multihash — backwards
+	// compatible with unsigned graphs.
 	encoded, err := encodeNode(n)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewClaim: canonical encode: %w", err)
 	}
-	id, err := hashContent(encoded)
+	hash, err := hashContent(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewClaim: hash: %w", err)
+	}
+	idPayload, err := signHash(cfg.SigningKey, hash.raw)
+	if err != nil {
+		return nil, fmt.Errorf("ranke.NewClaim: sign: %w", err)
+	}
+	id, err := idFromBytes(idPayload)
+	if err != nil {
+		return nil, fmt.Errorf("ranke.NewClaim: wrap id: %w", err)
 	}
 	n.id = id
 
@@ -181,6 +215,72 @@ func (c *claim) AsContributor() (Contributor, error) {
 }
 
 // --- helpers ---
+
+// resolveSigningPubkey returns the multikey-encoded pubkey whose
+// matching private key must produce this claim's signature. For the
+// initial (root) contributor, the pubkey is set on this very claim
+// via cfg.Pubkey. For every other claim, the pubkey is read from
+// the contributor referenced by cfg.Contributor.
+func resolveSigningPubkey(isRootContributor bool, cfg ClaimConfig) ([]byte, error) {
+	if isRootContributor {
+		return cfg.Pubkey, nil
+	}
+	if cfg.Contributor == nil {
+		return nil, errors.New("missing contributor")
+	}
+	return cfg.Contributor.Node().Pubkey(), nil
+}
+
+// checkSigningConsistency rejects mismatches between the supplied
+// SigningKey and the resolved contributor pubkey:
+//   - signing key set but resolved pubkey empty → caller wants to
+//     sign for a contributor that has no key on record
+//   - signing key nil but resolved pubkey non-empty → caller didn't
+//     supply the key the contributor requires
+//   - both set: signing key's public part must match the resolved
+//     pubkey (prevents Bob's private key from signing claims whose
+//     contributor field names Alice)
+func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, resolvedPubkey []byte) error {
+	hasSigner := signingKey != nil && !isTypedNil(signingKey)
+	hasPubkey := len(resolvedPubkey) > 0
+	switch {
+	case !hasSigner && !hasPubkey:
+		return nil // identity-Sign case
+	case hasSigner && !hasPubkey:
+		return errors.New("SigningKey supplied but resolved contributor has no pubkey")
+	case !hasSigner && hasPubkey:
+		return errors.New("resolved contributor has a pubkey but no SigningKey was supplied")
+	}
+	encoded, err := EncodePublicKey(signingKey.Public())
+	if err != nil {
+		return fmt.Errorf("encode signing key's pubkey: %w", err)
+	}
+	if !bytes.Equal(encoded, resolvedPubkey) {
+		return errors.New("SigningKey's public key does not match the resolved contributor pubkey")
+	}
+	return nil
+}
+
+// isTypedNil reports whether i is a nil interface value or wraps a
+// nil concrete pointer. A nil ed25519.PrivateKey passed as crypto.Signer
+// would otherwise sneak past `signingKey != nil`.
+func isTypedNil(i any) bool {
+	if i == nil {
+		return true
+	}
+	// crypto.Signer concrete types are usually slices ([]byte for
+	// ed25519); nil slice is a valid empty value here.
+	if s, ok := i.(interface{ Public() crypto.PublicKey }); ok {
+		// Calling Public on a nil ed25519.PrivateKey panics, so
+		// inspect via reflection-free duck typing: a usable signer
+		// must return a non-nil pubkey.
+		defer func() { _ = recover() }()
+		if s.Public() == nil {
+			return true
+		}
+	}
+	return false
+}
 
 // requiresProvenance reports whether claims of this class need at
 // least one derivation/* edge per §3.5.

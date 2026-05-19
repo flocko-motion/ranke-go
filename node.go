@@ -67,3 +67,12 @@ func (n *node) Fields() []string {
 	sort.Strings(names)
 	return names
 }
+
+func (n *node) Pubkey() []byte {
+	if len(n.pubkey) == 0 {
+		return nil
+	}
+	out := make([]byte, len(n.pubkey))
+	copy(out, n.pubkey)
+	return out
+}

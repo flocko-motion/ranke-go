@@ -1,6 +1,9 @@
 package ranke
 
-import "time"
+import (
+	"crypto"
+	"time"
+)
 
 // Public exported types and the unexported concrete implementations
 // of the interfaces declared in interfaces.go.
@@ -136,6 +139,19 @@ type ClaimConfig struct {
 	// node (§4.1). They participate in the canonical serialization
 	// and are covered by the node's id.
 	Fields map[string]string
+	// Pubkey is the multikey-encoded public key for a contributor
+	// claim (paper §4.1, §5.7). Empty for non-contributor claims and
+	// for unsigned contributors (identity-Sign case). Use
+	// EncodePublicKey to produce the multikey-encoded form from a
+	// Go crypto.PublicKey.
+	Pubkey []byte
+	// SigningKey is the private key used to sign this claim's id —
+	// matching the pubkey resolved from the contributor (or from
+	// this claim's own Pubkey field for the initial contributor).
+	// Nil signing key + empty resolved pubkey = identity Sign:
+	// id(v) = H(S(v)). Mismatch (signer set but no pubkey, or
+	// pubkey set but no signer) is rejected at NewClaim time.
+	SigningKey crypto.Signer
 }
 
 // EdgeConfig is the data-only input to NewEdge.
@@ -202,7 +218,8 @@ type node struct {
 	createdAt     time.Time
 	edges         []Id              // edge ids, sorted canonically
 	fields        map[string]string // additional implementation-defined fields (§4.1)
-	id            Id                // = H(S(node)); also the claim id
+	pubkey        []byte            // multikey-encoded pubkey on contributor nodes (§5.7); empty otherwise
+	id            Id                // = Sign(H(S(node))); also the claim id
 }
 
 // claim is the concrete implementation of Claim. A claim is its node

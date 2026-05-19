@@ -44,6 +44,10 @@ type encNode struct {
 	// Fields appear under tag 8 as a map sorted by key (CBOR
 	// Deterministic ensures sort order).
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
+	// Pubkey is the contributor's multikey-encoded public key (§5.7).
+	// Empty (omitted) on non-contributor claims and unsigned
+	// contributors. Participates in id computation like any field.
+	Pubkey []byte `cbor:"9,keyasint,omitempty"`
 }
 
 // encEdge is the wire shape of an edge (§4.2 simplified schema):
@@ -86,6 +90,7 @@ func buildEncNode(n *node) (encNode, error) {
 		EncodingSub:   n.encodingSub,
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 		Fields:        n.fields,
+		Pubkey:        n.pubkey,
 	}
 	if n.contentHash != nil {
 		en.ContentHash = idBytes(n.contentHash)
