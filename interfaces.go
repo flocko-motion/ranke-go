@@ -33,7 +33,10 @@
 //	func ParseId(s string) (Id, error)
 package ranke
 
-import "time"
+import (
+	"crypto"
+	"time"
+)
 
 // Filter selects a subset of edges matching some criterion.
 //
@@ -244,6 +247,18 @@ type Claim interface {
 // of contribution/contributor claims solidifies.
 type Contributor interface {
 	Claim
+	// SigningKey returns the private key matching this contributor's
+	// pubkey, or nil when the contributor has no key on record
+	// (identity-Sign case — paper §5.7). NewClaim, SetBranch, and
+	// Consolidate consult it for any claim minted on this
+	// contributor's behalf, so the key threads through the API
+	// without an explicit parameter at every site.
+	//
+	// The Ranke-Graph itself stores no private keys: a bare
+	// contributor claim (returned from AsContributor or loaded
+	// from disk) returns nil here. To attach a key for use during
+	// a session, wrap the contributor with WithSigningKey.
+	SigningKey() crypto.Signer
 }
 
 // Archive is one physical instance of (U, B) from §4.6. A Archive holds
@@ -331,7 +346,12 @@ type Archive interface {
 	// multi-headed graph cannot be addressed by a single id and must
 	// be consolidated first via a contribution/head claim (§4.5).
 	// Returns an error if the graph has zero or multiple heads.
-	SetBranch(name string, g Graph, contributor Contributor) error
+	// createdAt is optional. Zero / omitted → time.Now().UTC().
+	// Non-zero → used for the head and branches-table claims that
+	// SetBranch builds internally, making the operation deterministic
+	// (required by the conformance suite). Must satisfy monotonicity
+	// (§4.3): >= the createdAt of every reference.
+	SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error
 
 	// Branches returns a snapshot of every branch.
 	Branches() []Branch
@@ -461,7 +481,10 @@ type Graph interface {
 	// Returns an error if the graph is empty or already consolidated.
 	// The graph itself is unchanged by Consolidate — only AddClaim
 	// changes graph contents.
-	Consolidate(contributor Contributor) (Claim, error)
+	// createdAt is optional. Zero / omitted → time.Now().UTC().
+	// Non-zero → stamped onto the consolidation claim. Must satisfy
+	// monotonicity (§4.3): >= the createdAt of every open head.
+	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
 
 	// Validate runs a full strict integrity check of the graph.
 	//

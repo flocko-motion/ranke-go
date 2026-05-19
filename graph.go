@@ -3,6 +3,7 @@ package ranke
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // NewGraph creates a graph rooted at the given contribution/contributor
@@ -13,13 +14,28 @@ func NewGraph(root Contributor) Graph {
 		claims:     make(map[string]*claim),
 		referenced: make(map[string]struct{}),
 	}
-	if root != nil {
-		// Root is itself a Claim; just store it.
-		if c, ok := root.(*claim); ok {
-			g.claims[c.node.id.String()] = c
-		}
+	if c := unwrapClaim(root); c != nil {
+		g.claims[c.node.id.String()] = c
 	}
 	return g
+}
+
+// unwrapClaim peels any wrapper (e.g. *signedContributor) off a
+// Contributor to reach the underlying persisted *claim. Returns nil
+// if the chain doesn't end at our concrete type — i.e. the caller
+// passed a foreign implementation.
+func unwrapClaim(c Contributor) *claim {
+	for c != nil {
+		switch v := c.(type) {
+		case *claim:
+			return v
+		case *signedContributor:
+			c = v.contributor
+		default:
+			return nil
+		}
+	}
+	return nil
 }
 
 func (g *graph) AddClaim(cl Claim) (Id, error) {
@@ -93,7 +109,7 @@ func (g *graph) IsConsolidated() bool {
 	return len(g.Heads()) == 1
 }
 
-func (g *graph) Consolidate(contributor Contributor) (Claim, error) {
+func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error) {
 	heads := g.Heads()
 	if len(heads) == 0 {
 		return nil, errors.New("ranke.Graph.Consolidate: empty graph")
@@ -118,7 +134,20 @@ func (g *graph) Consolidate(contributor Contributor) (Claim, error) {
 		TypeSub:     "head",
 		Contributor: contributor,
 		Edges:       edges,
+		CreatedAt:   firstNonZero(createdAt),
 	})
+}
+
+// firstNonZero returns the first non-zero time in ts, or the zero
+// time.Time if all are zero / ts is empty. Used to absorb the
+// variadic createdAt parameter on Consolidate / SetBranch.
+func firstNonZero(ts []time.Time) time.Time {
+	for _, t := range ts {
+		if !t.IsZero() {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func (g *graph) Validate() error {

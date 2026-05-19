@@ -127,6 +127,13 @@ func NewClaim(cfg ClaimConfig) (Claim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
 	}
+	// If the caller didn't pass an explicit SigningKey, fall back
+	// to the one the Contributor carries. A bare contributor
+	// (unwrapped, or freshly loaded from disk) returns nil here,
+	// which collapses to identity Sign per §5.7.
+	if cfg.SigningKey == nil && cfg.Contributor != nil {
+		cfg.SigningKey = cfg.Contributor.SigningKey()
+	}
 	if err := checkSigningConsistency(cfg.SigningKey, resolvedPubkey); err != nil {
 		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
 	}
@@ -214,6 +221,11 @@ func (c *claim) AsContributor() (Contributor, error) {
 	return c, nil
 }
 
+// SigningKey on a bare *claim is always nil — the claim type is the
+// persisted data structure and stores no private keys. Wrap with
+// WithSigningKey for a session-scoped signer.
+func (c *claim) SigningKey() crypto.Signer { return nil }
+
 // --- helpers ---
 
 // resolveSigningPubkey returns the multikey-encoded pubkey whose
@@ -281,6 +293,34 @@ func isTypedNil(i any) bool {
 	}
 	return false
 }
+
+// WithSigningKey returns a Contributor that carries the private key
+// matching c's pubkey, so subsequent NewClaim/SetBranch/Consolidate
+// calls can sign on the contributor's behalf without the caller
+// threading the key through manually. Nil key collapses to the
+// identity-Sign behaviour the bare contributor already exposes.
+//
+// The Ranke-Graph itself stores no private keys; this wrapper is a
+// runtime convenience, not persisted to disk.
+func WithSigningKey(c Contributor, key crypto.Signer) Contributor {
+	return &signedContributor{contributor: c, key: key}
+}
+
+type signedContributor struct {
+	contributor Contributor
+	key         crypto.Signer
+}
+
+// Forward every Claim/Contributor method to the wrapped Contributor.
+// Embedding the interface bare would shadow it with a same-named
+// field — Go's method promotion doesn't fire on a *named* field.
+func (s *signedContributor) Node() Node                          { return s.contributor.Node() }
+func (s *signedContributor) Edges(filters ...Filter) []Edge      { return s.contributor.Edges(filters...) }
+func (s *signedContributor) Contributor() Contributor            { return s.contributor.Contributor() }
+func (s *signedContributor) IsContributor() bool                 { return s.contributor.IsContributor() }
+func (s *signedContributor) AsContributor() (Contributor, error) { return s.contributor.AsContributor() }
+func (s *signedContributor) ID() Id                              { return s.contributor.ID() }
+func (s *signedContributor) SigningKey() crypto.Signer           { return s.key }
 
 // requiresProvenance reports whether claims of this class need at
 // least one derivation/* edge per §3.5.

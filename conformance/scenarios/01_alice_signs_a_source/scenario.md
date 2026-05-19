@@ -16,19 +16,12 @@ creating derivations, building a semantic graph.
 
 ## Steps
 
-1. **Bootstrap Alice as the initial node.**
-   Build a `contribution/contributor` claim whose content carries Alice's Ed25519 public key. This claim has no edges — it is the only no-edge claim in the archive (§4.3, §4.5). Its id is `Sign(H(S(v)))` where the signing key is Alice's own private key (initial-node case: pubkey from `v.content`, §5.7).
+TODO: write the steps. Don't be too verbose, keep it bullet style - the code itself is the verbosity.
 
-2. **Ingest the email as a `source/email` claim.**
-   Load `alice_to_bob__apples.eml` as raw bytes. Build a `source/email` claim with the bytes as content and a `contribution/contributor` edge pointing to Alice. The claim is signed by Alice's key, looked up through the edge (§5.7 normal case).
-
-3. **Anchor the archive's branch table.**
-   Create a `contribution/head` claim consolidating the email claim, point the `main` branch at it via a `contribution/branch` edge in the `contribution/branches` table (§4.9). Commit `B_h`.
-
-4. **Persist to `./archive/`.**
+1. **Persist to `./archive/`.**
    Write the archive to the scenario's own `archive/` directory using the standard fs layout.
 
-5. **Dump `./ids.txt`.**
+2. **Dump `./ids.txt`.**
    Walk every claim in U, sort their ids lexicographically, write one id per line.
 
 ## Expected outputs

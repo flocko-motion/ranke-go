@@ -3,6 +3,7 @@ package ranke
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // archiveBackend is the internal hook between *archive and its
@@ -309,7 +310,7 @@ func (a *archive) Branches() []Branch {
 //
 // Then B_h is updated to the new table's id and persisted via the
 // backend.
-func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error {
+func (a *archive) SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
 		return errors.New("ranke.Archive.SetBranch: nil graph")
 	}
@@ -347,11 +348,13 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		}
 		headEdges = append(headEdges, e)
 	}
+	at := firstNonZero(createdAt)
 	headClaim, err := NewClaim(ClaimConfig{
 		TypeClass:   NodeContribution,
 		TypeSub:     "head",
 		Contributor: contributor,
 		Edges:       headEdges,
+		CreatedAt:   at,
 	})
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build head claim: %w", err)
@@ -420,6 +423,7 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		TypeSub:     "branches",
 		Contributor: contributor,
 		Edges:       tableEdges,
+		CreatedAt:   at,
 	})
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build branches claim: %w", err)
