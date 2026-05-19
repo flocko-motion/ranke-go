@@ -328,30 +328,6 @@ type claim struct {
 	contributor Contributor
 }
 
-// archive is the concrete implementation of Archive (= (U, B_h) from
-// the paper §4.6).
-//
-// U is content-addressed: claims map is keyed by Id.String() and
-// stores both ordinary record claims and structural ones
-// (contribution/head, contribution/branches). content holds the raw
-// bytes addressed by any node-or-edge ContentHash.
-//
-// B is collapsed to a single hash B_h: branchesHead is the id of the
-// current contribution/branches claim in U. The branch table itself
-// (name → head bindings, plus chain to prior tables) lives inside U
-// like every other claim — only the *handle* B_h is kept here, and
-// only B_h is persisted by backends.
-//
-// The public API never exposes the claims map directly. Listing of U
-// is not possible; only graph-by-head, content-by-id, and branch-by-
-// name lookups are. branchesHead == nil ⇒ no branches yet (fresh
-// archive).
-type archive struct {
-	claims       map[string]*claim // cache when backend != nil; source of truth otherwise
-	content      map[string][]byte // same: cache + truth
-	branchesHead Id                // id of current contribution/branches claim, or nil
-	backend      archiveBackend    // nil ⇒ pure in-memory; non-nil ⇒ persistent
-}
 
 // branch is the concrete implementation of Branch — a projection of
 // one contribution/branch edge in the current branch table.
@@ -388,11 +364,3 @@ type graph struct {
 	referenced map[string]struct{}
 }
 
-// memoryPersistence is the in-memory implementation of Persistence.
-//
-// blobs holds the canonical-encoded bytes of each claim, keyed by the
-// claim's hash string — content-addressed by construction. A graph is
-// reconstructed by reading its head blob and walking references.
-type memoryPersistence struct {
-	blobs map[string][]byte
-}

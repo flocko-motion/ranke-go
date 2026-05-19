@@ -1,6 +1,7 @@
 package ranke
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,26 +9,27 @@ import (
 	"testing"
 )
 
-// Exercises every termination branch of fsBackend.streamContent.
+// Exercises every termination branch of fsUniverse.StreamContent.
 func TestStreamContent(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
-	b := &fsBackend{dir: dir}
+	u := &fsUniverse{dir: dir}
 
 	payload := []byte("hello, ranke")
 	h, err := hashContent(payload)
 	if err != nil {
 		t.Fatalf("hashContent: %v", err)
 	}
-	if err := b.saveContent(h.String(), payload); err != nil {
-		t.Fatalf("saveContent: %v", err)
+	if err := u.SaveContent(ctx, h, payload); err != nil {
+		t.Fatalf("SaveContent: %v", err)
 	}
 	size := uint64(len(payload))
 	path := filepath.Join(dir, h.String())
 
 	t.Run("happy path returns bytes + EOF", func(t *testing.T) {
-		r, err := b.streamContent(h, size)
+		r, err := u.StreamContent(ctx, h, size)
 		if err != nil {
-			t.Fatalf("streamContent: %v", err)
+			t.Fatalf("StreamContent: %v", err)
 		}
 		defer r.Close()
 		got, err := io.ReadAll(r)
@@ -40,15 +42,14 @@ func TestStreamContent(t *testing.T) {
 	})
 
 	t.Run("overflow surfaces on final Read", func(t *testing.T) {
-		// Append junk on disk; consumer should never see a clean EOF.
 		if err := os.WriteFile(path, append([]byte{}, append(payload, []byte("EXTRA")...)...), 0o644); err != nil {
 			t.Fatalf("setup: %v", err)
 		}
 		defer os.WriteFile(path, payload, 0o644)
 
-		r, err := b.streamContent(h, size)
+		r, err := u.StreamContent(ctx, h, size)
 		if err != nil {
-			t.Fatalf("streamContent: %v", err)
+			t.Fatalf("StreamContent: %v", err)
 		}
 		defer r.Close()
 		_, err = io.ReadAll(r)
@@ -63,9 +64,9 @@ func TestStreamContent(t *testing.T) {
 		}
 		defer os.WriteFile(path, payload, 0o644)
 
-		r, err := b.streamContent(h, size)
+		r, err := u.StreamContent(ctx, h, size)
 		if err != nil {
-			t.Fatalf("streamContent: %v", err)
+			t.Fatalf("StreamContent: %v", err)
 		}
 		defer r.Close()
 		_, err = io.ReadAll(r)
@@ -74,11 +75,11 @@ func TestStreamContent(t *testing.T) {
 		}
 	})
 
+	// Same-length byte flip: only the final-block hash check catches
+	// it. Consumer must receive an error instead of a clean EOF, and
+	// must not have seen the full tampered payload.
 	t.Run("same-size tamper held back at final block", func(t *testing.T) {
-		// Same length, different bytes — only the final-block hash
-		// check can catch this; the consumer must get an error
-		// instead of a clean EOF.
-		tampered := []byte("ranke, hello") // same length, different content
+		tampered := []byte("ranke, hello")
 		if uint64(len(tampered)) != size {
 			t.Fatalf("test bug: tampered length %d != %d", len(tampered), size)
 		}
@@ -87,17 +88,15 @@ func TestStreamContent(t *testing.T) {
 		}
 		defer os.WriteFile(path, payload, 0o644)
 
-		r, err := b.streamContent(h, size)
+		r, err := u.StreamContent(ctx, h, size)
 		if err != nil {
-			t.Fatalf("streamContent: %v", err)
+			t.Fatalf("StreamContent: %v", err)
 		}
 		defer r.Close()
 		got, err := io.ReadAll(r)
 		if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
 			t.Fatalf("expected 'hash mismatch' error, got: %v (read %q)", err, got)
 		}
-		// Crucially, the consumer must NOT have seen the final byte
-		// of the tampered content — final block is held back.
 		if len(got) >= len(payload) {
 			t.Fatalf("consumer received the full tampered payload (%d bytes) — final block was not held back", len(got))
 		}

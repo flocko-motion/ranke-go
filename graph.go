@@ -243,11 +243,8 @@ func (g *graph) verifyOne(c *claim) error {
 	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
 		return fmt.Errorf("§5.7: %w", err)
 	}
-	// Content integrity (§5.10) is enforced at load time by the
-	// backend's loadContent, which stream-verifies (size, hash)
-	// against the values signed into the node. By the time a claim
-	// reaches verifyOne, its bytes have already been validated — so
-	// we don't re-hash here.
+	// Content integrity (§5.10) is enforced at Universe.GetContent /
+	// StreamContent time; bytes reaching verifyOne are already verified.
 	return nil
 }
 

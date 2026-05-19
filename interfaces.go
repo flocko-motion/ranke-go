@@ -1,36 +1,27 @@
-// Package ranke is the reference implementation of the Ranke-Graph ADT
-// as defined in §4 of "Ranke-Graph: A Provenance-First Data Structure".
+// Package ranke is the Go reference implementation of the
+// Ranke-Graph ADT (spec §4).
 //
-// The library is interface-first: callers depend only on the interfaces
-// declared in this file. Concrete types are unexported; constructors
-// return interfaces. The only exported non-interface types are the
-// data-only config structs (ClaimConfig, EdgeConfig) used to pass
-// arguments into the constructors.
+// Architecture follows the spec directly:
 //
-// Backend scope: this library ships two example Archive
-// implementations — NewMemArchive (in-memory, ephemeral) and
-// NewFsArchive (filesystem, durable). Other backends (S3, IPFS,
-// Neo4j, content-addressed databases, ...) belong in downstream
-// packages and need only satisfy the Archive interface.
+//   - Universe (𝒰, §4.5) — a content-addressed bag of claims and
+//     content bytes. Composable: NewFsUniverse, NewMemUniverse, plus
+//     downstream backends (S3, Neo4j, ...) that satisfy the Universe
+//     interface.
 //
-// Access model: dark, content-addressed (IPFS-style). Every record
-// operation is keyed on an explicit hash — you can try to fetch by
-// hash and learn whether it succeeded, but you cannot ask "what's in
-// here". The universe of claims U is not enumerable in principle,
-// and the API does not pretend otherwise. The only listing-style
-// call is over Branches — the local name-bindings B from §4.6, which
-// are explicitly local state, not part of U.
+//   - BranchTableHead (B_h, §4.7) — persists the single mutable Id of
+//     the current contribution/branches claim. NewFsBranchTableHead,
+//     NewMemBranchTableHead, or anything else that satisfies it.
 //
-// Public constructors (defined elsewhere in this package):
+//   - Archive (§4.8) — the (𝒰, B_h) tuple. NewArchive(u, bth) composes
+//     them. No per-backend factories: callers compose explicitly so
+//     the shape of the deployment is visible at the call site.
 //
-//	func NewGraph(root Contributor) Graph
-//	func NewMemArchive(root Contributor) Archive               // in-memory backend
-//	func NewFsArchive(path string, root Contributor) (Archive, error) // file-backed backend (planned)
-//	func NewClaim(cfg ClaimConfig) (Claim, error)
-//	func NewEdge(cfg EdgeConfig) (Edge, error)
-//	func NewTypeFilter(class *EdgeClass, sub *string) Filter
-//	func NewEncodingFilter(class *EncodingClass, sub *string) Filter
-//	func ParseId(s string) (Id, error)
+// Multiple Archives may share one Universe. Archive does not own
+// either of its dependencies — closing an Archive does not close
+// the Universe or BranchTableHead. The caller does.
+//
+// Higher-level concerns (queries, indices, cache stacks, federation)
+// live in the application layer above this library.
 package ranke
 
 import (
@@ -52,12 +43,7 @@ type Filter interface {
 
 // Id is a self-describing, content-addressed identifier.
 //
-// Id is the universal name in the system: it identifies a node, an
-// edge, or a hash-rooted graph instance (§4.5). What you can do with
-// an Id depends on the API you pass it to (Archive.GetClaim,
-// Persistence.Read, ...).
-//
-// Per §4 of the paper, id(v) = H(S(v)) for nodes and id(e) = H(S(e))
+// Per spec §4, id(v) = Sign(H(S(v))) for nodes and id(e) = H(S(e))
 // for edges, where S is the canonical serialization and H is a
 // cryptographic hash. The reference implementation uses CBOR
 // Deterministic encoding (RFC 8949 §4.2) for S and IPFS multihash
@@ -279,107 +265,19 @@ type Contributor interface {
 	SigningKey() crypto.Signer
 }
 
-// Archive is one physical instance of (U, B) from §4.6. A Archive holds
-// graphs (the U side) and branches (the B side) — claims live inside
-// graphs, not directly in the Archive.
-//
-// The Archive API operates at the graph and branch granularity:
-// fetching a graph by the id of its head, putting a graph (binding
-// it to a branch), naming and history. Claim-level operations
-// (AddClaim, ContainsClaim, GetClaim) belong on Graph — that is where
-// claims actually live. Internally, a Archive typically deduplicates
-// claims across graphs, but that is an implementation detail not
-// exposed by the interface.
-//
-// Listability is deliberately not part of the Archive API. The
-// universe U is unenumerable in principle. The only listing-style
-// call is Branches, which is explicitly the local B side, not U.
-//
-// Backends. This library ships two example Archive implementations:
-//
-//   - NewMemArchive — in-memory, ephemeral. Useful for tests, scratch
-//     work, the conformance suite, and any short-lived process.
-//   - NewFsArchive — filesystem-backed, durable. Loads B eagerly,
-//     fetches claims and content lazily on demand.
-//
-// Other backends (S3, IPFS, Neo4j, content-addressed databases) are
-// out of scope for this library — they live in downstream packages
-// and need only satisfy the Archive interface.
+// Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
+// are projections of claims that live in the underlying Universe.
 type Archive interface {
-	// --- Graphs (the U side) ---
-
-	// HasGraph reports whether the Archive holds a graph identified by
-	// the given head id (i.e. a graph rooted at this head is present
-	// and complete).
 	HasGraph(head Id) bool
-
-	// GetGraph retrieves the hash-rooted graph instance RG_h
-	// identified by head (§4.5). Returns an error if the Archive does
-	// not hold this graph or any required claim is missing.
 	GetGraph(head Id) (Graph, error)
 
-	// --- Content (addressed by ContentHash on nodes and edges) ---
-	//
-	// Content has no fetcher on the public Archive interface. Claims
-	// are the atomic unit exposed to users; content is reachable
-	// only through the claim that names it (Node.Content,
-	// Edge.Content). Adding HasContent/GetContent here would let
-	// callers probe content existence outside of any view they hold,
-	// which leaks past pruning. Internal access is still possible
-	// for implementations.
-	//
-	// TODO: revisit once pruning + scoped visibility (paper §5.6)
-	// land. The content layer needs to respect the same view filter
-	// as the claim layer; the interface design follows from that.
-
-	// --- Branches (the B side from §4.6) ---
-
-	// HasBranch reports whether a branch with the given name exists.
 	HasBranch(name string) bool
-
-	// GetBranch returns the named branch. Returns an error if no
-	// branch with that name exists.
 	GetBranch(name string) (Branch, error)
-
-	// SetBranch binds name to the given graph. Algorithm:
-	//
-	//  1. Look up B[name] — the previous contribution/branch claim
-	//     id, if any.
-	//  2. Build a new contribution/branch claim:
-	//     - TypeClass:     NodeContribution
-	//     - TypeSub:       "branch"
-	//     - EncodingClass: EncodingText
-	//     - EncodingSub:   "plain"
-	//     - Content:       name (the branch name, self-describing)
-	//     - CreatedAt:     now (UTC)
-	//     - contributor: the given contributor (NewClaim auto-builds
-	//       the contribution/contributor edge)
-	//     - edges:
-	//       · contribution/head   → g.Heads()[0]  (the bound head)
-	//       · contribution/branch → previous B[name] (only if set)
-	//  3. Add the new claim to U.
-	//  4. Update B[name] = new claim's id.
-	//
-	// The graph must be single-headed (len(g.Heads()) == 1); a
-	// multi-headed graph cannot be addressed by a single id and must
-	// be consolidated first via a contribution/head claim (§4.5).
-	// Returns an error if the graph has zero or multiple heads.
-	// createdAt is optional. Zero / omitted → time.Now().UTC().
-	// Non-zero → used for the head and branches-table claims that
-	// SetBranch builds internally, making the operation deterministic
-	// (required by the conformance suite). Must satisfy monotonicity
-	// (§4.3): >= the createdAt of every reference.
 	SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error
-
-	// Branches returns a snapshot of every branch.
 	Branches() []Branch
 
-	// VerifyBranch fetches the graph rooted at the latest head of
-	// the named branch and runs full integrity + authenticity
-	// verification (§5.10): every claim's id is recomputed from its
-	// canonical bytes, the contributor's pubkey is resolved, and
-	// the signature is checked. Returns the first violation as an
-	// error, or nil if the entire branch closure is intact.
+	// VerifyBranch loads the closure rooted at the branch's latest
+	// head and runs the spec §5.10 checks across it.
 	VerifyBranch(name string) error
 }
 
@@ -443,25 +341,9 @@ type BranchEntry interface {
 	Claim() Claim
 }
 
-// Graph is a Ranke-Graph instance RG ⊆ U (§4.4): a subset of the
-// universe of claims, in memory. A graph may be single-headed (the
-// special case RG_h, §4.5 — the closure of claims reachable from a
-// single id h) or multi-headed (concurrent writes produce multiple
-// open heads, no single id names the whole state until a
-// contribution/head claim consolidates them).
-//
-// A graph always has exactly one claim without edges: the root
-// contribution/contributor (§4.3), supplied at construction
-// (NewGraph). Every other claim added via AddClaim must reference
-// a contributor through its contribution/contributor edge.
-//
-// Graphs are where claims actually live: AddClaim grows the subset,
-// ContainsClaim and GetClaim look up claims in it. A Graph can be built
-// standalone (NewGraph, add claims, consolidate, persist via
-// Persistence) or fetched from a Archive (Archive.GetGraph(head)).
-//
-// Validation lives here because validation is bounded — Merkle
-// integrity holds across a closure, not over the unenumerable U.
+// Graph is a Ranke-Graph instance RG ⊆ 𝒰 (spec §4.5), in memory.
+// Built standalone via NewGraph for fresh contributions, or returned
+// from Archive.GetGraph(head) for a hash-rooted instance.
 type Graph interface {
 	// Add inserts one or more claims into the graph atomically.
 	// Every edge reference must already be reachable in the graph
@@ -493,8 +375,7 @@ type Graph interface {
 	Heads() []Id
 
 	// IsConsolidated reports whether this graph has exactly one open
-	// head — i.e. it is RG_h for some id h. A consolidated graph is
-	// addressable by a single id and persistable via Persistence.Write.
+	// head — i.e. it is RG_h for some id h, addressable by a single id.
 	IsConsolidated() bool
 
 	// Consolidate builds a contribution/head claim that references
@@ -529,27 +410,5 @@ type Graph interface {
 	// source) and the caller wants to avoid redundant work. All
 	// other checks still run.
 	ValidateWithExceptions(skip ...Id) error
-}
-
-// Persistence is the durable save/load plugin interface.
-//
-// It operates on hash-rooted graphs (RG_h, §4.5): closures
-// addressable by a single id. A multi-headed graph is not
-// persistable as-is — the caller must consolidate it via a
-// contribution/head claim first.
-//
-// The library ships an in-memory implementation (NewMemoryPersistence);
-// other backends — disk, S3, IPFS, a content-addressed database —
-// may live in downstream packages and satisfy this interface.
-type Persistence interface {
-	// Read loads the hash-rooted graph RG_h: the transitive closure
-	// of claims reachable from head by following each edge to its
-	// reference (§4.5). The head alone suffices to recover the graph.
-	// The returned Graph is single-headed; Heads() returns [head].
-	Read(head Id) (Graph, error)
-	// Write persists a graph and returns the id that names it (the
-	// id of its single head). The graph must be single-headed;
-	// otherwise Write returns an error.
-	Write(g Graph) (Id, error)
 }
 

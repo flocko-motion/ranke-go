@@ -55,7 +55,7 @@ usage:
   ranke show     <dir> <id>
   ranke validate <dir>
 
-dir is a filesystem-backed archive (see NewFsArchive). Read-only.`)
+dir is a filesystem-backed archive (FsUniverse + FsBranchTableHead at dir/B_h). Read-only.`)
 }
 
 func exit(err error) {
@@ -66,11 +66,15 @@ func exit(err error) {
 }
 
 func openArchive(dir string) (ranke.Archive, error) {
-	a, err := ranke.NewFsArchive(dir)
+	u, err := ranke.NewFsUniverse(dir)
 	if err != nil {
-		return nil, fmt.Errorf("open archive %s: %w", dir, err)
+		return nil, fmt.Errorf("open universe %s: %w", dir, err)
 	}
-	return a, nil
+	bth, err := ranke.NewFsBranchTableHead(filepath.Join(dir, "B_h"))
+	if err != nil {
+		return nil, fmt.Errorf("open branch table head: %w", err)
+	}
+	return ranke.NewArchive(u, bth)
 }
 
 // --- info ---

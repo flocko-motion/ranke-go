@@ -17,6 +17,7 @@
 package main
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
@@ -197,9 +198,14 @@ func main() {
 	}.Sign())
 	must(g.Add(familyRel))
 
-	// --- 7. Consolidate the open heads, persist as branch "main". ---
+	// --- 7. Consolidate, then compose an Archive from its parts ---
+	// (filesystem Universe + B_h file alongside it) and persist as
+	// branch "main". Real deployments would stack a MemUniverse on
+	// top, or swap S3Universe in below — this scenario keeps it flat.
 	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
-	arc := must(ranke.NewFsArchive(helpers.ArchiveDir))
+	u := must(ranke.NewFsUniverse(helpers.ArchiveDir))
+	bth := must(ranke.NewFsBranchTableHead(filepath.Join(helpers.ArchiveDir, "B_h")))
+	arc := must(ranke.NewArchive(u, bth))
 	must(arc.SetBranch("main", g, alice, s.NextTimestamp(time.Second)))
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---

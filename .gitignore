@@ -13,3 +13,4 @@ conformance/scenarios/*/ids.txt
 
 # Local copy of the spec, kept at repo root for convenience.
 /specification.typ
+/specification.txt

@@ -45,7 +45,9 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 }
 
 func (s *Scenario) ReloadAndVerify(expectBranch, expectHead string) {
-	arc := Must(ranke.NewFsArchive(ArchiveDir))
+	u := Must(ranke.NewFsUniverse(ArchiveDir))
+	bth := Must(ranke.NewFsBranchTableHead(filepath.Join(ArchiveDir, "B_h")))
+	arc := Must(ranke.NewArchive(u, bth))
 	allIds := make(map[string]struct{})
 	found := false
 	failedBranches := 0

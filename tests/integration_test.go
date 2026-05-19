@@ -1,11 +1,12 @@
 // Integration tests — drive IntegrationTest against every Archive
-// backend the library ships. Same suite a 3rd-party backend uses,
-// just called with our two example factories.
+// shape the library supports, composed explicitly from Universe +
+// BranchTableHead.
 package tests
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
@@ -44,18 +45,18 @@ func TestMain(m *testing.M) {
 }
 
 func TestIntegrationMem(t *testing.T) {
-	// Mem: the factory returns the same Archive every call, so Reset
-	// is a no-op (state cannot be lost because nothing leaves memory).
-	a := ranke.NewMemArchive()
+	a, err := ranke.NewArchive(ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
+	require.NoError(t, err)
 	IntegrationTest(t, func() ranke.Archive { return a })
 }
 
 func TestIntegrationFs(t *testing.T) {
-	// Fs: the factory builds a fresh handle at the same dir each
-	// call. Reset drops in-memory caches and re-reads branches.json;
-	// the next claim/content access fetches from disk.
 	IntegrationTest(t, func() ranke.Archive {
-		a, err := ranke.NewFsArchive(fsTestDir)
+		u, err := ranke.NewFsUniverse(fsTestDir)
+		require.NoError(t, err)
+		bth, err := ranke.NewFsBranchTableHead(filepath.Join(fsTestDir, "B_h"))
+		require.NoError(t, err)
+		a, err := ranke.NewArchive(u, bth)
 		require.NoError(t, err)
 		return a
 	})
