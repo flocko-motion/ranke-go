@@ -137,8 +137,16 @@ func (g *graph) ValidateWithExceptions(skip ...Id) error {
 		if _, sk := skipSet[k]; sk {
 			continue
 		}
-		// 1. Recompute the node's id from its canonical encoding and
-		//    compare against the stored id (Merkle integrity, §5.2).
+		// 1. Every edge reference must resolve in the graph. Done
+		//    first so signature checks have the contributor available.
+		for _, e := range c.edges {
+			if _, ok := g.claims[e.reference.String()]; !ok {
+				return fmt.Errorf("validate %s: edge references missing claim %s", k, e.reference.String())
+			}
+		}
+		// 2. Merkle integrity + authenticity in one step (§5.10):
+		//    recompute H(S(v)), resolve the contributor's pubkey,
+		//    verify Sign(H(S(v))) against the stored id.
 		encoded, err := encodeNode(c.node)
 		if err != nil {
 			return fmt.Errorf("validate %s: encode: %w", k, err)
@@ -147,15 +155,39 @@ func (g *graph) ValidateWithExceptions(skip ...Id) error {
 		if err != nil {
 			return fmt.Errorf("validate %s: hash: %w", k, err)
 		}
-		if !recomputed.Equal(c.node.id) {
-			return fmt.Errorf("validate %s: id mismatch (Merkle integrity, §5.2)", k)
+		pubkey, err := g.resolveClaimPubkey(c)
+		if err != nil {
+			return fmt.Errorf("validate %s: resolve pubkey: %w", k, err)
 		}
-		// 2. Every edge reference must resolve in the graph.
-		for _, e := range c.edges {
-			if _, ok := g.claims[e.reference.String()]; !ok {
-				return fmt.Errorf("validate %s: edge references missing claim %s", k, e.reference.String())
-			}
+		idH, ok := c.node.id.(*hash)
+		if !ok {
+			return fmt.Errorf("validate %s: id not a *hash (foreign id type)", k)
+		}
+		if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
+			return fmt.Errorf("validate %s: %w (§5.7)", k, err)
 		}
 	}
 	return nil
+}
+
+// resolveClaimPubkey returns the pubkey whose matching private key
+// signed this claim's id (§5.7). For the initial contributor (a
+// claim with no edges, per §4.3), the pubkey is on the claim's own
+// node. For every other claim, it is on the node of the contributor
+// referenced by the claim's contribution/contributor edge.
+func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
+	if len(c.edges) == 0 {
+		// Initial node (the only no-edge claim a graph may contain).
+		return c.node.pubkey, nil
+	}
+	for _, e := range c.edges {
+		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
+			contributor, ok := g.claims[e.reference.String()]
+			if !ok {
+				return nil, fmt.Errorf("contributor claim %s not in graph", e.reference.String())
+			}
+			return contributor.node.pubkey, nil
+		}
+	}
+	return nil, errors.New("non-initial claim missing contribution/contributor edge")
 }
