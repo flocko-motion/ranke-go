@@ -1,1 +1,7 @@
 bin/
+
+# Scenario binaries land at repo root when invoked as
+# `go build ./conformance/scenarios/<name>` from there.
+/01_*
+/02_*
+/03_*
