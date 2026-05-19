@@ -124,6 +124,30 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 	}
 }
 
+// Keypair pairs a private signing key with its multikey-encoded
+// public key — the two pieces of key material a contributor claim
+// needs. LoadPrivateKey returns one of these in a single call.
+type Keypair struct {
+	Private crypto.Signer
+	Pubkey  []byte // multikey-encoded (see EncodePublicKey)
+}
+
+// LoadPrivateKey loads an Ed25519 PKCS#8 PEM private key from path
+// and pre-computes its multikey-encoded public key. Returns the
+// pair in a single value so callers don't repeat the load + encode
+// dance.
+func LoadPrivateKey(path string) (Keypair, error) {
+	priv, err := LoadEd25519PrivateKeyPEM(path)
+	if err != nil {
+		return Keypair{}, err
+	}
+	pubkey, err := EncodePublicKey(priv.Public())
+	if err != nil {
+		return Keypair{}, fmt.Errorf("ranke.LoadPrivateKey: encode pubkey: %w", err)
+	}
+	return Keypair{Private: priv, Pubkey: pubkey}, nil
+}
+
 // LoadEd25519PrivateKeyPEM loads an Ed25519 private key from a
 // PKCS#8 PEM file (as produced by `openssl genpkey -algorithm
 // ed25519`). The returned key satisfies crypto.Signer.

@@ -17,7 +17,28 @@ import (
 // and is functionally equivalent in the signed case: the claim's
 // signature transitively authenticates the edges it owns.
 
-// NewClaim constructs a Claim atomically per §4.3:
+// NewClaim seeds a ClaimBuilder with the three most common required
+// fields. Chain With* setters to add optionals, then call .Sign()
+// to finalize:
+//
+//	c, err := ranke.NewClaim("source/email", alice, body).
+//	    WithEncoding(ranke.EncodingMessageRFC822).
+//	    WithCreatedAt(at).
+//	    Sign()
+//
+// For full struct-literal control, build a ClaimBuilder directly
+// and call .Sign() on it.
+func NewClaim(typ string, contributor Contributor, content []byte) ClaimBuilder {
+	return ClaimBuilder{
+		Type:        typ,
+		Contributor: contributor,
+		Content:     content,
+	}
+}
+
+// buildClaim constructs a Claim atomically per §4.3 from a fully
+// populated ClaimBuilder. Internal — callers reach it via
+// ClaimBuilder.Sign() or via NewClaim(...).WithX().Sign().
 //
 //   - validates type, encoding, content/contenthash exclusion
 //   - rejects derivation/, entity/, relation/* nodes that lack a
@@ -26,17 +47,42 @@ import (
 //     cfg.Contributor (omitted only for the root contribution/contributor
 //     claim, which self-attributes per §4.3)
 //   - sorts edges canonically (by id bytes), computes the node id
-//     as H(canonical(node))
+//     as Sign(H(canonical(node)))
 //
 // The returned Claim is immutable.
-func NewClaim(cfg ClaimConfig) (Claim, error) {
+func buildClaim(cfg ClaimBuilder) (Claim, error) {
+	// Type takes precedence over the split TypeClass + TypeSub form
+	// — see ClaimConfig docs.
+	if cfg.Type != "" {
+		class, sub, err := splitType(cfg.Type)
+		if err != nil {
+			return nil, fmt.Errorf("ranke.NewClaim: Type: %w", err)
+		}
+		cfg.TypeClass = NodeClass(class)
+		cfg.TypeSub = sub
+	}
 	if cfg.TypeClass == "" || cfg.TypeSub == "" {
-		return nil, errors.New("ranke.NewClaim: TypeClass and TypeSub are required")
+		return nil, errors.New("ranke.NewClaim: Type (or TypeClass + TypeSub) is required")
 	}
 	if !validNodeClass(cfg.TypeClass) {
 		return nil, fmt.Errorf("ranke.NewClaim: unknown NodeClass %q", cfg.TypeClass)
 	}
-	if cfg.EncodingClass != "" && !validEncodingClass(cfg.EncodingClass) {
+	if cfg.Encoding != "" {
+		class, sub, err := splitType(cfg.Encoding)
+		if err != nil {
+			return nil, fmt.Errorf("ranke.NewClaim: Encoding: %w", err)
+		}
+		cfg.EncodingClass = EncodingClass(class)
+		cfg.EncodingSub = sub
+	}
+	// Encoding is required per §4.1 — fall back to text/plain so
+	// scenarios don't have to spell it out on every structural
+	// claim. Explicit Encoding always wins.
+	if cfg.EncodingClass == "" {
+		cfg.EncodingClass = encText
+		cfg.EncodingSub = "plain"
+	}
+	if !validEncodingClass(cfg.EncodingClass) {
 		return nil, fmt.Errorf("ranke.NewClaim: unknown EncodingClass %q", cfg.EncodingClass)
 	}
 	if cfg.Content != nil && cfg.ContentHash != nil {
@@ -95,21 +141,25 @@ func NewClaim(cfg ClaimConfig) (Claim, error) {
 		typeSub:       cfg.TypeSub,
 		encodingClass: cfg.EncodingClass,
 		encodingSub:   cfg.EncodingSub,
+		title:         cfg.Title,
 		createdAt:     createdAt,
 		fields:        cloneFields(cfg.Fields),
 		content:       cfg.Content,
 		pubkey:        cfg.Pubkey,
 	}
 
-	// Resolve content hash.
+	// Resolve content hash + size. Size always tracks len(content); if
+	// only ContentHash was supplied (no Content), size is 0.
 	if cfg.ContentHash != nil {
 		n.contentHash = cfg.ContentHash
+		n.size = uint64(len(cfg.Content))
 	} else if cfg.Content != nil {
 		ch, err := hashContent(cfg.Content)
 		if err != nil {
 			return nil, fmt.Errorf("ranke.NewClaim: content hash: %w", err)
 		}
 		n.contentHash = ch
+		n.size = uint64(len(cfg.Content))
 	}
 
 	// Edge ids on the node, in sorted order.
@@ -214,11 +264,24 @@ func (c *claim) IsContributor() bool {
 	return c.node.typeClass == NodeContribution && c.node.typeSub == "contributor"
 }
 
-func (c *claim) AsContributor() (Contributor, error) {
+func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) {
 	if !c.IsContributor() {
 		return nil, fmt.Errorf("ranke.Claim.AsContributor: claim has type %s, not contribution/contributor", c.node.Type())
 	}
-	return c, nil
+	if len(signingKey) == 0 || signingKey[0] == nil {
+		return c, nil // unwrapped — caller didn't ask to bind a key
+	}
+	if len(c.node.pubkey) == 0 {
+		return nil, errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
+	}
+	keyPubkey, err := EncodePublicKey(signingKey[0].Public())
+	if err != nil {
+		return nil, fmt.Errorf("ranke.Claim.AsContributor: encode signing key pubkey: %w", err)
+	}
+	if !bytes.Equal(keyPubkey, c.node.pubkey) {
+		return nil, errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
+	}
+	return WithSigningKey(c, signingKey[0]), nil
 }
 
 // SigningKey on a bare *claim is always nil — the claim type is the
@@ -226,14 +289,83 @@ func (c *claim) AsContributor() (Contributor, error) {
 // WithSigningKey for a session-scoped signer.
 func (c *claim) SigningKey() crypto.Signer { return nil }
 
+// --- ClaimBuilder fluent API ---
+
+// Sign finalizes a ClaimBuilder into an immutable Claim. Optional
+// variadic key overrides ClaimBuilder.SigningKey; both are
+// alternatives to letting Sign pull the key from the Contributor's
+// wrapped signer (see WithSigningKey). Empty resolved pubkey
+// collapses to identity Sign per §5.7.
+func (b ClaimBuilder) Sign(signingKey ...crypto.Signer) (Claim, error) {
+	if len(signingKey) > 0 && signingKey[0] != nil {
+		b.SigningKey = signingKey[0]
+	}
+	return buildClaim(b)
+}
+
+// --- ClaimBuilder chained setters ---
+//
+// Each returns the builder by value so calls chain cleanly. Use
+// the struct literal form when you want every field at once;
+// chain when you want to layer optionals onto NewBuilder.
+
+func (b ClaimBuilder) WithType(t string) ClaimBuilder             { b.Type = t; return b }
+func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder         { b.Encoding = e; return b }
+func (b ClaimBuilder) WithTitle(t string) ClaimBuilder            { b.Title = t; return b }
+func (b ClaimBuilder) WithContent(c []byte) ClaimBuilder          { b.Content = c; return b }
+func (b ClaimBuilder) WithContentHash(h Id) ClaimBuilder          { b.ContentHash = h; return b }
+func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder     { b.CreatedAt = t; return b }
+func (b ClaimBuilder) WithContributor(c Contributor) ClaimBuilder { b.Contributor = c; return b }
+func (b ClaimBuilder) WithPubkey(p []byte) ClaimBuilder           { b.Pubkey = p; return b }
+func (b ClaimBuilder) WithSigningKey(k crypto.Signer) ClaimBuilder { b.SigningKey = k; return b }
+
+// WithEdges appends the given edges to the builder's Edges slice.
+// Pass once with all edges, or chain multiple WithEdges calls.
+func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
+	b.Edges = append(b.Edges, edges...)
+	return b
+}
+
+// WithField sets one additional implementation-defined field on
+// the node (§4.1). Copies the existing Fields map so the receiver
+// stays unchanged.
+func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
+	f := make(map[string]string, len(b.Fields)+1)
+	for k, v := range b.Fields {
+		f[k] = v
+	}
+	f[key] = value
+	b.Fields = f
+	return b
+}
+
 // --- helpers ---
+
+// splitType parses a "class/sub" string into its two segments. Both
+// parts must be non-empty; the separator is a single "/".
+func splitType(s string) (class, sub string, err error) {
+	if s == "" {
+		return "", "", errors.New("empty")
+	}
+	slash := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' {
+			slash = i
+			break
+		}
+	}
+	if slash <= 0 || slash == len(s)-1 {
+		return "", "", fmt.Errorf("expected \"class/sub\", got %q", s)
+	}
+	return s[:slash], s[slash+1:], nil
+}
 
 // resolveSigningPubkey returns the multikey-encoded pubkey whose
 // matching private key must produce this claim's signature. For the
 // initial (root) contributor, the pubkey is set on this very claim
 // via cfg.Pubkey. For every other claim, the pubkey is read from
 // the contributor referenced by cfg.Contributor.
-func resolveSigningPubkey(isRootContributor bool, cfg ClaimConfig) ([]byte, error) {
+func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, error) {
 	if isRootContributor {
 		return cfg.Pubkey, nil
 	}
@@ -318,7 +450,9 @@ func (s *signedContributor) Node() Node                          { return s.cont
 func (s *signedContributor) Edges(filters ...Filter) []Edge      { return s.contributor.Edges(filters...) }
 func (s *signedContributor) Contributor() Contributor            { return s.contributor.Contributor() }
 func (s *signedContributor) IsContributor() bool                 { return s.contributor.IsContributor() }
-func (s *signedContributor) AsContributor() (Contributor, error) { return s.contributor.AsContributor() }
+func (s *signedContributor) AsContributor(key ...crypto.Signer) (Contributor, error) {
+	return s.contributor.AsContributor(key...)
+}
 func (s *signedContributor) ID() Id                              { return s.contributor.ID() }
 func (s *signedContributor) SigningKey() crypto.Signer           { return s.key }
 

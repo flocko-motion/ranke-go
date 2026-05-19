@@ -7,8 +7,9 @@
 //
 //	ranke info <dir>            — high-level summary (B_h, branches)
 //	ranke branches <dir>        — list every branch and its head id
-//	ranke show <dir> <id>       — decode and print one claim
-//	ranke validate <dir> <head> — fetch the graph rooted at head and run Validate
+//	ranke show <file>           — heuristically decode any archive file (claim or content)
+//	ranke show <dir> <id>       — resolve a claim by id via the archive
+//	ranke validate <dir>        — verify every branch end-to-end (§5.10)
 package main
 
 import (
@@ -50,8 +51,9 @@ func usage() {
 usage:
   ranke info     <dir>
   ranke branches <dir>
+  ranke show     <file>
   ranke show     <dir> <id>
-  ranke validate <dir> <head>
+  ranke validate <dir>
 
 dir is a filesystem-backed archive (see NewFsArchive). Read-only.`)
 }
@@ -118,32 +120,41 @@ func cmdBranches(args []string) error {
 
 // --- show ---
 //
-// Accepts either:
-//
-//	ranke show <dir> <id>          load via the archive (full wiring)
-//	ranke show <file-path>         decode the file directly
-//
-// The single-arg form is for the common case of `ls claims/` then
-// pointing at a file — e.g.
-//   ranke show /tmp/ranke-go-test/claims/bciq...
-// We derive (dir, id) from the path: the parent of "claims" is the
-// archive dir, the basename is the id.
+//	ranke show <file>        heuristic: claim if CBOR-decodes, else content
+//	ranke show <dir> <id>    open the archive, resolve id with full wiring
 func cmdShow(args []string) error {
 	switch len(args) {
 	case 1:
-		dir, id, ok := splitClaimPath(args[0])
-		if !ok {
-			return fmt.Errorf("show: path %q does not look like <dir>/claims/<id>; use 2-arg form: ranke show <dir> <id>", args[0])
-		}
-		return showAt(dir, id)
+		return showFile(args[0])
 	case 2:
-		return showAt(args[0], args[1])
+		return showInArchive(args[0], args[1])
 	default:
-		return fmt.Errorf("show: usage: ranke show <file-path>  OR  ranke show <dir> <id>")
+		return fmt.Errorf("show: usage: ranke show <file>  OR  ranke show <dir> <id>")
 	}
 }
 
-func showAt(dir, idStr string) error {
+func showFile(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("show: %w", err)
+	}
+	idStr := filepath.Base(path)
+	id, idErr := ranke.ParseId(idStr)
+	if idErr == nil {
+		if c, err := ranke.DecodeClaim(id, b); err == nil {
+			fmt.Printf("file:  %s\n", path)
+			fmt.Printf("kind:  claim (%d bytes)\n\n", len(b))
+			printClaim(c)
+			return nil
+		}
+	}
+	fmt.Printf("file:  %s\n", path)
+	fmt.Printf("kind:  content (%d bytes)\n\n", len(b))
+	fmt.Println(previewBytes(b))
+	return nil
+}
+
+func showInArchive(dir, idStr string) error {
 	a, err := openArchive(dir)
 	if err != nil {
 		return err
@@ -156,7 +167,7 @@ func showAt(dir, idStr string) error {
 	if err != nil {
 		return fmt.Errorf("show: fetch claim: %w", err)
 	}
-	c, ok := g.GetClaim(id)
+	c, ok := g.Get(id)
 	if !ok {
 		return fmt.Errorf("show: claim %s not in graph", id.String())
 	}
@@ -164,41 +175,51 @@ func showAt(dir, idStr string) error {
 	return nil
 }
 
-// splitClaimPath turns ".../foo/claims/bciq..." into ("foo", "bciq...", true).
-// Returns false if path doesn't have a "claims" parent.
-func splitClaimPath(p string) (dir, id string, ok bool) {
-	dir2, base := filepath.Split(p)
-	dir2 = strings.TrimRight(dir2, string(filepath.Separator))
-	parent, sub := filepath.Split(dir2)
-	parent = strings.TrimRight(parent, string(filepath.Separator))
-	if sub != "claims" {
-		return "", "", false
-	}
-	return parent, base, true
-}
-
 // --- validate ---
 
 func cmdValidate(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("validate: usage: ranke validate <dir> <head>")
+	if len(args) != 1 {
+		return fmt.Errorf("validate: usage: ranke validate <dir>")
 	}
 	a, err := openArchive(args[0])
 	if err != nil {
 		return err
 	}
-	id, err := ranke.ParseId(args[1])
-	if err != nil {
-		return fmt.Errorf("validate: parse head: %w", err)
+	branches := a.Branches()
+	if len(branches) == 0 {
+		return fmt.Errorf("validate: archive has no branches")
 	}
-	g, err := a.GetGraph(id)
-	if err != nil {
-		return fmt.Errorf("validate: fetch graph: %w", err)
+	totalFailed := 0
+	for _, b := range branches {
+		fmt.Printf("branch %s → %s\n", b.Name(), b.Latest().Head().String())
+		g, err := a.GetGraph(b.Latest().Head())
+		if err != nil {
+			fmt.Printf("  ✗ load graph: %v\n", err)
+			totalFailed++
+			continue
+		}
+		count, failed := 0, 0
+		err = g.Validate(func(c ranke.Claim, depth int, e error) {
+			count++
+			indent := strings.Repeat("  ", depth+1)
+			mark := "✓"
+			if e != nil {
+				mark = "✗"
+				failed++
+			}
+			fmt.Printf("%s%s %s  %s\n", indent, mark, c.Node().Type(), shortId(c.ID()))
+			if e != nil {
+				fmt.Printf("%s     %v\n", indent, e)
+			}
+		})
+		fmt.Printf("  %d/%d claims valid\n", count-failed, count)
+		if err != nil {
+			totalFailed++
+		}
 	}
-	if err := g.Validate(); err != nil {
-		return fmt.Errorf("validate: %w", err)
+	if totalFailed > 0 {
+		return fmt.Errorf("validate: %d branch(es) failed", totalFailed)
 	}
-	fmt.Printf("ok — %s validates\n", shortId(id))
 	return nil
 }
 

@@ -2,6 +2,7 @@ package ranke
 
 import (
 	"errors"
+	"io"
 	"fmt"
 	"time"
 )
@@ -18,7 +19,27 @@ import (
 type archiveBackend interface {
 	loadClaim(idStr string) (*claim, error)
 	saveClaim(c *claim) error
-	loadContent(idStr string) ([]byte, error)
+	// getContent fetches and verifies the content addressed by
+	// expectedHash, bounded to expectedSize bytes (both signed into
+	// the referencing claim). Returns (bytes, nil) only if both
+	// hash and size match. Use this when the caller actually needs
+	// the bytes (e.g. to display or process them).
+	getContent(expectedHash Id, expectedSize uint64) ([]byte, error)
+	// streamContent returns a Reader that yields the content
+	// incrementally and verifies as it goes. The reader hashes every
+	// byte read from the source, and the Read call that would
+	// deliver the final byte first probes the source for overflow
+	// and finalizes the hash check — only releasing those last
+	// bytes if both pass. On failure the caller's final Read
+	// returns an error instead of io.EOF, so a consumer can never
+	// receive a clean termination on corrupted content (they will
+	// have received N-1 blocks; the trailing error is the signal
+	// to discard).
+	//
+	// Use streamContent for large content where buffering the
+	// whole thing is wasteful. Verify-only is the same primitive:
+	// io.Copy(io.Discard, stream) — Copy's error is the verdict.
+	streamContent(expectedHash Id, expectedSize uint64) (io.ReadCloser, error)
 	saveContent(idStr string, b []byte) error
 	saveBranchesHead(id Id) error // writes B_h
 }
@@ -66,7 +87,7 @@ func (a *archive) lookupClaim(id Id) (*claim, error) {
 // Backed by fetchContent (cache + backend).
 func (a *archive) loadClaimContent(c *claim) error {
 	if c.node.contentHash != nil && c.node.content == nil {
-		b, err := a.fetchContent(c.node.contentHash)
+		b, err := a.fetchContent(c.node.contentHash, c.node.size)
 		if err != nil {
 			return fmt.Errorf("node content %s: %w", c.node.contentHash.String(), err)
 		}
@@ -78,8 +99,9 @@ func (a *archive) loadClaimContent(c *claim) error {
 }
 
 // fetchContent returns content bytes for id, consulting the cache
-// then the backend. Caches successful loads.
-func (a *archive) fetchContent(id Id) ([]byte, error) {
+// then the backend. The backend verifies (hash, size) before
+// returning — cached entries were verified on first load.
+func (a *archive) fetchContent(id Id, expected uint64) ([]byte, error) {
 	k := id.String()
 	if b, ok := a.content[k]; ok {
 		return b, nil
@@ -87,7 +109,7 @@ func (a *archive) fetchContent(id Id) ([]byte, error) {
 	if a.backend == nil {
 		return nil, errNotFound
 	}
-	b, err := a.backend.loadContent(k)
+	b, err := a.backend.getContent(id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +301,18 @@ func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error
 	}, nil
 }
 
+func (a *archive) VerifyBranch(name string) error {
+	b, err := a.GetBranch(name)
+	if err != nil {
+		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
+	}
+	g, err := a.GetGraph(b.Latest().Head())
+	if err != nil {
+		return fmt.Errorf("ranke.Archive.VerifyBranch: GetGraph %s: %w", b.Latest().Head().String(), err)
+	}
+	return g.Validate()
+}
+
 func (a *archive) Branches() []Branch {
 	table, err := a.resolveBranchesTable()
 	if err != nil || table == nil {
@@ -349,13 +383,12 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor, creat
 		headEdges = append(headEdges, e)
 	}
 	at := firstNonZero(createdAt)
-	headClaim, err := NewClaim(ClaimConfig{
-		TypeClass:   NodeContribution,
-		TypeSub:     "head",
+	headClaim, err := ClaimBuilder{
+		Type:        NodeHead,
 		Contributor: contributor,
 		Edges:       headEdges,
 		CreatedAt:   at,
-	})
+	}.Sign()
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build head claim: %w", err)
 	}
@@ -418,13 +451,12 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor, creat
 		tableEdges = append(tableEdges, chain)
 	}
 
-	tableClaim, err := NewClaim(ClaimConfig{
-		TypeClass:   NodeContribution,
-		TypeSub:     "branches",
+	tableClaim, err := ClaimBuilder{
+		Type:        NodeBranches,
 		Contributor: contributor,
 		Edges:       tableEdges,
 		CreatedAt:   at,
-	})
+	}.Sign()
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build branches claim: %w", err)
 	}

@@ -17,8 +17,17 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	if cfg.Reference == nil {
 		return nil, errors.New("ranke.NewEdge: Reference is required")
 	}
+	// Type takes precedence over the split form — see EdgeConfig docs.
+	if cfg.Type != "" {
+		class, sub, err := splitType(cfg.Type)
+		if err != nil {
+			return nil, fmt.Errorf("ranke.NewEdge: Type: %w", err)
+		}
+		cfg.TypeClass = EdgeClass(class)
+		cfg.TypeSub = sub
+	}
 	if cfg.TypeClass == "" || cfg.TypeSub == "" {
-		return nil, errors.New("ranke.NewEdge: TypeClass and TypeSub are required")
+		return nil, errors.New("ranke.NewEdge: Type (or TypeClass + TypeSub) is required")
 	}
 	if !validEdgeClass(cfg.TypeClass) {
 		return nil, fmt.Errorf("ranke.NewEdge: unknown EdgeClass %q", cfg.TypeClass)
@@ -110,9 +119,9 @@ func validNodeClass(c NodeClass) bool {
 
 func validEncodingClass(c EncodingClass) bool {
 	switch c {
-	case EncodingApplication, EncodingAudio, EncodingExample, EncodingFont,
-		EncodingImage, EncodingMessage, EncodingModel, EncodingMultipart,
-		EncodingText, EncodingVideo:
+	case encApplication, encAudio, encExample, encFont,
+		encImage, encMessage, encModel, encMultipart,
+		encText, encVideo:
 		return true
 	}
 	return false

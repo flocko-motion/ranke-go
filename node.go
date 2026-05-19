@@ -26,9 +26,10 @@ func (n *node) Encoding() string {
 func (n *node) EncodingClass() EncodingClass { return n.encodingClass }
 func (n *node) EncodingSub() string          { return n.encodingSub }
 
-func (n *node) ContentHash() Id    { return n.contentHash }
+func (n *node) ContentHash() Id      { return n.contentHash }
+func (n *node) Size() uint64         { return n.size }
 func (n *node) CreatedAt() time.Time { return n.createdAt }
-func (n *node) ID() Id             { return n.id }
+func (n *node) ID() Id               { return n.id }
 
 func (n *node) Edges() []Id {
 	out := make([]Id, len(n.edges))
@@ -76,3 +77,5 @@ func (n *node) Pubkey() []byte {
 	copy(out, n.pubkey)
 	return out
 }
+
+func (n *node) Title() string { return n.title }

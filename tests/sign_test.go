@@ -22,15 +22,11 @@ func signedContributor(t *testing.T) (ranke.Contributor, ed25519.PrivateKey) {
 	require.NoError(t, err)
 	pubkey, err := ranke.EncodePublicKey(priv.Public())
 	require.NoError(t, err)
-	c, err := ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeContribution,
-		TypeSub:       "contributor",
-		EncodingClass: ranke.EncodingText,
-		EncodingSub:   "plain",
-		Content:       []byte("test-contributor"),
-		Pubkey:        pubkey,
-		SigningKey:    priv,
-	})
+	c, err := ranke.ClaimBuilder{
+		Type:    ranke.NodeContributor,
+		Content: []byte("test-contributor"),
+		Pubkey:  pubkey,
+	}.Sign(priv)
 	require.NoError(t, err)
 	view, err := c.AsContributor()
 	require.NoError(t, err)
@@ -43,20 +39,16 @@ func signedContributor(t *testing.T) (ranke.Contributor, ed25519.PrivateKey) {
 func TestSignedClaimVerifies(t *testing.T) {
 	alice, alicePriv := signedContributor(t)
 
-	source, err := ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeSource,
-		TypeSub:       "email",
-		EncodingClass: ranke.EncodingMessage,
-		EncodingSub:   "rfc822",
-		Content:       []byte("From: alice\r\n\r\nhello"),
-		Contributor:   alice,
-		SigningKey:    alicePriv,
-	})
+	source, err := ranke.ClaimBuilder{
+		Type:        ranke.TypeSource("email"),
+		Encoding:    ranke.EncodingMessage("rfc822"),
+		Content:     []byte("From: alice\r\n\r\nhello"),
+		Contributor: alice,
+	}.Sign(alicePriv)
 	require.NoError(t, err)
 
 	g := ranke.NewGraph(alice)
-	_, err = g.AddClaim(source)
-	require.NoError(t, err)
+	require.NoError(t, g.Add(source))
 
 	require.NoError(t, g.Validate(), "signed graph must validate")
 }
@@ -65,26 +57,23 @@ func TestSignedClaimVerifies(t *testing.T) {
 // path: contributor with no pubkey, no SigningKey, id = H(S(v)),
 // verification reduces to a hash check.
 func TestIdentitySignClaimVerifies(t *testing.T) {
-	alice := mkContributor(t, "alice@example.com") // unsigned helper
+	alice := contributor(t, "alice@example.com") // unsigned helper
 
-	source, err := ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeSource,
-		TypeSub:       "email",
-		EncodingClass: ranke.EncodingMessage,
-		EncodingSub:   "rfc822",
-		Content:       []byte("From: alice\r\n\r\nhello"),
-		Contributor:   alice,
-	})
+	source, err := ranke.ClaimBuilder{
+		Type:        ranke.TypeSource("email"),
+		Encoding:    ranke.EncodingMessage("rfc822"),
+		Content:     []byte("From: alice\r\n\r\nhello"),
+		Contributor: alice,
+	}.Sign()
 	require.NoError(t, err)
 
 	g := ranke.NewGraph(alice)
-	_, err = g.AddClaim(source)
-	require.NoError(t, err)
+	require.NoError(t, g.Add(source))
 
 	require.NoError(t, g.Validate(), "identity-Sign graph must validate")
 }
 
-// TestSigningKeyMustMatchPubkey confirms NewClaim rejects a signer
+// TestSigningKeyMustMatchPubkey confirms Sign rejects a signer
 // whose public key doesn't match the resolved contributor pubkey.
 // Without this check, Bob's key could sign a claim attributed to
 // Alice, undermining authenticity.
@@ -93,15 +82,12 @@ func TestSigningKeyMustMatchPubkey(t *testing.T) {
 	_, bobPriv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
-	_, err = ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeSource,
-		TypeSub:       "email",
-		EncodingClass: ranke.EncodingMessage,
-		EncodingSub:   "rfc822",
-		Content:       []byte("hello"),
-		Contributor:   alice,
-		SigningKey:    bobPriv, // Bob's key, Alice's contributor
-	})
+	_, err = ranke.ClaimBuilder{
+		Type:        ranke.TypeSource("email"),
+		Encoding:    ranke.EncodingMessage("rfc822"),
+		Content:     []byte("hello"),
+		Contributor: alice,
+	}.Sign(bobPriv) // Bob's key, Alice's contributor
 	require.Error(t, err, "signer/contributor mismatch must be rejected")
 }
 
@@ -114,15 +100,12 @@ func TestSignedContributorRequiresSigner(t *testing.T) {
 	pubkey, err := ranke.EncodePublicKey(priv.Public())
 	require.NoError(t, err)
 
-	_, err = ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeContribution,
-		TypeSub:       "contributor",
-		EncodingClass: ranke.EncodingText,
-		EncodingSub:   "plain",
-		Content:       []byte("alice"),
-		Pubkey:        pubkey,
-		// SigningKey missing on purpose
-	})
+	_, err = ranke.ClaimBuilder{
+		Type:    ranke.NodeContributor,
+		Content: []byte("alice"),
+		Pubkey:  pubkey,
+		// no Sign(priv) — signing key missing on purpose
+	}.Sign()
 	require.Error(t, err, "pubkey-without-signer must be rejected")
 }
 
@@ -132,45 +115,28 @@ func TestSignedContributorRequiresSigner(t *testing.T) {
 // in a single recomputation.
 func TestTamperingDetected(t *testing.T) {
 	alice, alicePriv := signedContributor(t)
-	source, err := ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeSource,
-		TypeSub:       "email",
-		EncodingClass: ranke.EncodingMessage,
-		EncodingSub:   "rfc822",
-		Content:       []byte("From: alice\r\n\r\nhello"),
-		Contributor:   alice,
-		SigningKey:    alicePriv,
-	})
+	source, err := ranke.ClaimBuilder{
+		Type:        ranke.TypeSource("email"),
+		Encoding:    ranke.EncodingMessage("rfc822"),
+		Content:     []byte("From: alice\r\n\r\nhello"),
+		Contributor: alice,
+	}.Sign(alicePriv)
 	require.NoError(t, err)
 
 	g := ranke.NewGraph(alice)
-	_, err = g.AddClaim(source)
-	require.NoError(t, err)
+	require.NoError(t, g.Add(source))
 	require.NoError(t, g.Validate())
 
-	// Mutate the source claim's content in place. The library's
-	// public API doesn't expose mutation, so we round-trip through
-	// the encoding by constructing a *similar* claim with a tweaked
-	// byte but reusing the original id — i.e. forging a claim with
-	// the same id but different content. Validate must catch this
-	// because the recomputed hash won't match the (signed) id.
-	//
-	// We can do this with a low-level surgery: build a new claim with
-	// modified content but copy the original id onto it. Since the
-	// library's id field is unexported, the cleanest test is to
-	// confirm that an honestly-built second claim has a DIFFERENT id
+	// Confirm that an honestly-built second claim has a DIFFERENT id
 	// when content differs by one byte — the inverse of what an
 	// attacker would need to forge.
-	source2, err := ranke.NewClaim(ranke.ClaimConfig{
-		TypeClass:     ranke.NodeSource,
-		TypeSub:       "email",
-		EncodingClass: ranke.EncodingMessage,
-		EncodingSub:   "rfc822",
-		Content:       []byte("From: alice\r\n\r\nhellO"), // last byte differs
-		Contributor:   alice,
-		SigningKey:    alicePriv,
-		CreatedAt:     source.Node().CreatedAt(), // pin timestamp to isolate the content change
-	})
+	source2, err := ranke.ClaimBuilder{
+		Type:        ranke.TypeSource("email"),
+		Encoding:    ranke.EncodingMessage("rfc822"),
+		Content:     []byte("From: alice\r\n\r\nhellO"), // last byte differs
+		Contributor: alice,
+		CreatedAt:   source.Node().CreatedAt(), // pin timestamp to isolate the content change
+	}.Sign(alicePriv)
 	require.NoError(t, err)
 	require.False(t, source.ID().Equal(source2.ID()),
 		"one-byte content change must produce a different id (collision resistance, §5.2)")

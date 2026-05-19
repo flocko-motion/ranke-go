@@ -141,6 +141,11 @@ type Node interface {
 	// The bytes themselves live in implementation-defined storage,
 	// addressed by ContentHash.
 	ContentHash() Id
+	// Size is the byte-length of the content addressed by ContentHash.
+	// 0 when the node has no content. Paired with ContentHash in the
+	// canonical encoding so verifiers detect truncation/extension and
+	// storage layers can know the size without loading the bytes.
+	Size() uint64
 	// Content returns the node's content bytes. Returns (nil, nil)
 	// if the node has no content. The bytes travel with the claim;
 	// no Archive lookup is required.
@@ -178,6 +183,11 @@ type Node interface {
 	// declare a key — i.e. a signed contributor. Empty for every
 	// other claim and for unsigned contributors (identity-Sign case).
 	Pubkey() []byte
+	// Title returns the node's optional short text label, or the
+	// empty string if none is set. Title is omitted from the
+	// canonical encoding when empty, so an unset Title doesn't
+	// affect the claim's id.
+	Title() string
 	// ID is the content-addressed identifier of this node and thus of
 	// the owning claim.
 	ID() Id
@@ -215,7 +225,15 @@ type Claim interface {
 	// AsContributor returns this claim as a Contributor for typed
 	// access. Errors if the claim is not of node type
 	// "contribution/contributor".
-	AsContributor() (Contributor, error)
+	//
+	// If a signing key is supplied, it must match the contributor's
+	// pubkey field — the returned Contributor is then wrapped via
+	// WithSigningKey so subsequent claims attributed to it sign
+	// automatically. A key-vs-pubkey mismatch (or a key on an
+	// unsigned contributor) is returned as an error. Skip the key
+	// for an unwrapped contributor (e.g. for a downstream that just
+	// references it).
+	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
 	// ID is the claim's content-addressed identifier (= Node().ID()).
 	ID() Id
 }
@@ -355,6 +373,14 @@ type Archive interface {
 
 	// Branches returns a snapshot of every branch.
 	Branches() []Branch
+
+	// VerifyBranch fetches the graph rooted at the latest head of
+	// the named branch and runs full integrity + authenticity
+	// verification (§5.10): every claim's id is recomputed from its
+	// canonical bytes, the contributor's pubkey is resolved, and
+	// the signature is checked. Returns the first violation as an
+	// error, or nil if the entire branch closure is intact.
+	VerifyBranch(name string) error
 }
 
 // Branch is a convenience view over a contribution/branch claim.
@@ -437,29 +463,28 @@ type BranchEntry interface {
 // Validation lives here because validation is bounded — Merkle
 // integrity holds across a closure, not over the unenumerable U.
 type Graph interface {
-	// AddClaim inserts a claim into the graph atomically. Every edge
-	// reference must already be reachable in this graph (atomic
-	// creation rule, §4.3). The claim must have at least one edge:
-	// the only no-edge claim a graph may contain is its root, which
-	// was supplied at NewGraph. Adding an already-present claim is
-	// idempotent and returns the same id without error.
-	AddClaim(claim Claim) (Id, error)
+	// Add inserts one or more claims into the graph atomically.
+	// Every edge reference must already be reachable in the graph
+	// at insertion time (atomic creation rule, §4.3). Non-root
+	// claims must have at least one edge — the only no-edge claim a
+	// graph may contain is its root, supplied at NewGraph. Adding
+	// an already-present claim is idempotent. Returns the first
+	// error encountered; claims added before the failing one stay
+	// in the graph.
+	Add(claims ...Claim) error
 
-	// ContainsClaim reports whether this graph contains a claim with
-	// the given id.
+	// Contains reports whether the graph contains a claim with the
+	// given id.
 	//
-	// Note: there is intentionally no untyped Contains(id) and no
-	// ContainsEdge(id). Edges are addressable only through their
-	// parent claim's Edges() method — exposing them by id would
-	// leak the existence of pruned content, since a user could check
-	// whether an edge id is present even when the view they hold
-	// excludes the parent claim. Content is reachable via
-	// ContentHash on the records that name it; pruning visibility
-	// is enforced at that level.
-	ContainsClaim(id Id) bool
+	// Note: edges are addressable only through their parent claim's
+	// Edges() method — exposing them by id would leak the existence
+	// of pruned content. Content is reachable via ContentHash on
+	// the records that name it; pruning visibility is enforced at
+	// that level.
+	Contains(id Id) bool
 
-	// GetClaim retrieves a claim from the graph by id.
-	GetClaim(id Id) (Claim, bool)
+	// Get retrieves a claim from the graph by id.
+	Get(id Id) (Claim, bool)
 
 	// Heads returns the open heads of this graph: claims in the
 	// graph that no other claim in the graph references (§4.5). A
@@ -474,28 +499,29 @@ type Graph interface {
 
 	// Consolidate builds a contribution/head claim that references
 	// every open head of this graph, attributed to the given
-	// contributor (§4.5). Returns the constructed claim; the caller
-	// adds it to a graph via AddClaim, after which the closure is
-	// addressable by the new claim's id (the unique open head).
+	// contributor (§4.5), adds it to the graph, and returns it.
+	// After this call the graph is single-headed at the new claim's
+	// id.
 	//
 	// Returns an error if the graph is empty or already consolidated.
-	// The graph itself is unchanged by Consolidate — only AddClaim
-	// changes graph contents.
 	// createdAt is optional. Zero / omitted → time.Now().UTC().
 	// Non-zero → stamped onto the consolidation claim. Must satisfy
 	// monotonicity (§4.3): >= the createdAt of every open head.
 	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
 
-	// Validate runs a full strict integrity check of the graph.
+	// Validate recursively walks the closure from every open head
+	// and runs the per-claim integrity + authenticity check (§5.10)
+	// on each: edges resolve, Merkle hash matches, contributor's
+	// signature verifies. Always walks the full closure (so verbose
+	// callers see every claim) and returns the first error
+	// encountered, or nil if all valid.
 	//
-	// Recomputes every claim's id from its canonical serialization
-	// and compares against the stored id (Merkle integrity, §5.2);
-	// verifies every edge reference resolves to a claim in the
-	// graph; checks that every non-root claim carries exactly one
-	// contribution/contributor edge (§4.3); checks class/subtype
-	// well-formedness and node-edges sort order. Returns the first
-	// violation as an error, or nil if intact.
-	Validate() error
+	// If report callbacks are supplied, each is called once per
+	// visited claim with its recursion depth and check result —
+	// nil err = valid. Useful for tooling that wants to show a
+	// tree-walk of the validation (the CLI's validate command,
+	// scenario reload-and-verify).
+	Validate(report ...func(c Claim, depth int, err error)) error
 
 	// ValidateWithExceptions is Validate, but skips integrity checks
 	// for claims whose ids appear in skip. Useful when a subset is

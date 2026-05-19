@@ -50,17 +50,87 @@ const (
 // portion remains open.
 type EncodingClass string
 
+// Internal typed constants used by validEncodingClass and by the
+// default-fill in buildClaim. Callers should construct full
+// encoding strings via the EncodingX functions below (e.g.
+// EncodingText("plain")) rather than reaching for these.
 const (
-	EncodingApplication EncodingClass = "application"
-	EncodingAudio       EncodingClass = "audio"
-	EncodingExample     EncodingClass = "example"
-	EncodingFont        EncodingClass = "font"
-	EncodingImage       EncodingClass = "image"
-	EncodingMessage     EncodingClass = "message"
-	EncodingModel       EncodingClass = "model"
-	EncodingMultipart   EncodingClass = "multipart"
-	EncodingText        EncodingClass = "text"
-	EncodingVideo       EncodingClass = "video"
+	encApplication EncodingClass = "application"
+	encAudio       EncodingClass = "audio"
+	encExample     EncodingClass = "example"
+	encFont        EncodingClass = "font"
+	encImage       EncodingClass = "image"
+	encMessage     EncodingClass = "message"
+	encModel       EncodingClass = "model"
+	encMultipart   EncodingClass = "multipart"
+	encText        EncodingClass = "text"
+	encVideo       EncodingClass = "video"
+)
+
+// Encoding prefix functions for the ten RFC 6838 top-level MIME
+// classes. Pass the subtype, get the full media type string:
+//
+//	Encoding: ranke.EncodingText("plain")      // "text/plain"
+//	Encoding: ranke.EncodingMessage("rfc822")  // "message/rfc822"
+//	Encoding: ranke.EncodingImage("png")       // "image/png"
+//
+// Each is a one-line wrapper around encType, so the class-name
+// strings live in exactly one place (the encX constants above).
+func EncodingApplication(sub string) string { return encType(encApplication, sub) }
+func EncodingAudio(sub string) string       { return encType(encAudio, sub) }
+func EncodingExample(sub string) string     { return encType(encExample, sub) }
+func EncodingFont(sub string) string        { return encType(encFont, sub) }
+func EncodingImage(sub string) string       { return encType(encImage, sub) }
+func EncodingMessage(sub string) string     { return encType(encMessage, sub) }
+func EncodingModel(sub string) string       { return encType(encModel, sub) }
+func EncodingMultipart(sub string) string   { return encType(encMultipart, sub) }
+func EncodingText(sub string) string        { return encType(encText, sub) }
+func EncodingVideo(sub string) string       { return encType(encVideo, sub) }
+
+// encType joins an encoding class and subtype with "/" — the
+// single source of truth for MIME-type assembly.
+func encType(class EncodingClass, sub string) string { return string(class) + "/" + sub }
+
+// Type prefix functions for the four open-vocabulary classes
+// (paper §4.8). Pass the subtype, get back the full "class/sub":
+//
+//	Type: ranke.TypeSource("email")     // "source/email"
+//	Type: ranke.TypeRelation("likes")   // "relation/likes"
+//
+// For the closed contribution/* set, use the full string constants
+// (NodeContributor, NodeHead, ...) below — there's no open subtype
+// to fill in.
+//
+// Each is a one-line wrapper around nodeType, so the class-name
+// strings live in exactly one place (the NodeX / EdgeX constants).
+func TypeSource(sub string) string     { return nodeType(NodeSource, sub) }
+func TypeDerivation(sub string) string { return nodeType(NodeDerivation, sub) }
+func TypeEntity(sub string) string     { return nodeType(NodeEntity, sub) }
+func TypeRelation(sub string) string   { return nodeType(NodeRelation, sub) }
+
+// nodeType joins a node class and subtype with "/". Shared by the
+// TypeX functions above and used to derive the closed-vocabulary
+// contribution/* constants below.
+func nodeType(class NodeClass, sub string) string { return string(class) + "/" + sub }
+
+// Full "class/sub" type strings for the contribution/* claims and
+// edges defined by the ADT (paper §Type Vocabulary). Use these as
+// the value of ClaimBuilder.Type or EdgeConfig.Type. Constructed
+// from the NodeContribution / EdgeContribution class constants so
+// the prefix string lives in exactly one place.
+const (
+	// Node claim types (closed contribution/* set).
+	NodeContributor = string(NodeContribution) + "/contributor"
+	NodeHead        = string(NodeContribution) + "/head"
+	NodeBranches    = string(NodeContribution) + "/branches"
+
+	// Edge types (closed contribution/* set). Branch and Prune are
+	// edge-only — they have no claim counterpart.
+	EdgeContributor = string(EdgeContribution) + "/contributor"
+	EdgeHead        = string(EdgeContribution) + "/head"
+	EdgeBranches    = string(EdgeContribution) + "/branches"
+	EdgeBranch      = string(EdgeContribution) + "/branch"
+	EdgePrune       = string(EdgeContribution) + "/prune"
 )
 
 // RelationDirection tags an entity's role on a relation/* edge (§4.7).
@@ -107,16 +177,34 @@ const (
 // Edges holds the additional edges (provenance, relation, structural)
 // for the claim. The contribution/contributor edge is added by
 // NewClaim and need not be supplied.
-type ClaimConfig struct {
-	// TypeClass is the closed-vocabulary node class (§4.8). Required.
+// ClaimBuilder was previously named ClaimConfig. Kept as the data
+// type for ClaimBuilder{...}.Sign() and for NewClaim's chained
+// setter style. See claim.go for Sign + With* methods.
+type ClaimBuilder struct {
+	// Type is the full "class/sub" string, e.g. "contribution/contributor",
+	// "source/email", "entity/person". Use one of the Node* constants
+	// for the closed contribution/* vocabulary. If set, NewClaim splits
+	// on "/" and validates the class — takes precedence over the split
+	// TypeClass + TypeSub fields below.
+	Type string
+	// TypeClass / TypeSub: the split form. Use Type instead for new
+	// code; these remain valid for callers preferring the typed enum.
 	TypeClass NodeClass
-	// TypeSub is the open-vocabulary subtype, e.g. "email", "contributor".
-	// Required.
-	TypeSub string
-	// EncodingClass is the closed-vocabulary MIME top-level type (RFC 6838).
+	TypeSub   string
+	// Encoding is the full MIME media type, e.g. "text/plain",
+	// "message/rfc822". Use one of the Encoding* constants or pass any
+	// valid MIME string. Takes precedence over EncodingClass + EncodingSub.
+	Encoding string
+	// EncodingClass / EncodingSub: the split form. Optional.
 	EncodingClass EncodingClass
-	// EncodingSub is the open-vocabulary subtype, e.g. "plain", "rfc822".
-	EncodingSub string
+	EncodingSub   string
+	// Title is an optional short text label for the claim. Content
+	// can be binary or very long; Title gives every claim a
+	// human-readable handle for tools and UIs. CBOR-encoded with
+	// omitempty, so leaving it unset produces byte-identical
+	// claims to a Title-unaware impl — it is an offer, not a
+	// schema change.
+	Title string
 	// Content and ContentHash are mutually exclusive: set Content
 	// to have NewClaim hash the bytes, or set ContentHash directly
 	// when the content lives outside the graph.
@@ -145,14 +233,13 @@ type ClaimConfig struct {
 	// EncodePublicKey to produce the multikey-encoded form from a
 	// Go crypto.PublicKey.
 	Pubkey []byte
-	// SigningKey is the private key used to sign this claim's id —
-	// matching the pubkey resolved from the contributor (or from
-	// this claim's own Pubkey field for the initial contributor).
-	// Nil signing key + empty resolved pubkey = identity Sign:
-	// id(v) = H(S(v)). Mismatch (signer set but no pubkey, or
-	// pubkey set but no signer) is rejected at NewClaim time.
+	// SigningKey is the private key used to sign this claim's id.
+	// Optional alternative to passing the key as Sign's argument
+	// (or pre-bundling it via WithSigningKey on the contributor).
+	// Nil + empty resolved pubkey = identity Sign per §5.7.
 	SigningKey crypto.Signer
 }
+
 
 // EdgeConfig is the data-only input to NewEdge.
 //
@@ -165,11 +252,13 @@ type EdgeConfig struct {
 	// Reference is the id of the older claim this edge points at.
 	// Required.
 	Reference Id
-	// TypeClass is the closed-vocabulary edge class (§4.8). Required.
+	// Type is the full "class/sub" string, e.g. "contribution/head",
+	// "derivation/source". Takes precedence over the split form below.
+	Type string
+	// TypeClass / TypeSub: the split form. Use Type instead for new
+	// code; these remain valid for callers preferring the typed enum.
 	TypeClass EdgeClass
-	// TypeSub is the open-vocabulary subtype, e.g. "head", "branch".
-	// Required.
-	TypeSub string
+	TypeSub   string
 	// Content is the edge's inline content. Empty if the edge
 	// carries no content.
 	Content []byte
@@ -213,8 +302,10 @@ type node struct {
 	typeSub       string
 	encodingClass EncodingClass
 	encodingSub   string
+	title         string // optional short text label (§4.1 extension); empty = omitted from CBOR
 	contentHash   Id     // nil when no content
 	content       []byte // raw content bytes, kept with the node
+	size          uint64 // size in bytes of the content (= len(content)); paired with contentHash to defend against truncation/extension
 	createdAt     time.Time
 	edges         []Id              // edge ids, sorted canonically
 	fields        map[string]string // additional implementation-defined fields (§4.1)

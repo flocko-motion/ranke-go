@@ -38,44 +38,49 @@ func unwrapClaim(c Contributor) *claim {
 	return nil
 }
 
-func (g *graph) AddClaim(cl Claim) (Id, error) {
+func (g *graph) Add(claims ...Claim) error {
+	for i, cl := range claims {
+		if err := g.addOne(cl); err != nil {
+			return fmt.Errorf("Graph.Add: claim %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (g *graph) addOne(cl Claim) error {
 	if cl == nil {
-		return nil, errors.New("ranke.Graph.AddClaim: nil claim")
+		return errors.New("nil claim")
 	}
 	c, ok := cl.(*claim)
 	if !ok {
-		return nil, errors.New("ranke.Graph.AddClaim: claim from foreign implementation")
+		return errors.New("claim from foreign implementation")
 	}
-
 	// Idempotency: same id ⇒ no-op.
 	key := c.node.id.String()
 	if _, exists := g.claims[key]; exists {
-		return c.node.id, nil
+		return nil
 	}
-
 	// Only the root may have no edges; the root was set at NewGraph.
 	if len(c.edges) == 0 {
-		return nil, errors.New("ranke.Graph.AddClaim: only the root contribution/contributor (set at NewGraph) may have no edges")
+		return errors.New("only the root contribution/contributor (set at NewGraph) may have no edges")
 	}
-
 	// Atomic creation rule (§4.3): every edge reference must already
 	// be present in the graph.
 	for _, e := range c.edges {
 		refKey := e.reference.String()
 		if _, ok := g.claims[refKey]; !ok {
-			return nil, fmt.Errorf("ranke.Graph.AddClaim: edge references unknown claim %s (atomic creation rule, §4.3)", refKey)
+			return fmt.Errorf("edge references unknown claim %s (atomic creation rule, §4.3)", refKey)
 		}
 	}
-
 	// Insert the claim and mark each referenced claim.
 	g.claims[key] = c
 	for _, e := range c.edges {
 		g.referenced[e.reference.String()] = struct{}{}
 	}
-	return c.node.id, nil
+	return nil
 }
 
-func (g *graph) ContainsClaim(id Id) bool {
+func (g *graph) Contains(id Id) bool {
 	if id == nil {
 		return false
 	}
@@ -83,7 +88,7 @@ func (g *graph) ContainsClaim(id Id) bool {
 	return ok
 }
 
-func (g *graph) GetClaim(id Id) (Claim, bool) {
+func (g *graph) Get(id Id) (Claim, bool) {
 	if id == nil {
 		return nil, false
 	}
@@ -129,13 +134,19 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 		}
 		edges = append(edges, e)
 	}
-	return NewClaim(ClaimConfig{
-		TypeClass:   NodeContribution,
-		TypeSub:     "head",
+	head, err := ClaimBuilder{
+		Type:        NodeHead,
 		Contributor: contributor,
 		Edges:       edges,
 		CreatedAt:   firstNonZero(createdAt),
-	})
+	}.Sign()
+	if err != nil {
+		return nil, err
+	}
+	if err := g.Add(head); err != nil {
+		return nil, fmt.Errorf("ranke.Graph.Consolidate: add head: %w", err)
+	}
+	return head, nil
 }
 
 // firstNonZero returns the first non-zero time in ts, or the zero
@@ -150,8 +161,13 @@ func firstNonZero(ts []time.Time) time.Time {
 	return time.Time{}
 }
 
-func (g *graph) Validate() error {
-	return g.ValidateWithExceptions()
+func (g *graph) Validate(report ...func(c Claim, depth int, err error)) error {
+	seen := map[string]bool{}
+	var firstErr error
+	for _, h := range g.Heads() {
+		g.validateRecursive(h, 0, seen, report, &firstErr)
+	}
+	return firstErr
 }
 
 func (g *graph) ValidateWithExceptions(skip ...Id) error {
@@ -161,41 +177,77 @@ func (g *graph) ValidateWithExceptions(skip ...Id) error {
 			skipSet[s.String()] = struct{}{}
 		}
 	}
+	var firstErr error
+	g.Validate(func(c Claim, _ int, err error) {
+		if firstErr != nil || err == nil {
+			return
+		}
+		if _, sk := skipSet[c.ID().String()]; sk {
+			return
+		}
+		firstErr = fmt.Errorf("validate %s: %w", c.ID().String(), err)
+	})
+	return firstErr
+}
 
-	for k, c := range g.claims {
-		if _, sk := skipSet[k]; sk {
-			continue
-		}
-		// 1. Every edge reference must resolve in the graph. Done
-		//    first so signature checks have the contributor available.
-		for _, e := range c.edges {
-			if _, ok := g.claims[e.reference.String()]; !ok {
-				return fmt.Errorf("validate %s: edge references missing claim %s", k, e.reference.String())
-			}
-		}
-		// 2. Merkle integrity + authenticity in one step (§5.10):
-		//    recompute H(S(v)), resolve the contributor's pubkey,
-		//    verify Sign(H(S(v))) against the stored id.
-		encoded, err := encodeNode(c.node)
-		if err != nil {
-			return fmt.Errorf("validate %s: encode: %w", k, err)
-		}
-		recomputed, err := hashContent(encoded)
-		if err != nil {
-			return fmt.Errorf("validate %s: hash: %w", k, err)
-		}
-		pubkey, err := g.resolveClaimPubkey(c)
-		if err != nil {
-			return fmt.Errorf("validate %s: resolve pubkey: %w", k, err)
-		}
-		idH, ok := c.node.id.(*hash)
-		if !ok {
-			return fmt.Errorf("validate %s: id not a *hash (foreign id type)", k)
-		}
-		if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
-			return fmt.Errorf("validate %s: %w (§5.7)", k, err)
+func (g *graph) validateRecursive(id Id, depth int, seen map[string]bool, report []func(Claim, int, error), firstErr *error) {
+	k := id.String()
+	if seen[k] {
+		return
+	}
+	seen[k] = true
+	c, ok := g.claims[k]
+	if !ok {
+		return
+	}
+	err := g.verifyOne(c)
+	for _, r := range report {
+		r(c, depth, err)
+	}
+	if err != nil && *firstErr == nil {
+		*firstErr = fmt.Errorf("validate %s: %w", k, err)
+	}
+	for _, e := range c.edges {
+		g.validateRecursive(e.reference, depth+1, seen, report, firstErr)
+	}
+}
+
+// verifyOne runs the §5.10 checks on a single claim:
+//   - every edge reference resolves to a claim in the graph;
+//   - canonical re-encode + recompute H(S(v)) + signature check
+//     against id(v) (record integrity + authenticity, §5.2 + §5.7);
+//   - if content_hash is set, re-hash the actual content bytes and
+//     compare (content integrity).
+func (g *graph) verifyOne(c *claim) error {
+	for _, e := range c.edges {
+		if _, ok := g.claims[e.reference.String()]; !ok {
+			return fmt.Errorf("edge references missing claim %s", e.reference.String())
 		}
 	}
+	encoded, err := encodeNode(c.node)
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+	recomputed, err := hashContent(encoded)
+	if err != nil {
+		return fmt.Errorf("hash: %w", err)
+	}
+	pubkey, err := g.resolveClaimPubkey(c)
+	if err != nil {
+		return fmt.Errorf("resolve pubkey: %w", err)
+	}
+	idH, ok := c.node.id.(*hash)
+	if !ok {
+		return errors.New("id not a *hash (foreign id type)")
+	}
+	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
+		return fmt.Errorf("§5.7: %w", err)
+	}
+	// Content integrity (§5.10) is enforced at load time by the
+	// backend's loadContent, which stream-verifies (size, hash)
+	// against the values signed into the node. By the time a claim
+	// reaches verifyOne, its bytes have already been validated — so
+	// we don't re-hash here.
 	return nil
 }
 
