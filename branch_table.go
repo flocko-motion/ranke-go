@@ -26,7 +26,11 @@ func LoadBranchTable(ctx context.Context, u Universe, bh Id) (BranchTable, error
 	return bt, nil
 }
 
-// loadClaimAs is the shared "load + type-assert" used by branchTable.
+// loadClaimAs is the shared "load + type-assert + wire contributor"
+// used by archive.lookupClaim and branchTable's traversals. Every
+// returned claim has .contributor populated — either self (root) or
+// the recursively-wired claim referenced by its contribution/contributor
+// edge.
 func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
 	cl, err := u.LoadClaim(ctx, id)
 	if err != nil {
@@ -36,7 +40,34 @@ func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
 	if !ok {
 		return nil, errors.New("foreign Claim returned by Universe")
 	}
+	if err := wireContributor(ctx, u, c); err != nil {
+		return nil, err
+	}
 	return c, nil
+}
+
+// wireContributor sets c.contributor by following its contribution/contributor
+// edge (or self-attributing for the root claim). Idempotent: no-op
+// when c.contributor is already set.
+func wireContributor(ctx context.Context, u Universe, c *claim) error {
+	if c.contributor != nil {
+		return nil
+	}
+	if len(c.edges) == 0 {
+		c.contributor = c
+		return nil
+	}
+	for _, e := range c.edges {
+		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
+			cc, err := loadClaimAs(ctx, u, e.reference)
+			if err != nil {
+				return fmt.Errorf("wire contributor: %w", err)
+			}
+			c.contributor = cc
+			return nil
+		}
+	}
+	return errors.New("non-root claim missing contribution/contributor edge")
 }
 
 type branchTable struct {

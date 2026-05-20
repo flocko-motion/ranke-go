@@ -62,10 +62,6 @@ func (a *archive) lookupClaim(ctx context.Context, id Id) (*claim, error) {
 		delete(a.claims, k)
 		return nil, err
 	}
-	if err := a.wireContributor(ctx, c); err != nil {
-		delete(a.claims, k)
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -92,24 +88,6 @@ func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]b
 	}
 	a.content[k] = b
 	return b, nil
-}
-
-func (a *archive) wireContributor(ctx context.Context, c *claim) error {
-	if len(c.edges) == 0 {
-		c.contributor = c
-		return nil
-	}
-	for _, e := range c.edges {
-		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
-			cc, err := a.lookupClaim(ctx, e.reference)
-			if err != nil {
-				return fmt.Errorf("wire contributor: %w", err)
-			}
-			c.contributor = cc
-			return nil
-		}
-	}
-	return errors.New("non-root claim missing contribution/contributor edge")
 }
 
 func (a *archive) absorbClaim(ctx context.Context, c *claim) error {

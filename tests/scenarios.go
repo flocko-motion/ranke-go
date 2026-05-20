@@ -151,33 +151,60 @@ func symRelation(t *testing.T, ctr ranke.Contributor, sub, text string, sources 
 
 // --- Scenario: SetBranchAutoConsolidates ---
 //
-// Recommended workflow: build a graph against an existing
-// contributor, add claims freely (including unrelated branches),
-// then SetBranch — the archive wraps every open head in a single
-// contribution/head claim. No separate Consolidate call needed.
+// The recommended write workflow:
+//
+//   1. open archive
+//   2. load the existing contributor from the branch — don't mint a
+//      new one per commit
+//   3. NewGraph(existing), add claims freely (open heads are fine)
+//   4. SetBranch — the archive wraps every open head in a single
+//      contribution/head claim. No explicit Consolidate needed.
 
 func runSetBranchAutoConsolidates(t *testing.T, ctx context.Context, ts *testArchive) {
-	t.Logf("Scenario: SetBranch auto-consolidates a multi-headed graph")
+	t.Logf("Scenario: load existing contributor from archive, append")
+	t.Logf("  a multi-headed graph, SetBranch auto-consolidates.")
 
+	// Phase 1 — initial commit: the contributor IS the initial claim
+	// (spec §4.3 — the only claim a graph may hold with no edges).
+	// SetBranch on a one-claim graph just binds "main" at a
+	// contribution/head wrapping the contributor.
 	operator := contributor(t, "operator@example.com")
-	g := ranke.NewGraph(operator)
-	em := email(t, operator, "alice@example.com", "bob@example.com", "hi\n")
-	e1 := entity(t, operator, "person", "Alice", em)
-	e2 := entity(t, operator, "object", "apples", em)
+	g0 := ranke.NewGraph(operator)
+	require.NoError(t, ts.SetBranch(ctx, "main", g0, operator), "initial SetBranch")
+	ts.Reset()
+
+	// Phase 2 — RELOAD the contributor from the archive. This is the
+	// pattern: never mint a fresh contributor when one already exists
+	// in the archive; load and reuse.
+	b, err := ts.GetBranch(ctx, "main")
+	require.NoError(t, err)
+	existing := b.Latest().Contributor()
+	require.NotNil(t, existing, "branch entry exposes its contributor")
+	require.True(t, existing.ID().Equal(operator.ID()),
+		"loaded contributor id matches the original — same identity, no new claim")
+	t.Logf("    loaded contributor from archive: %s", existing.ID().String()[:16]+"…")
+
+	// Build a fresh graph against the EXISTING contributor and add
+	// two unrelated entities — both become open heads.
+	g := ranke.NewGraph(existing)
+	em := email(t, existing, "alice@example.com", "bob@example.com", "second\n")
+	e1 := entity(t, existing, "person", "Alice", em)
+	e2 := entity(t, existing, "object", "apples", em)
 	must(g.Add(em))
 	must(g.Add(e1))
 	must(g.Add(e2))
 
 	require.False(t, g.IsConsolidated(), "graph should be multi-headed before SetBranch")
 	require.Len(t, g.Heads(), 2, "expected exactly 2 open heads")
-	t.Logf("    2 open heads: %s, %s", e1.ID().String()[:16]+"…", e2.ID().String()[:16]+"…")
+	t.Logf("    2 open heads: %s, %s",
+		e1.ID().String()[:16]+"…", e2.ID().String()[:16]+"…")
 
 	// SetBranch directly — no Consolidate call.
-	require.NoError(t, ts.SetBranch(ctx, "main", g, operator),
+	require.NoError(t, ts.SetBranch(ctx, "main", g, existing),
 		"SetBranch on multi-headed graph")
 	ts.Reset()
 
-	b, err := ts.GetBranch(ctx, "main")
+	b, err = ts.GetBranch(ctx, "main")
 	require.NoError(t, err)
 	headId := b.Latest().Head()
 	t.Logf("    branch head: %s", headId.String()[:16]+"…")
