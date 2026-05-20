@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// graph is the concrete implementation of Graph (= RG ⊆ 𝒰, spec §4.5).
+// claims is keyed by Id.String(); referenced tracks every claim id
+// that some other claim references via an edge — so Heads() =
+// claims \ referenced.
+type graph struct {
+	claims     map[string]*claim
+	referenced map[string]struct{}
+}
+
 // NewGraph creates a graph and adds the given contribution/contributor
 // claim . This claim might be an initial node without edges or a full
 // clojure.

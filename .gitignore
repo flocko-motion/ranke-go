@@ -1,4 +1,8 @@
 bin/
+dist/
+
+# Stray binaries from `go build ./cmd/<tool>` at repo root.
+/scenariodoc
 
 # Scenario binaries land at repo root when invoked as
 # `go build ./conformance/scenarios/<name>` from there.

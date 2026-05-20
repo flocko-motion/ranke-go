@@ -9,6 +9,46 @@ import (
 	"time"
 )
 
+// ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
+//
+// Required: a Type (either Type or TypeClass+TypeSub). Content and
+// ContentHash are mutually exclusive: set Content to have build
+// hash the bytes for you, or set ContentHash directly when the
+// content lives outside the graph. CreatedAt defaults to
+// time.Now().UTC() when zero. Contributor is required for every
+// claim except the root contribution/contributor claim — see §4.3.
+type ClaimBuilder struct {
+	Type          string
+	TypeClass     NodeClass
+	TypeSub       string
+	Encoding      string
+	EncodingClass EncodingClass
+	EncodingSub   string
+	Title         string
+	Content       []byte
+	ContentHash   Id
+	CreatedAt     time.Time
+	Contributor   Contributor
+	Edges         []Edge
+	Fields        map[string]string
+	// Pubkey is the multikey-encoded public key for a contributor
+	// claim (§4.1, §5.7). Empty for non-contributor claims and for
+	// unsigned contributors (identity-Sign case).
+	Pubkey []byte
+	// SigningKey is the private key used to sign this claim's id.
+	// Optional; nil + empty resolved pubkey = identity Sign per §5.7.
+	SigningKey crypto.Signer
+}
+
+// claim is the concrete implementation of Claim. A claim is its node
+// together with the full edge records (the node only carries edge ids).
+// Atomically created at Sign; immutable after.
+type claim struct {
+	node        *node
+	edges       []*edge // same order as node.edges
+	contributor Contributor
+}
+
 // Edge ids stay as plain H(S(e)) multihashes regardless of signing.
 // The claim's signed id covers every edge id via canonical
 // serialization (encNode.Edges), so tampering with any edge changes

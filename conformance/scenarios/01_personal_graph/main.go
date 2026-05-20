@@ -2,9 +2,9 @@
 //
 // Alice (Ed25519 keypair, signed) ingests two emails, then extracts
 // a small knowledge graph (summary + entities + relations) over
-// them. The result is persisted as a Ranke-Archive under ./archive,
-// and the sorted ids of every claim land in ./ids.txt — the bytes
-// variant implementations must reproduce.
+// them. The result is persisted as a data/ bundle (universe + B_h +
+// sorted ids), and a conformant variant implementation must
+// reproduce the same bundle byte-for-byte.
 //
 // Every claim is built inline so the reader sees the exact
 // ClaimBuilder + Sign call for each one — no local helpers hiding
