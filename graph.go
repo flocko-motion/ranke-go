@@ -160,7 +160,7 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 
 // firstNonZero returns the first non-zero time in ts, or the zero
 // time.Time if all are zero / ts is empty. Used to absorb the
-// variadic createdAt parameter on Consolidate / SetBranch.
+// variadic createdAt parameter on Consolidate / AddGraph.
 func firstNonZero(ts []time.Time) time.Time {
 	for _, t := range ts {
 		if !t.IsZero() {

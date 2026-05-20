@@ -254,7 +254,7 @@ type Contributor interface {
 	Claim
 	// SigningKey returns the private key matching this contributor's
 	// pubkey, or nil when the contributor has no key on record
-	// (identity-Sign case — paper §5.7). NewClaim, SetBranch, and
+	// (identity-Sign case — paper §5.7). NewClaim, AddGraph, and
 	// Consolidate consult it for any claim minted on this
 	// contributor's behalf, so the key threads through the API
 	// without an explicit parameter at every site.
@@ -272,13 +272,27 @@ type Contributor interface {
 // Every method takes a ctx threaded from the entry point. The
 // library honors ctx.Done() between Universe calls.
 type Archive interface {
-	HasGraph(ctx context.Context, head Id) bool
-	GetGraph(ctx context.Context, head Id) (Graph, error)
+	HasClosure(ctx context.Context, head Id) bool
+	GetClosure(ctx context.Context, head Id) (Graph, error)
 
 	HasBranch(ctx context.Context, name string) bool
 	GetBranch(ctx context.Context, name string) (Branch, error)
-	SetBranch(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error
 	Branches(ctx context.Context) []Branch
+
+	// AddClaim appends a single claim to the named branch. The
+	// branch's current closure is loaded, the claim is added, the
+	// result is committed via AddGraph. Convenience for the common
+	// "insert one row" case; build the graph yourself + AddGraph
+	// when you have a multi-claim transaction. The claim's own
+	// contributor attributes the bookkeeping claims (contribution/head
+	// and contribution/branches).
+	AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error
+
+	// AddGraph commits g to the named branch. Every claim in g is
+	// absorbed into 𝒰, a contribution/head claim wraps g's open
+	// heads (auto-consolidating multi-headed graphs), and a new
+	// contribution/branches table records the binding.
+	AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error
 
 	// VerifyBranch loads the closure rooted at the branch's latest
 	// head and runs the spec §5.10 checks across it.
@@ -335,7 +349,7 @@ type BranchTable interface {
 //   - node type:    "contribution/branch"
 //   - node content: the branch name, in text/plain (self-describing,
 //     redundant with B's key but useful for self-identifying claims)
-//   - edges (three; see SetBranch for the construction algorithm):
+//   - edges (three; see AddGraph for the construction algorithm):
 //   - contribution/contributor → the contributor (required by §4.3)
 //   - contribution/head        → the head being bound
 //   - contribution/branch      → the previous branch claim for this
@@ -347,7 +361,7 @@ type BranchTable interface {
 //
 // Branch is a read-only projection of that claim, exposing Name,
 // the Latest binding (as a BranchEntry), and the Provenance chain
-// of prior bindings. Mutation goes through Archive.SetBranch, which
+// of prior bindings. Mutation goes through Archive.AddGraph, which
 // builds and appends a new contribution/branch claim and updates
 // B[name].
 type Branch interface {
@@ -388,7 +402,7 @@ type BranchEntry interface {
 
 // Graph is a Ranke-Graph instance RG ⊆ 𝒰 (spec §4.5), in memory.
 // Built standalone via NewGraph for fresh contributions, or returned
-// from Archive.GetGraph(head) for a hash-rooted instance.
+// from Archive.GetClosure(head) for a hash-rooted instance.
 type Graph interface {
 	// Add inserts one or more claims into the graph atomically.
 	// Every edge reference must already be reachable in the graph

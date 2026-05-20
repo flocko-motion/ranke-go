@@ -56,7 +56,7 @@ func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead
 	for _, b := range arc.Branches(ctx) {
 		head := b.Latest().Head().String()
 		fmt.Printf("branch %s → %s\n", b.Name(), head)
-		g := Must(arc.GetGraph(ctx, b.Latest().Head()))
+		g := Must(arc.GetClosure(ctx, b.Latest().Head()))
 		count, failed := 0, 0
 		err := g.Validate(func(c ranke.Claim, depth int, e error) {
 			count++

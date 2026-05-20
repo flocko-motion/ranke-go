@@ -467,7 +467,7 @@ func isTypedNil(i any) bool {
 }
 
 // WithSigningKey returns a Contributor that carries the private key
-// matching c's pubkey, so subsequent NewClaim/SetBranch/Consolidate
+// matching c's pubkey, so subsequent NewClaim/AddGraph/Consolidate
 // calls can sign on the contributor's behalf without the caller
 // threading the key through manually. Nil key collapses to the
 // identity-Sign behaviour the bare contributor already exposes.

@@ -112,7 +112,7 @@ func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
 	return a.u.SaveContent(ctx, id, b)
 }
 
-func (a *archive) HasGraph(ctx context.Context, head Id) bool {
+func (a *archive) HasClosure(ctx context.Context, head Id) bool {
 	if head == nil {
 		return false
 	}
@@ -120,13 +120,13 @@ func (a *archive) HasGraph(ctx context.Context, head Id) bool {
 	return err == nil
 }
 
-func (a *archive) GetGraph(ctx context.Context, head Id) (Graph, error) {
+func (a *archive) GetClosure(ctx context.Context, head Id) (Graph, error) {
 	if head == nil {
-		return nil, errors.New("ranke.Archive.GetGraph: nil head")
+		return nil, errors.New("ranke.Archive.GetClosure: nil head")
 	}
 	root, err := a.lookupClaim(ctx, head)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Archive.GetGraph: head %s: %w", head.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetClosure: head %s: %w", head.String(), err)
 	}
 	g := &graph{
 		claims:     make(map[string]*claim),
@@ -149,7 +149,7 @@ func (a *archive) GetGraph(ctx context.Context, head Id) (Graph, error) {
 			g.referenced[refKey] = struct{}{}
 			next, err := a.lookupClaim(ctx, e.reference)
 			if err != nil {
-				return nil, fmt.Errorf("ranke.Archive.GetGraph: missing claim %s referenced by %s: %w", refKey, k, err)
+				return nil, fmt.Errorf("ranke.Archive.GetClosure: missing claim %s referenced by %s: %w", refKey, k, err)
 			}
 			queue = append(queue, next)
 		}
@@ -180,36 +180,63 @@ func (a *archive) VerifyBranch(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	g, err := a.GetGraph(ctx, b.Latest().Head())
+	g, err := a.GetClosure(ctx, b.Latest().Head())
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: GetGraph %s: %w", b.Latest().Head().String(), err)
+		return fmt.Errorf("ranke.Archive.VerifyBranch: GetClosure %s: %w", b.Latest().Head().String(), err)
 	}
 	return g.Validate()
 }
 
-// SetBranch advances the named branch per spec §4.7:
+func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error {
+	if c == nil {
+		return errors.New("ranke.Archive.AddClaim: nil claim")
+	}
+	contributor := c.Contributor()
+	if contributor == nil {
+		return errors.New("ranke.Archive.AddClaim: claim has no contributor")
+	}
+	var g Graph
+	if a.table.Has(name) {
+		b, err := a.table.Get(ctx, name)
+		if err != nil {
+			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
+		}
+		g, err = a.GetClosure(ctx, b.Latest().Head())
+		if err != nil {
+			return fmt.Errorf("ranke.Archive.AddClaim: load branch state: %w", err)
+		}
+	} else {
+		g = NewGraph(contributor)
+	}
+	if err := g.Add(c); err != nil {
+		return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
+	}
+	return a.AddGraph(ctx, name, g, contributor, createdAt...)
+}
+
+// AddGraph advances the named branch per spec §4.7:
 //  1. Absorb every claim in g into U (atomic-creation rule).
 //  2. Build a contribution/head claim consolidating g's open heads.
 //  3. Delegate the branches-claim mint to a.table.Set.
 //  4. Persist the new B_h via a.bth.
-func (a *archive) SetBranch(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
+func (a *archive) AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
-		return errors.New("ranke.Archive.SetBranch: nil graph")
+		return errors.New("ranke.Archive.AddGraph: nil graph")
 	}
 	if contributor == nil {
-		return errors.New("ranke.Archive.SetBranch: contributor required")
+		return errors.New("ranke.Archive.AddGraph: contributor required")
 	}
 	if len(g.Heads()) == 0 {
-		return errors.New("ranke.Archive.SetBranch: graph has no open heads to bind")
+		return errors.New("ranke.Archive.AddGraph: graph has no open heads to bind")
 	}
 	cg, ok := g.(*graph)
 	if !ok {
-		return errors.New("ranke.Archive.SetBranch: graph from foreign implementation")
+		return errors.New("ranke.Archive.AddGraph: graph from foreign implementation")
 	}
 
 	for _, c := range cg.claims {
 		if err := a.absorbClaim(ctx, c); err != nil {
-			return fmt.Errorf("ranke.Archive.SetBranch: absorb claim: %w", err)
+			return fmt.Errorf("ranke.Archive.AddGraph: absorb claim: %w", err)
 		}
 	}
 
@@ -221,7 +248,7 @@ func (a *archive) SetBranch(ctx context.Context, name string, g Graph, contribut
 			TypeSub:   "head",
 		})
 		if err != nil {
-			return fmt.Errorf("ranke.Archive.SetBranch: build head edge: %w", err)
+			return fmt.Errorf("ranke.Archive.AddGraph: build head edge: %w", err)
 		}
 		headEdges = append(headEdges, e)
 	}
@@ -233,19 +260,19 @@ func (a *archive) SetBranch(ctx context.Context, name string, g Graph, contribut
 		CreatedAt:   at,
 	}.Sign()
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.SetBranch: build head claim: %w", err)
+		return fmt.Errorf("ranke.Archive.AddGraph: build head claim: %w", err)
 	}
 	headC := headClaim.(*claim)
 	if err := a.absorbClaim(ctx, headC); err != nil {
-		return fmt.Errorf("ranke.Archive.SetBranch: absorb head claim: %w", err)
+		return fmt.Errorf("ranke.Archive.AddGraph: absorb head claim: %w", err)
 	}
 
 	nextTable, err := a.table.Set(ctx, name, headC.node.id, contributor, at)
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.SetBranch: %w", err)
+		return fmt.Errorf("ranke.Archive.AddGraph: %w", err)
 	}
 	if err := a.bth.Save(ctx, nextTable.Bh()); err != nil {
-		return fmt.Errorf("ranke.Archive.SetBranch: persist B_h: %w", err)
+		return fmt.Errorf("ranke.Archive.AddGraph: persist B_h: %w", err)
 	}
 	a.table = nextTable
 	return nil
