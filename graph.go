@@ -6,6 +6,39 @@ import (
 	"time"
 )
 
+// Graph is a Ranke-Graph instance RG ⊆ 𝒰 (spec §4.5), in memory.
+// Built standalone via NewGraph for fresh contributions, or
+// materialized from a loaded Claim via Claim.Graph(ctx).
+type Graph interface {
+	// Add inserts claims atomically. Every edge reference must
+	// already be reachable in the graph (atomic creation rule, §4.3).
+	// Non-root claims must have at least one edge. Idempotent.
+	Add(claims ...Claim) error
+	Contains(id Id) bool
+	Get(id Id) (Claim, bool)
+	// Heads returns the open heads — claims no other claim in the
+	// graph references (§4.5). A single-headed graph is a closure
+	// (RG_h); multi-headed means concurrent open heads.
+	Heads() []Id
+	// IsConsolidated reports len(Heads()) == 1.
+	IsConsolidated() bool
+	// Consolidate builds a contribution/head claim wrapping every
+	// open head, adds it, and returns it. After this the graph is
+	// single-headed at the new claim's id. createdAt defaults to
+	// time.Now().UTC() when zero / omitted; must satisfy
+	// monotonicity (§4.3).
+	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
+	// Validate walks the closure from every open head and runs the
+	// §5.10 per-claim integrity + authenticity check. Walks the
+	// full closure (so verbose callers see every claim) and returns
+	// the first error, or nil. Optional report callbacks are called
+	// once per visited claim with its depth and result.
+	Validate(report ...func(c Claim, depth int, err error)) error
+	// ValidateWithExceptions skips integrity checks for ids in skip
+	// (known-good subsets). Other checks still run.
+	ValidateWithExceptions(skip ...Id) error
+}
+
 // graph is the concrete implementation of Graph (= RG ⊆ 𝒰, spec §4.5).
 // claims is keyed by Id.String(); referenced tracks every claim id
 // that some other claim references via an edge — so Heads() =

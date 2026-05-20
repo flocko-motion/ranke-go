@@ -63,6 +63,46 @@ func (c *claim) Validate(ctx context.Context) error {
 	return g.Validate()
 }
 
+// Claim is a node together with the edges in its edges set.
+// Atomically created (spec §4.3); immutable after.
+type Claim interface {
+	Node() Node
+	// Edges returns the edges in canonical order. With filters,
+	// only edges matching every filter (AND) are returned.
+	Edges(filters ...Filter) []Edge
+	// Contributor returns the contributor for this claim — always
+	// a contribution/contributor claim. Self-attribution for the
+	// root (no-edge) contributor.
+	Contributor() Contributor
+	IsContributor() bool
+	// AsContributor returns this claim as a Contributor. Errors if
+	// the claim isn't of type contribution/contributor. If a signing
+	// key is supplied it must match the contributor's pubkey; the
+	// returned Contributor is wrapped via WithSigningKey so
+	// subsequent claims attributed to it sign automatically.
+	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
+	ID() Id
+	// Graph materializes the claim's provenance by walking edge
+	// references. For claims loaded from a Universe the walk uses
+	// that Universe; in-memory claims walk only what's reachable
+	// through already-wired contributor refs.
+	Graph(ctx context.Context) (Graph, error)
+	// Validate is the §5.10 check across the claim's provenance —
+	// convenience for Graph(ctx).Validate().
+	Validate(ctx context.Context) error
+}
+
+// Contributor is a typed view over a Claim whose node type is
+// "contribution/contributor". Obtain via Claim.AsContributor,
+// Claim.Contributor, Branch.Contributor, or BranchEntry.Contributor.
+type Contributor interface {
+	Claim
+	// SigningKey returns the private key matching this contributor's
+	// pubkey, or nil for identity-Sign (§5.7) or unbound contributors
+	// loaded from disk. Attach a key via WithSigningKey for a session.
+	SigningKey() crypto.Signer
+}
+
 // ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
 //
 // Required: a Type (either Type or TypeClass+TypeSub). Content and

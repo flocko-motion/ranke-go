@@ -2,6 +2,29 @@ package ranke
 
 import "time"
 
+// Branch is a convenience view over a contribution/branch claim.
+// Mutation goes through Archive.AddGraph / AddClaim.
+type Branch interface {
+	Name() string
+	// Latest is the current binding, exposed as a BranchEntry so the
+	// accessors are the same as for prior bindings.
+	Latest() BranchEntry
+	// Provenance returns previously-bound entries (most-recent first),
+	// walking the contribution/branch edges back through prior branch
+	// claims. Latest is not included.
+	Provenance() []BranchEntry
+}
+
+// BranchEntry is one entry in a branch's history — the head it was
+// bound to, the time of that binding, and the contributor that made
+// it.
+type BranchEntry interface {
+	Head() Id
+	Time() time.Time
+	Contributor() Contributor
+	Claim() Claim
+}
+
 // branch / branchEntry are projections of one (name, head) binding
 // in a contribution/branches claim. All values are derived from the
 // underlying table claim, so they're self-contained and survive

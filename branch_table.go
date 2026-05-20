@@ -7,6 +7,32 @@ import (
 	"time"
 )
 
+// BranchTable is a contribution/branches claim (spec §4.7) viewed as
+// an aggregate: the named branches it holds, the chain of prior
+// tables (history), and the operation that mints the next version.
+//
+// Immutable: Set returns a *new* table; the underlying claim chain
+// records every revision. Construct via LoadBranchTable.
+type BranchTable interface {
+	// Bh is the id of the contribution/branches claim this table
+	// represents; nil for the empty table.
+	Bh() Id
+	// Has reports whether a branch with this name exists in this
+	// table (no history walk).
+	Has(name string) bool
+	// Get returns the named branch with provenance pre-walked.
+	Get(ctx context.Context, name string) (Branch, error)
+	// List returns every branch in this table with provenance walked.
+	List(ctx context.Context) ([]Branch, error)
+	// History walks the contribution/branches chain backwards
+	// (most-recent-first), excluding self.
+	History(ctx context.Context) ([]BranchTable, error)
+	// Set mints a new contribution/branches claim with name → head
+	// (other branches carried forward, chained to this table via a
+	// contribution/branches edge) and returns the new BranchTable.
+	Set(ctx context.Context, name string, head Id, contributor Contributor, createdAt time.Time) (BranchTable, error)
+}
+
 // LoadBranchTable loads the contribution/branches claim at bh from u
 // and returns it as a BranchTable. nil bh → empty table.
 func LoadBranchTable(ctx context.Context, u Universe, bh Id) (BranchTable, error) {

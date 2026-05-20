@@ -7,6 +7,35 @@ import (
 	"time"
 )
 
+// Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
+// are projections of claims that live in the underlying Universe.
+// Every method takes a ctx threaded from the entry point.
+type Archive interface {
+	HasClaim(ctx context.Context, id Id) bool
+	// GetClaim returns the claim at id. Call .Graph(ctx) on the
+	// result to materialize the provenance.
+	GetClaim(ctx context.Context, id Id) (Claim, error)
+
+	HasBranch(ctx context.Context, name string) bool
+	GetBranch(ctx context.Context, name string) (Branch, error)
+	Branches(ctx context.Context) []Branch
+
+	// AddClaim appends a single claim to the named branch. Loads
+	// the branch's current closure, adds the claim, commits via
+	// AddGraph. Use AddGraph directly for multi-claim transactions.
+	AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error
+
+	// AddGraph commits g to the named branch. Every claim in g is
+	// absorbed into 𝒰, a contribution/head claim wraps g's open
+	// heads (auto-consolidating multi-headed graphs), and a new
+	// contribution/branches table records the binding.
+	AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error
+
+	// VerifyBranch loads the claim at the branch's latest head and
+	// runs the §5.10 checks across its provenance.
+	VerifyBranch(ctx context.Context, name string) error
+}
+
 // NewArchive composes a Universe (𝒰) with a BranchTableHead (B_h)
 // into a Ranke-Archive (spec §4.8). The Archive holds no resources
 // of its own — closing it does not close u or bth; the caller
