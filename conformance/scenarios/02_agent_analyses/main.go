@@ -28,7 +28,7 @@ import (
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "bciqbjygkwo6kqd7xn2qzcgxgzwoa3kbfvv2cr2x2vd5gh63zd4teuay"
+const expectedMainHead = "bciqd3khoouqui5q36ikpfuwgzyc674azteg6s74zvw5kkh6fhw4hhdi"
 
 func main() {
 	ctx := context.Background()
@@ -137,13 +137,16 @@ func main() {
 
 	// --- 6. Agent: extract relations. ---
 	// Each relation/* edge carries an additional "conviction" field
-	// (paper §4.2: "additional implementation-defined fields") —
-	// demonstrates that arbitrary fields participate in the canonical
-	// encoding and thus in the edge's id. Variant impls must encode
-	// the same field key/value to reproduce the same ids.
-	high := map[string]string{"conviction": "high"}
-	low := map[string]string{"conviction": "low"}
-	medium := map[string]string{"conviction": "medium"}
+	// in the -1..1 range — an application convention (paper §3.5
+	// mentions "conviction values" as the kind of detail consumers
+	// fetch at intermediate abstraction levels). +1.0 is strong
+	// assertion, -1.0 strong negation (used in scenario 03), 0 is
+	// neutral. Values are decimal-encoded strings since edge Fields
+	// is map[string]string. They participate in the canonical
+	// encoding — variant impls must match byte-for-byte.
+	strong := map[string]string{"conviction": "1.0"}
+	medium := map[string]string{"conviction": "0.5"}
+	weak := map[string]string{"conviction": "0.3"}
 
 	likes := must(ranke.ClaimBuilder{
 		Type:        ranke.TypeRelation("likes"),
@@ -152,8 +155,8 @@ func main() {
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationFrom, Fields: high})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: apples.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationTo, Fields: high})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationFrom, Fields: strong})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: apples.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
 	must(g.Add(likes))
@@ -164,8 +167,8 @@ func main() {
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom, Fields: high})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo, Fields: high})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom, Fields: strong})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
 	must(g.Add(knows))
@@ -176,8 +179,8 @@ func main() {
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationFrom, Fields: low})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationTo, Fields: low})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationFrom, Fields: weak})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationTo, Fields: weak})),
 		},
 	}.Sign())
 	must(g.Add(ignores))

@@ -35,10 +35,13 @@ agentAKey is bound to the agent for the agent's OWN contributions.
 ### 6. Agent: extract relations.
 
 Each relation/* edge carries an additional "conviction" field
-(paper §4.2: "additional implementation-defined fields") —
-demonstrates that arbitrary fields participate in the canonical
-encoding and thus in the edge's id. Variant impls must encode
-the same field key/value to reproduce the same ids.
+in the -1..1 range — an application convention (paper §3.5
+mentions "conviction values" as the kind of detail consumers
+fetch at intermediate abstraction levels). +1.0 is strong
+assertion, -1.0 strong negation (used in scenario 03), 0 is
+neutral. Values are decimal-encoded strings since edge Fields
+is map[string]string. They participate in the canonical
+encoding — variant impls must match byte-for-byte.
 
 ### 7. AddGraph — archive auto-consolidates the open heads and persists.
 
