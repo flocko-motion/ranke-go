@@ -51,6 +51,12 @@ func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Arc
 	t.Run("AgentAnalyzesEmails", func(t *testing.T) {
 		runAgentAnalyzes(t, ctx, newTestArchive(factory))
 	})
+	t.Run("AddGraphAutoConsolidates", func(t *testing.T) {
+		runAddGraphAutoConsolidates(t, ctx, newTestArchive(factory))
+	})
+	t.Run("AddClaimExtendsBranch", func(t *testing.T) {
+		runAddClaimExtendsBranch(t, ctx, newTestArchive(factory))
+	})
 }
 
 // testArchive wraps a ranke.Archive with a Reset method that drops

@@ -8,24 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Scenarios — multi-stage stories from the paper that build a graph,
-// commit it through SetBranch, Reset the archive, and verify the
-// state survived. Each Reset is observably a no-op for an honest
-// backend: handles change, ids stay stable, closures still validate.
-
-// commit takes a graph (single- or multi-headed) and SetBranches it
-// under "main", consolidating first if needed. After commit, the
-// archive is Reset — the work has been "persisted" (or no-op'd on
-// mem) and the test handle is fresh.
+// Scenarios — multi-stage stories that build a graph, commit it via
+// AddGraph, Reset, and verify the state survived. Each Reset is
+// observably a no-op for an honest backend.
 func commit(t *testing.T, ctx context.Context, ts *testArchive, g ranke.Graph, contributor ranke.Contributor) {
 	t.Helper()
-	if !g.IsConsolidated() {
-		t.Logf("    consolidating %d open heads", len(g.Heads()))
-		must(g.Consolidate(contributor))
-	}
-	t.Logf("    SetBranch main → %s", g.Heads()[0].String()[:16]+"…")
-	require.NoError(t, ts.SetBranch(ctx, "main", g, contributor), "SetBranch main")
-	t.Logf("    [Reset] drop handle, reload from backend")
+	require.NoError(t, ts.AddGraph(ctx, "main", g, contributor), "AddGraph main")
 	ts.Reset()
 }
 
@@ -36,7 +24,7 @@ func fetchMain(t *testing.T, ctx context.Context, ts *testArchive) (ranke.Graph,
 	require.True(t, ts.HasBranch(ctx, "main"), "branch main exists after reset")
 	b := must(ts.GetBranch(ctx, "main"))
 	head := b.Latest().Head()
-	g := must(ts.GetGraph(ctx, head))
+	g := must(ts.GetClosure(ctx, head))
 	t.Logf("    fetched main → head %s (%d open heads)", head.String()[:16]+"…", len(g.Heads()))
 	return g, head
 }
@@ -147,6 +135,116 @@ func symRelation(t *testing.T, ctr ranke.Contributor, sub, text string, sources 
 		Contributor: ctr,
 		Edges:       edges,
 	}.Sign())
+}
+
+// --- Scenario: AddClaimExtendsBranch ---
+//
+// arch.AddClaim is the "insert one row" convenience: it loads the
+// branch's current closure, adds the claim, and commits via
+// AddGraph. After two AddClaim calls the second claim should be
+// present AND the first should still be reachable.
+
+func runAddClaimExtendsBranch(t *testing.T, ctx context.Context, ts *testArchive) {
+	t.Logf("Scenario: AddClaim extends a branch (insert-one-row convenience)")
+
+	// Isolated branch so we don't trip on state from sibling tests.
+	const branchName = "addclaim-extends"
+	operator := contributor(t, "addclaim-test@example.com")
+
+	emA := email(t, operator, "alice@example.com", "bob@example.com", "first\n")
+	require.NoError(t, ts.AddClaim(ctx, branchName, emA), "AddClaim emA")
+	ts.Reset()
+
+	emB := email(t, operator, "alice@example.com", "bob@example.com", "second\n")
+	require.NoError(t, ts.AddClaim(ctx, branchName, emB), "AddClaim emB")
+	ts.Reset()
+
+	b, err := ts.GetBranch(ctx, branchName)
+	require.NoError(t, err)
+	g, err := ts.GetClosure(ctx, b.Latest().Head())
+	require.NoError(t, err)
+
+	require.True(t, g.Contains(emA.ID()), "first claim still reachable after second AddClaim")
+	require.True(t, g.Contains(emB.ID()), "second claim reachable")
+	require.True(t, g.Contains(operator.ID()), "contributor reachable")
+	require.NoError(t, g.Validate(), "closure validates")
+	t.Logf("    ✓ both claims survived the second AddClaim")
+}
+
+// --- Scenario: AddGraphAutoConsolidates ---
+//
+// Recommended write workflow: open archive, load the existing
+// contributor from the branch, NewGraph(existing), add claims
+// freely (open heads are fine), AddGraph — the archive wraps every
+// open head in a single contribution/head claim. No explicit
+// Consolidate needed.
+
+func runAddGraphAutoConsolidates(t *testing.T, ctx context.Context, ts *testArchive) {
+	t.Logf("Scenario: load existing contributor from archive, append")
+	t.Logf("  a multi-headed graph, AddGraph auto-consolidates.")
+
+	// Phase 1 — bootstrap with operator.
+	operator := contributor(t, "operator@example.com")
+	g0 := ranke.NewGraph(operator)
+	require.NoError(t, ts.AddGraph(ctx, "main", g0, operator), "bootstrap")
+	ts.Reset()
+
+	// Phase 2 — RELOAD the contributor from the archive. This is the
+	// pattern: never mint a fresh contributor when one already exists
+	// in the archive; load and reuse.
+	b, err := ts.GetBranch(ctx, "main")
+	require.NoError(t, err)
+	existing := b.Latest().Contributor()
+	require.NotNil(t, existing, "branch entry exposes its contributor")
+	require.True(t, existing.ID().Equal(operator.ID()),
+		"loaded contributor id matches the original — same identity, no new claim")
+	t.Logf("    loaded contributor from archive: %s", existing.ID().String()[:16]+"…")
+
+	// Build a fresh graph against the EXISTING contributor and add
+	// two unrelated entities — both become open heads.
+	g := ranke.NewGraph(existing)
+	em := email(t, existing, "alice@example.com", "bob@example.com", "second\n")
+	e1 := entity(t, existing, "person", "Alice", em)
+	e2 := entity(t, existing, "object", "apples", em)
+	must(g.Add(em))
+	must(g.Add(e1))
+	must(g.Add(e2))
+
+	require.False(t, g.IsConsolidated(), "graph should be multi-headed before AddGraph")
+	require.Len(t, g.Heads(), 2, "expected exactly 2 open heads")
+	t.Logf("    2 open heads: %s, %s",
+		e1.ID().String()[:16]+"…", e2.ID().String()[:16]+"…")
+
+	// AddGraph directly — no Consolidate call.
+	require.NoError(t, ts.AddGraph(ctx, "main", g, existing),
+		"AddGraph on multi-headed graph")
+	ts.Reset()
+
+	b, err = ts.GetBranch(ctx, "main")
+	require.NoError(t, err)
+	headId := b.Latest().Head()
+	t.Logf("    branch head: %s", headId.String()[:16]+"…")
+
+	fresh, err := ts.GetClosure(ctx, headId)
+	require.NoError(t, err)
+	require.True(t, fresh.IsConsolidated(), "loaded graph should be single-headed")
+	require.True(t, fresh.Heads()[0].Equal(headId), "loaded graph's head matches branch head")
+
+	headClaim, ok := fresh.Get(headId)
+	require.True(t, ok, "branch head claim is in the closure")
+	require.Equal(t, "contribution/head", headClaim.Node().Type(),
+		"branch head is a contribution/head claim")
+
+	// Confirm the auto-consolidation wrapped EVERY original open head.
+	refs := map[string]bool{}
+	for _, e := range headClaim.Edges() {
+		if e.Type() == "contribution/head" {
+			refs[e.Reference().String()] = true
+		}
+	}
+	require.True(t, refs[e1.ID().String()], "auto-consolidate edges include entity1")
+	require.True(t, refs[e2.ID().String()], "auto-consolidate edges include entity2")
+	t.Logf("    ✓ contribution/head wraps both original heads")
 }
 
 // --- Scenario: AliceEmail ---

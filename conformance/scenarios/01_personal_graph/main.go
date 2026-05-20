@@ -208,7 +208,7 @@ func main() {
 	u := must(ranke.NewFsUniverse(helpers.UniverseDir))
 	bth := must(ranke.NewFsBranchTableHead(helpers.BranchTableHeadPath))
 	arc := must(ranke.NewArchive(ctx, u, bth))
-	must(arc.SetBranch(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
+	must(arc.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)
