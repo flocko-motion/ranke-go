@@ -3,10 +3,11 @@
 Conformance scenario 02 — agent analyses two emails.
 
 An operator (identity-Sign contributor) ingests two emails as
-source/email claims. An extraction agent (signed by Bob) is itself
-contributed by the operator; the agent then derives entities and
-relations from the emails — a summary, four entities (Alice, apples,
-Bob Sr, Bob Jr), and four relations (likes, knows, ignores, family).
+source/email claims. An extraction agent (signed by its own
+Ed25519 key) is itself contributed by the operator; the agent
+then derives entities and relations from the emails — a summary,
+four entities (Alice, apples, Bob Sr, Bob Jr), and four relations
+(likes, knows, ignores, family).
 
 Two Bobs from two emails get distinct ids by content-addressing
 (different derivation/source edges → different node hashes). The
@@ -20,7 +21,10 @@ via a derivation/source edge).
 
 ### 1. Operator: identity-Sign root contributor.
 
-### 2. Extraction agent — Bob-signed contributor under operator.
+### 2. Extraction agent — Ed25519-signed contributor under operator.
+
+The agent claim itself is signed by operator (identity-Sign);
+agentAKey is bound to the agent for the agent's OWN contributions.
 
 ### 3. Ingest two source emails, attributed to the operator.
 

@@ -1,10 +1,11 @@
 // Conformance scenario 02 — agent analyses two emails.
 //
 // An operator (identity-Sign contributor) ingests two emails as
-// source/email claims. An extraction agent (signed by Bob) is itself
-// contributed by the operator; the agent then derives entities and
-// relations from the emails — a summary, four entities (Alice, apples,
-// Bob Sr, Bob Jr), and four relations (likes, knows, ignores, family).
+// source/email claims. An extraction agent (signed by its own
+// Ed25519 key) is itself contributed by the operator; the agent
+// then derives entities and relations from the emails — a summary,
+// four entities (Alice, apples, Bob Sr, Bob Jr), and four relations
+// (likes, knows, ignores, family).
 //
 // Two Bobs from two emails get distinct ids by content-addressing
 // (different derivation/source edges → different node hashes). The
@@ -27,7 +28,7 @@ import (
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "bciqfkg5pugszn4m7d3cznpnxchj3cxuokzbnjcoiu32nlys2vjcy4gq"
+const expectedMainHead = "bciqmezhn3mqgxthxgqcs2s33wly3uzfv5fk6xd5frvilh5xp5lp2sey"
 
 func main() {
 	ctx := context.Background()
@@ -43,18 +44,18 @@ func main() {
 	operator := must(operatorClaim.AsContributor())
 	g := ranke.NewGraph(operator)
 
-	// --- 2. Extraction agent — Bob-signed contributor under operator. ---
-	bobKey := must(ranke.LoadPrivateKey(helpers.KeyPath("bob.pem")))
+	// --- 2. Extraction agent — Ed25519-signed contributor under operator. ---
 	// The agent claim itself is signed by operator (identity-Sign);
-	// bobKey is bound to the agent for the agent's OWN contributions.
+	// agentAKey is bound to the agent for the agent's OWN contributions.
+	agentAKey := must(ranke.LoadPrivateKey(helpers.KeyPath("agentA.pem")))
 	agentClaim := must(ranke.ClaimBuilder{
 		Type:        ranke.NodeContributor,
 		Content:     []byte("extraction-agent-v1"),
-		Pubkey:      bobKey.Pubkey,
+		Pubkey:      agentAKey.Pubkey,
 		Contributor: operator,
 		CreatedAt:   s.NextTimestamp(time.Second),
 	}.Sign())
-	agent := must(agentClaim.AsContributor(bobKey.Private))
+	agent := must(agentClaim.AsContributor(agentAKey.Private))
 	must(g.Add(agentClaim))
 
 	// --- 3. Ingest two source emails, attributed to the operator. ---
