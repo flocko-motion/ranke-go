@@ -149,6 +149,61 @@ func symRelation(t *testing.T, ctr ranke.Contributor, sub, text string, sources 
 	}.Sign())
 }
 
+// --- Scenario: SetBranchAutoConsolidates ---
+//
+// Recommended workflow: build a graph against an existing
+// contributor, add claims freely (including unrelated branches),
+// then SetBranch — the archive wraps every open head in a single
+// contribution/head claim. No separate Consolidate call needed.
+
+func runSetBranchAutoConsolidates(t *testing.T, ctx context.Context, ts *testArchive) {
+	t.Logf("Scenario: SetBranch auto-consolidates a multi-headed graph")
+
+	operator := contributor(t, "operator@example.com")
+	g := ranke.NewGraph(operator)
+	em := email(t, operator, "alice@example.com", "bob@example.com", "hi\n")
+	e1 := entity(t, operator, "person", "Alice", em)
+	e2 := entity(t, operator, "object", "apples", em)
+	must(g.Add(em))
+	must(g.Add(e1))
+	must(g.Add(e2))
+
+	require.False(t, g.IsConsolidated(), "graph should be multi-headed before SetBranch")
+	require.Len(t, g.Heads(), 2, "expected exactly 2 open heads")
+	t.Logf("    2 open heads: %s, %s", e1.ID().String()[:16]+"…", e2.ID().String()[:16]+"…")
+
+	// SetBranch directly — no Consolidate call.
+	require.NoError(t, ts.SetBranch(ctx, "main", g, operator),
+		"SetBranch on multi-headed graph")
+	ts.Reset()
+
+	b, err := ts.GetBranch(ctx, "main")
+	require.NoError(t, err)
+	headId := b.Latest().Head()
+	t.Logf("    branch head: %s", headId.String()[:16]+"…")
+
+	fresh, err := ts.GetGraph(ctx, headId)
+	require.NoError(t, err)
+	require.True(t, fresh.IsConsolidated(), "loaded graph should be single-headed")
+	require.True(t, fresh.Heads()[0].Equal(headId), "loaded graph's head matches branch head")
+
+	headClaim, ok := fresh.Get(headId)
+	require.True(t, ok, "branch head claim is in the closure")
+	require.Equal(t, "contribution/head", headClaim.Node().Type(),
+		"branch head is a contribution/head claim")
+
+	// Confirm the auto-consolidation wrapped EVERY original open head.
+	refs := map[string]bool{}
+	for _, e := range headClaim.Edges() {
+		if e.Type() == "contribution/head" {
+			refs[e.Reference().String()] = true
+		}
+	}
+	require.True(t, refs[e1.ID().String()], "auto-consolidate edges include entity1")
+	require.True(t, refs[e2.ID().String()], "auto-consolidate edges include entity2")
+	t.Logf("    ✓ contribution/head wraps both original heads")
+}
+
 // --- Scenario: AliceEmail ---
 
 func runAliceEmail(t *testing.T, ctx context.Context, ts *testArchive) {

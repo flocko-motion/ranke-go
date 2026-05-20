@@ -285,6 +285,47 @@ type Archive interface {
 	VerifyBranch(ctx context.Context, name string) error
 }
 
+// BranchTable is a contribution/branches claim (spec §4.7) viewed
+// as an aggregate: the named set of branches it holds, the chain
+// of prior tables (history), and the operation that mints the next
+// version.
+//
+// Construct via LoadBranchTable. Empty table = Bh() returns nil,
+// List returns empty, Has always false. Set returns a *new* table
+// with the (name → head) binding updated; the old table is
+// unchanged. The new contribution/branches claim is written to the
+// underlying Universe — the caller is responsible for persisting
+// the new Bh() via a BranchTableHead.
+type BranchTable interface {
+	// Bh is the id of the contribution/branches claim this table
+	// represents, or nil for the empty table.
+	Bh() Id
+
+	// Has reports whether a branch with the given name exists in
+	// this table. Synchronous — only reads from the loaded claim.
+	Has(name string) bool
+
+	// Get returns the named branch with provenance walked back
+	// through prior tables. Returns an error if the name is not
+	// present in this table.
+	Get(ctx context.Context, name string) (Branch, error)
+
+	// List returns every branch in this table with provenance walked.
+	List(ctx context.Context) ([]Branch, error)
+
+	// History walks the contribution/branches chain backwards
+	// (most-recent-first) and returns every prior table. Self is
+	// not included.
+	History(ctx context.Context) ([]BranchTable, error)
+
+	// Set mints a new contribution/branches claim with this table's
+	// branches carried forward, the named branch's head replaced
+	// (or added), and a contribution/branches edge linking to the
+	// previous table (if any). Returns the new BranchTable wrapping
+	// the new claim.
+	Set(ctx context.Context, name string, head Id, contributor Contributor, createdAt time.Time) (BranchTable, error)
+}
+
 // Branch is a convenience view over a contribution/branch claim.
 //
 // Per the §4.6 model, B is a map[string]Id from branch name to the id
