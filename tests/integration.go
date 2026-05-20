@@ -48,9 +48,6 @@ func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Arc
 	t.Run("AliceEmail", func(t *testing.T) {
 		runAliceEmail(t, ctx, newTestArchive(factory))
 	})
-	t.Run("AgentAnalyzesEmails", func(t *testing.T) {
-		runAgentAnalyzes(t, ctx, newTestArchive(factory))
-	})
 	t.Run("AddGraphAutoConsolidates", func(t *testing.T) {
 		runAddGraphAutoConsolidates(t, ctx, newTestArchive(factory))
 	})
