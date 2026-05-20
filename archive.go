@@ -23,13 +23,13 @@ type Archive interface {
 	// AddClaim appends a single claim to the named branch. Loads
 	// the branch's current closure, adds the claim, commits via
 	// AddGraph. Use AddGraph directly for multi-claim transactions.
-	AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error
+	AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error
 
 	// AddGraph commits g to the named branch. Every claim in g is
 	// absorbed into 𝒰, a contribution/head claim wraps g's open
 	// heads (auto-consolidating multi-headed graphs), and a new
 	// contribution/branches table records the binding.
-	AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error
+	AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error
 
 	// VerifyBranch loads the claim at the branch's latest head and
 	// runs the §5.10 checks across its provenance.
@@ -193,7 +193,7 @@ func (a *archive) VerifyBranch(ctx context.Context, name string) error {
 	return c.Validate(ctx)
 }
 
-func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error {
+func (a *archive) AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error {
 	if c == nil {
 		return errors.New("ranke.Archive.AddClaim: nil claim")
 	}
@@ -202,8 +202,8 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 		return errors.New("ranke.Archive.AddClaim: claim has no contributor")
 	}
 	var g Graph
-	if a.table.Has(name) {
-		b, err := a.table.Get(ctx, name)
+	if a.table.Has(branchName) {
+		b, err := a.table.Get(ctx, branchName)
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 		}
@@ -221,7 +221,7 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 	if err := g.Add(c); err != nil {
 		return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 	}
-	return a.AddGraph(ctx, name, g, contributor, createdAt...)
+	return a.AddGraph(ctx, branchName, g, contributor, createdAt...)
 }
 
 // AddGraph advances the named branch per spec §4.7:
@@ -229,7 +229,7 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 //  2. Build a contribution/head claim consolidating g's open heads.
 //  3. Delegate the branches-claim mint to a.table.Set.
 //  4. Persist the new B_h via a.bth.
-func (a *archive) AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
+func (a *archive) AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
 		return errors.New("ranke.Archive.AddGraph: nil graph")
 	}
@@ -277,7 +277,7 @@ func (a *archive) AddGraph(ctx context.Context, name string, g Graph, contributo
 		return fmt.Errorf("ranke.Archive.AddGraph: absorb head claim: %w", err)
 	}
 
-	nextTable, err := a.table.Set(ctx, name, headC.node.id, contributor, at)
+	nextTable, err := a.table.Set(ctx, branchName, headC.node.id, contributor, at)
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.AddGraph: %w", err)
 	}
