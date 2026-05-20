@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,16 +27,17 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	ctx := context.Background()
 	args := os.Args[2:]
 	switch os.Args[1] {
 	case "info":
-		exit(cmdInfo(args))
+		exit(cmdInfo(ctx, args))
 	case "branches":
-		exit(cmdBranches(args))
+		exit(cmdBranches(ctx, args))
 	case "show":
-		exit(cmdShow(args))
+		exit(cmdShow(ctx, args))
 	case "validate":
-		exit(cmdValidate(args))
+		exit(cmdValidate(ctx, args))
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -55,7 +57,7 @@ usage:
   ranke show     <dir> <id>
   ranke validate <dir>
 
-dir is a filesystem-backed archive (FsUniverse + FsBranchTableHead at dir/B_h). Read-only.`)
+dir is a data bundle: dir/universe/ (claims + content) + dir/branches/B_h. Read-only.`)
 }
 
 func exit(err error) {
@@ -65,29 +67,29 @@ func exit(err error) {
 	}
 }
 
-func openArchive(dir string) (ranke.Archive, error) {
-	u, err := ranke.NewFsUniverse(dir)
+func openArchive(ctx context.Context, dir string) (ranke.Archive, error) {
+	u, err := ranke.NewFsUniverse(filepath.Join(dir, "universe"))
 	if err != nil {
-		return nil, fmt.Errorf("open universe %s: %w", dir, err)
+		return nil, fmt.Errorf("open universe in %s: %w", dir, err)
 	}
-	bth, err := ranke.NewFsBranchTableHead(filepath.Join(dir, "B_h"))
+	bth, err := ranke.NewFsBranchTableHead(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
-		return nil, fmt.Errorf("open branch table head: %w", err)
+		return nil, fmt.Errorf("open branch table head in %s: %w", dir, err)
 	}
-	return ranke.NewArchive(u, bth)
+	return ranke.NewArchive(ctx, u, bth)
 }
 
 // --- info ---
 
-func cmdInfo(args []string) error {
+func cmdInfo(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("info: usage: ranke info <dir>")
 	}
-	a, err := openArchive(args[0])
+	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	branches := a.Branches()
+	branches := a.Branches(ctx)
 	fmt.Printf("archive %s\n", args[0])
 	fmt.Printf("  branches: %d\n", len(branches))
 	for _, b := range branches {
@@ -98,15 +100,15 @@ func cmdInfo(args []string) error {
 
 // --- branches ---
 
-func cmdBranches(args []string) error {
+func cmdBranches(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("branches: usage: ranke branches <dir>")
 	}
-	a, err := openArchive(args[0])
+	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	bs := a.Branches()
+	bs := a.Branches(ctx)
 	if len(bs) == 0 {
 		fmt.Println("(no branches)")
 		return nil
@@ -126,12 +128,12 @@ func cmdBranches(args []string) error {
 //
 //	ranke show <file>        heuristic: claim if CBOR-decodes, else content
 //	ranke show <dir> <id>    open the archive, resolve id with full wiring
-func cmdShow(args []string) error {
+func cmdShow(ctx context.Context, args []string) error {
 	switch len(args) {
 	case 1:
 		return showFile(args[0])
 	case 2:
-		return showInArchive(args[0], args[1])
+		return showInArchive(ctx, args[0], args[1])
 	default:
 		return fmt.Errorf("show: usage: ranke show <file>  OR  ranke show <dir> <id>")
 	}
@@ -158,8 +160,8 @@ func showFile(path string) error {
 	return nil
 }
 
-func showInArchive(dir, idStr string) error {
-	a, err := openArchive(dir)
+func showInArchive(ctx context.Context, dir, idStr string) error {
+	a, err := openArchive(ctx, dir)
 	if err != nil {
 		return err
 	}
@@ -167,7 +169,7 @@ func showInArchive(dir, idStr string) error {
 	if err != nil {
 		return fmt.Errorf("show: parse id %q: %w", idStr, err)
 	}
-	g, err := a.GetGraph(id)
+	g, err := a.GetGraph(ctx, id)
 	if err != nil {
 		return fmt.Errorf("show: fetch claim: %w", err)
 	}
@@ -181,22 +183,22 @@ func showInArchive(dir, idStr string) error {
 
 // --- validate ---
 
-func cmdValidate(args []string) error {
+func cmdValidate(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("validate: usage: ranke validate <dir>")
 	}
-	a, err := openArchive(args[0])
+	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	branches := a.Branches()
+	branches := a.Branches(ctx)
 	if len(branches) == 0 {
 		return fmt.Errorf("validate: archive has no branches")
 	}
 	totalFailed := 0
 	for _, b := range branches {
 		fmt.Printf("branch %s → %s\n", b.Name(), b.Latest().Head().String())
-		g, err := a.GetGraph(b.Latest().Head())
+		g, err := a.GetGraph(ctx, b.Latest().Head())
 		if err != nil {
 			fmt.Printf("  ✗ load graph: %v\n", err)
 			totalFailed++

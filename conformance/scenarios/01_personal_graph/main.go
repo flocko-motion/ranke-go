@@ -17,7 +17,7 @@
 package main
 
 import (
-	"path/filepath"
+	"context"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
@@ -33,6 +33,7 @@ func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 const expectedMainHead = "b5ua3tgiyjt3tezqsng2dserleoawi6g6ymk2qj4xwi2ojxwk6mzgdi35sdapnp7i333tbisaykhmnnzokoouxqbhwvyajrymtfyrk7zhbq"
 
 func main() {
+	ctx := context.Background()
 	s := helpers.New("01 - personal knowledge graph",
 		time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC))
 
@@ -199,15 +200,16 @@ func main() {
 	must(g.Add(familyRel))
 
 	// --- 7. Consolidate, then compose an Archive from its parts ---
-	// (filesystem Universe + B_h file alongside it) and persist as
-	// branch "main". Real deployments would stack a MemUniverse on
-	// top, or swap S3Universe in below — this scenario keeps it flat.
+	// (filesystem Universe under data/universe/, B_h file under
+	// data/branches/) and persist as branch "main". Real deployments
+	// would stack a MemUniverse on top, or swap S3Universe in below —
+	// this scenario keeps it flat so the bundle is just a directory.
 	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
-	u := must(ranke.NewFsUniverse(helpers.ArchiveDir))
-	bth := must(ranke.NewFsBranchTableHead(filepath.Join(helpers.ArchiveDir, "B_h")))
-	arc := must(ranke.NewArchive(u, bth))
-	must(arc.SetBranch("main", g, alice, s.NextTimestamp(time.Second)))
+	u := must(ranke.NewFsUniverse(helpers.UniverseDir))
+	bth := must(ranke.NewFsBranchTableHead(helpers.BranchTableHeadPath))
+	arc := must(ranke.NewArchive(ctx, u, bth))
+	must(arc.SetBranch(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---
-	s.ReloadAndVerify("main", expectedMainHead)
+	s.ReloadAndVerify(ctx, "main", expectedMainHead)
 }

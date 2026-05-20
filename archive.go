@@ -9,17 +9,17 @@ import (
 
 // NewArchive composes a Universe (𝒰) with a BranchTableHead (B_h)
 // into a Ranke-Archive (spec §4.8). The Archive holds no resources
-// of its own — Close() does not close u or bth; the caller manages
+// of its own — closing it does not close u or bth; the caller manages
 // their lifetimes, which is what lets multiple Archives share one
 // Universe.
-func NewArchive(u Universe, bth BranchTableHead) (Archive, error) {
+func NewArchive(ctx context.Context, u Universe, bth BranchTableHead) (Archive, error) {
 	if u == nil {
 		return nil, errors.New("ranke.NewArchive: nil Universe")
 	}
 	if bth == nil {
 		return nil, errors.New("ranke.NewArchive: nil BranchTableHead")
 	}
-	bh, err := bth.Load(context.Background())
+	bh, err := bth.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewArchive: load B_h: %w", err)
 	}
@@ -41,7 +41,7 @@ type archive struct {
 	content map[string][]byte
 }
 
-func (a *archive) lookupClaim(id Id) (*claim, error) {
+func (a *archive) lookupClaim(ctx context.Context, id Id) (*claim, error) {
 	if id == nil {
 		return nil, errors.New("nil id")
 	}
@@ -49,7 +49,7 @@ func (a *archive) lookupClaim(id Id) (*claim, error) {
 	if c, ok := a.claims[k]; ok {
 		return c, nil
 	}
-	cl, err := a.u.LoadClaim(context.Background(), id)
+	cl, err := a.u.LoadClaim(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -58,22 +58,22 @@ func (a *archive) lookupClaim(id Id) (*claim, error) {
 		return nil, errors.New("foreign Claim returned by Universe")
 	}
 	a.claims[k] = c
-	if err := a.loadClaimContent(c); err != nil {
+	if err := a.loadClaimContent(ctx, c); err != nil {
 		delete(a.claims, k)
 		return nil, err
 	}
-	if err := a.wireContributor(c); err != nil {
+	if err := a.wireContributor(ctx, c); err != nil {
 		delete(a.claims, k)
 		return nil, err
 	}
 	return c, nil
 }
 
-func (a *archive) loadClaimContent(c *claim) error {
+func (a *archive) loadClaimContent(ctx context.Context, c *claim) error {
 	if c.node.contentHash == nil || c.node.content != nil {
 		return nil
 	}
-	b, err := a.fetchContent(c.node.contentHash, c.node.size)
+	b, err := a.fetchContent(ctx, c.node.contentHash, c.node.size)
 	if err != nil {
 		return fmt.Errorf("node content %s: %w", c.node.contentHash.String(), err)
 	}
@@ -81,12 +81,12 @@ func (a *archive) loadClaimContent(c *claim) error {
 	return nil
 }
 
-func (a *archive) fetchContent(id Id, expected uint64) ([]byte, error) {
+func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]byte, error) {
 	k := id.String()
 	if b, ok := a.content[k]; ok {
 		return b, nil
 	}
-	b, err := a.u.GetContent(context.Background(), id, expected)
+	b, err := a.u.GetContent(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -94,14 +94,14 @@ func (a *archive) fetchContent(id Id, expected uint64) ([]byte, error) {
 	return b, nil
 }
 
-func (a *archive) wireContributor(c *claim) error {
+func (a *archive) wireContributor(ctx context.Context, c *claim) error {
 	if len(c.edges) == 0 {
 		c.contributor = c
 		return nil
 	}
 	for _, e := range c.edges {
 		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
-			cc, err := a.lookupClaim(e.reference)
+			cc, err := a.lookupClaim(ctx, e.reference)
 			if err != nil {
 				return fmt.Errorf("wire contributor: %w", err)
 			}
@@ -112,41 +112,41 @@ func (a *archive) wireContributor(c *claim) error {
 	return errors.New("non-root claim missing contribution/contributor edge")
 }
 
-func (a *archive) absorbClaim(c *claim) error {
+func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
 	k := c.node.id.String()
 	if _, ok := a.claims[k]; !ok {
 		a.claims[k] = c
 	}
-	if err := a.u.SaveClaim(context.Background(), c); err != nil {
+	if err := a.u.SaveClaim(ctx, c); err != nil {
 		return err
 	}
 	if c.node.content != nil && c.node.contentHash != nil {
-		if err := a.absorbContent(c.node.contentHash, c.node.content); err != nil {
+		if err := a.absorbContent(ctx, c.node.contentHash, c.node.content); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *archive) absorbContent(id Id, b []byte) error {
+func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
 	k := id.String()
 	a.content[k] = b
-	return a.u.SaveContent(context.Background(), id, b)
+	return a.u.SaveContent(ctx, id, b)
 }
 
-func (a *archive) HasGraph(head Id) bool {
+func (a *archive) HasGraph(ctx context.Context, head Id) bool {
 	if head == nil {
 		return false
 	}
-	_, err := a.lookupClaim(head)
+	_, err := a.lookupClaim(ctx, head)
 	return err == nil
 }
 
-func (a *archive) GetGraph(head Id) (Graph, error) {
+func (a *archive) GetGraph(ctx context.Context, head Id) (Graph, error) {
 	if head == nil {
 		return nil, errors.New("ranke.Archive.GetGraph: nil head")
 	}
-	root, err := a.lookupClaim(head)
+	root, err := a.lookupClaim(ctx, head)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.Archive.GetGraph: head %s: %w", head.String(), err)
 	}
@@ -156,6 +156,9 @@ func (a *archive) GetGraph(head Id) (Graph, error) {
 	}
 	queue := []*claim{root}
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		c := queue[0]
 		queue = queue[1:]
 		k := c.node.id.String()
@@ -166,7 +169,7 @@ func (a *archive) GetGraph(head Id) (Graph, error) {
 		for _, e := range c.edges {
 			refKey := e.reference.String()
 			g.referenced[refKey] = struct{}{}
-			next, err := a.lookupClaim(e.reference)
+			next, err := a.lookupClaim(ctx, e.reference)
 			if err != nil {
 				return nil, fmt.Errorf("ranke.Archive.GetGraph: missing claim %s referenced by %s: %w", refKey, k, err)
 			}
@@ -176,15 +179,15 @@ func (a *archive) GetGraph(head Id) (Graph, error) {
 	return g, nil
 }
 
-func (a *archive) resolveBranchesTable() (*claim, error) {
+func (a *archive) resolveBranchesTable(ctx context.Context) (*claim, error) {
 	if a.branchesHead == nil {
 		return nil, nil
 	}
-	return a.lookupClaim(a.branchesHead)
+	return a.lookupClaim(ctx, a.branchesHead)
 }
 
-func (a *archive) findBranchEdge(name string) (*claim, *edge, error) {
-	table, err := a.resolveBranchesTable()
+func (a *archive) findBranchEdge(ctx context.Context, name string) (*claim, *edge, error) {
+	table, err := a.resolveBranchesTable(ctx)
 	if err != nil || table == nil {
 		return nil, nil, err
 	}
@@ -196,23 +199,23 @@ func (a *archive) findBranchEdge(name string) (*claim, *edge, error) {
 	return table, nil, nil
 }
 
-func (a *archive) HasBranch(name string) bool {
-	_, e, err := a.findBranchEdge(name)
+func (a *archive) HasBranch(ctx context.Context, name string) bool {
+	_, e, err := a.findBranchEdge(ctx, name)
 	return err == nil && e != nil
 }
 
-func (a *archive) GetBranch(name string) (Branch, error) {
-	table, e, err := a.findBranchEdge(name)
+func (a *archive) GetBranch(ctx context.Context, name string) (Branch, error) {
+	table, e, err := a.findBranchEdge(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.Archive.GetBranch: %w", err)
 	}
 	if e == nil {
 		return nil, fmt.Errorf("ranke.Archive.GetBranch: branch %q not found", name)
 	}
-	return a.buildBranchView(table, e)
+	return a.buildBranchView(ctx, table, e)
 }
 
-func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error) {
+func (a *archive) buildBranchView(ctx context.Context, table *claim, branchEdge *edge) (Branch, error) {
 	name := string(branchEdge.content)
 	head := branchEdge.reference
 
@@ -222,7 +225,7 @@ func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error
 		var prev *claim
 		for _, e := range cur.edges {
 			if e.typeClass == EdgeContribution && e.typeSub == "branches" {
-				p, err := a.lookupClaim(e.reference)
+				p, err := a.lookupClaim(ctx, e.reference)
 				if err != nil {
 					return nil, fmt.Errorf("provenance table %s: %w", e.reference.String(), err)
 				}
@@ -253,27 +256,27 @@ func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error
 	}, nil
 }
 
-func (a *archive) VerifyBranch(name string) error {
-	b, err := a.GetBranch(name)
+func (a *archive) VerifyBranch(ctx context.Context, name string) error {
+	b, err := a.GetBranch(ctx, name)
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	g, err := a.GetGraph(b.Latest().Head())
+	g, err := a.GetGraph(ctx, b.Latest().Head())
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: GetGraph %s: %w", b.Latest().Head().String(), err)
 	}
 	return g.Validate()
 }
 
-func (a *archive) Branches() []Branch {
-	table, err := a.resolveBranchesTable()
+func (a *archive) Branches(ctx context.Context) []Branch {
+	table, err := a.resolveBranchesTable(ctx)
 	if err != nil || table == nil {
 		return nil
 	}
 	out := make([]Branch, 0)
 	for _, e := range table.edges {
 		if e.typeClass == EdgeContribution && e.typeSub == "branch" {
-			b, err := a.buildBranchView(table, e)
+			b, err := a.buildBranchView(ctx, table, e)
 			if err == nil {
 				out = append(out, b)
 			}
@@ -282,7 +285,7 @@ func (a *archive) Branches() []Branch {
 	return out
 }
 
-func (a *archive) SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
+func (a *archive) SetBranch(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
 		return errors.New("ranke.Archive.SetBranch: nil graph")
 	}
@@ -298,7 +301,7 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor, creat
 	}
 
 	for _, c := range cg.claims {
-		if err := a.absorbClaim(c); err != nil {
+		if err := a.absorbClaim(ctx, c); err != nil {
 			return fmt.Errorf("ranke.Archive.SetBranch: absorb claim: %w", err)
 		}
 	}
@@ -326,13 +329,13 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor, creat
 		return fmt.Errorf("ranke.Archive.SetBranch: build head claim: %w", err)
 	}
 	headC := headClaim.(*claim)
-	if err := a.absorbClaim(headC); err != nil {
+	if err := a.absorbClaim(ctx, headC); err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: absorb head claim: %w", err)
 	}
 
 	var prevTable *claim
 	if a.branchesHead != nil {
-		prevTable, err = a.lookupClaim(a.branchesHead)
+		prevTable, err = a.lookupClaim(ctx, a.branchesHead)
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.SetBranch: load previous table: %w", err)
 		}
@@ -390,12 +393,12 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor, creat
 		return fmt.Errorf("ranke.Archive.SetBranch: build branches claim: %w", err)
 	}
 	tableC := tableClaim.(*claim)
-	if err := a.absorbClaim(tableC); err != nil {
+	if err := a.absorbClaim(ctx, tableC); err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: absorb branches claim: %w", err)
 	}
 
 	a.branchesHead = tableC.node.id
-	if err := a.bth.Save(context.Background(), a.branchesHead); err != nil {
+	if err := a.bth.Save(ctx, a.branchesHead); err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: persist B_h: %w", err)
 	}
 	return nil
