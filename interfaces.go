@@ -25,6 +25,7 @@
 package ranke
 
 import (
+	"context"
 	"crypto"
 	"time"
 )
@@ -267,18 +268,22 @@ type Contributor interface {
 
 // Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
 // are projections of claims that live in the underlying Universe.
+//
+// Every method takes a ctx; pass context.Background() if there's
+// nothing to cancel. The library honors ctx.Done() between Universe
+// calls.
 type Archive interface {
-	HasGraph(head Id) bool
-	GetGraph(head Id) (Graph, error)
+	HasGraph(ctx context.Context, head Id) bool
+	GetGraph(ctx context.Context, head Id) (Graph, error)
 
-	HasBranch(name string) bool
-	GetBranch(name string) (Branch, error)
-	SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error
-	Branches() []Branch
+	HasBranch(ctx context.Context, name string) bool
+	GetBranch(ctx context.Context, name string) (Branch, error)
+	SetBranch(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error
+	Branches(ctx context.Context) []Branch
 
 	// VerifyBranch loads the closure rooted at the branch's latest
 	// head and runs the spec §5.10 checks across it.
-	VerifyBranch(name string) error
+	VerifyBranch(ctx context.Context, name string) error
 }
 
 // Branch is a convenience view over a contribution/branch claim.

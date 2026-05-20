@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
@@ -18,12 +19,13 @@ import (
 // mem) and the test handle is fresh.
 func commit(t *testing.T, ts *testArchive, g ranke.Graph, contributor ranke.Contributor) {
 	t.Helper()
+	ctx := context.Background()
 	if !g.IsConsolidated() {
 		t.Logf("    consolidating %d open heads", len(g.Heads()))
 		must(g.Consolidate(contributor))
 	}
 	t.Logf("    SetBranch main → %s", g.Heads()[0].String()[:16]+"…")
-	require.NoError(t, ts.SetBranch("main", g, contributor), "SetBranch main")
+	require.NoError(t, ts.SetBranch(ctx, "main", g, contributor), "SetBranch main")
 	t.Logf("    [Reset] drop handle, reload from backend")
 	ts.Reset()
 }
@@ -32,10 +34,11 @@ func commit(t *testing.T, ts *testArchive, g ranke.Graph, contributor ranke.Cont
 // Graph plus the bound head id.
 func fetchMain(t *testing.T, ts *testArchive) (ranke.Graph, ranke.Id) {
 	t.Helper()
-	require.True(t, ts.HasBranch("main"), "branch main exists after reset")
-	b := must(ts.GetBranch("main"))
+	ctx := context.Background()
+	require.True(t, ts.HasBranch(ctx, "main"), "branch main exists after reset")
+	b := must(ts.GetBranch(ctx, "main"))
 	head := b.Latest().Head()
-	g := must(ts.GetGraph(head))
+	g := must(ts.GetGraph(ctx, head))
 	t.Logf("    fetched main → head %s (%d open heads)", head.String()[:16]+"…", len(g.Heads()))
 	return g, head
 }

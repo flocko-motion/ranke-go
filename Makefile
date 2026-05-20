@@ -69,9 +69,8 @@ scenarios:
 verify-scenarios:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
-		(cd "$$d" && rm -rf archive ids.txt && go run . > /dev/null); \
-		diff -r "$$d/archive_reference" "$$d/archive" > /dev/null \
-			&& diff "$$d/ids_reference.txt" "$$d/ids.txt" > /dev/null \
+		(cd "$$d" && rm -rf data && go run . > /dev/null); \
+		diff -r "$$d/data_reference" "$$d/data" > /dev/null \
 			&& echo "$$d: matches reference ✓" \
 			|| { echo "$$d: DRIFT — differs from checked-in reference"; exit 1; }; \
 	done
@@ -82,15 +81,14 @@ verify-scenarios:
 update-references:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- update $$d ---"; \
-		(cd "$$d" && rm -rf archive ids.txt && go run . > /dev/null); \
-		rm -rf "$$d/archive_reference" "$$d/ids_reference.txt"; \
-		cp -r "$$d/archive" "$$d/archive_reference"; \
-		cp "$$d/ids.txt" "$$d/ids_reference.txt"; \
+		(cd "$$d" && rm -rf data && go run . > /dev/null); \
+		rm -rf "$$d/data_reference"; \
+		cp -r "$$d/data" "$$d/data_reference"; \
 	done
 	@echo "References updated. Review with: git diff conformance/scenarios/"
 
 clean:
 	rm -rf bin/
 	@for d in $(SCENARIO_DIRS); do \
-		rm -rf "$$d/archive" "$$d/ids.txt"; \
+		rm -rf "$$d/data"; \
 	done

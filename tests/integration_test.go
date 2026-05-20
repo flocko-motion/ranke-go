@@ -4,6 +4,7 @@
 package tests
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestIntegrationMem(t *testing.T) {
-	a, err := ranke.NewArchive(ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
+	a, err := ranke.NewArchive(context.Background(), ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
 	require.NoError(t, err)
 	IntegrationTest(t, func() ranke.Archive { return a })
 }
@@ -56,7 +57,7 @@ func TestIntegrationFs(t *testing.T) {
 		require.NoError(t, err)
 		bth, err := ranke.NewFsBranchTableHead(filepath.Join(fsTestDir, "B_h"))
 		require.NoError(t, err)
-		a, err := ranke.NewArchive(u, bth)
+		a, err := ranke.NewArchive(context.Background(), u, bth)
 		require.NoError(t, err)
 		return a
 	})

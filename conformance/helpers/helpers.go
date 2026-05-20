@@ -2,6 +2,7 @@
 package helpers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -16,8 +17,12 @@ import (
 const (
 	KeysDir    = "../../fixtures/keys"
 	SourcesDir = "../../fixtures/sources"
-	ArchiveDir = "./archive"
-	IdsPath    = "./ids.txt"
+	// DataDir is the scenario's output bundle: tar it and you have
+	// everything a verifier needs.
+	DataDir             = "./data"
+	UniverseDir         = DataDir + "/universe"
+	BranchTableHeadPath = DataDir + "/branches/B_h"
+	IdsPath             = DataDir + "/ids.txt"
 )
 
 type Scenario struct {
@@ -27,12 +32,9 @@ type Scenario struct {
 
 func New(title string, at time.Time) *Scenario {
 	fmt.Printf("scenario %s\n\n", title)
-	fmt.Printf("outputs:\n  %s\n  %s\n\n", ArchiveDir, IdsPath)
-	if err := os.RemoveAll(ArchiveDir); err != nil {
-		log.Fatalf("scenario.New: wipe %s: %v", ArchiveDir, err)
-	}
-	if err := os.RemoveAll(IdsPath); err != nil {
-		log.Fatalf("scenario.New: wipe %s: %v", IdsPath, err)
+	fmt.Printf("output bundle:\n  %s/\n    universe/   (claims + content)\n    branches/B_h\n    ids.txt\n\n", DataDir)
+	if err := os.RemoveAll(DataDir); err != nil {
+		log.Fatalf("scenario.New: wipe %s: %v", DataDir, err)
 	}
 	return &Scenario{Title: title, at: at.UTC()}
 }
@@ -45,16 +47,17 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 }
 
 func (s *Scenario) ReloadAndVerify(expectBranch, expectHead string) {
-	u := Must(ranke.NewFsUniverse(ArchiveDir))
-	bth := Must(ranke.NewFsBranchTableHead(filepath.Join(ArchiveDir, "B_h")))
-	arc := Must(ranke.NewArchive(u, bth))
+	ctx := context.Background()
+	u := Must(ranke.NewFsUniverse(UniverseDir))
+	bth := Must(ranke.NewFsBranchTableHead(BranchTableHeadPath))
+	arc := Must(ranke.NewArchive(ctx, u, bth))
 	allIds := make(map[string]struct{})
 	found := false
 	failedBranches := 0
-	for _, b := range arc.Branches() {
+	for _, b := range arc.Branches(ctx) {
 		head := b.Latest().Head().String()
 		fmt.Printf("branch %s → %s\n", b.Name(), head)
-		g := Must(arc.GetGraph(b.Latest().Head()))
+		g := Must(arc.GetGraph(ctx, b.Latest().Head()))
 		count, failed := 0, 0
 		err := g.Validate(func(c ranke.Claim, depth int, e error) {
 			count++
