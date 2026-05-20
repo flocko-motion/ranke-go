@@ -34,6 +34,12 @@ agentAKey is bound to the agent for the agent's OWN contributions.
 
 ### 6. Agent: extract relations.
 
+Each relation/* edge carries an additional "conviction" field
+(paper §4.2: "additional implementation-defined fields") —
+demonstrates that arbitrary fields participate in the canonical
+encoding and thus in the edge's id. Variant impls must encode
+the same field key/value to reproduce the same ids.
+
 ### 7. AddGraph — archive auto-consolidates the open heads and persists.
 
 ### 8. Reload, verify every branch, dump ids, assert head.

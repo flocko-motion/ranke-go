@@ -28,7 +28,7 @@ import (
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "bciqmezhn3mqgxthxgqcs2s33wly3uzfv5fk6xd5frvilh5xp5lp2sey"
+const expectedMainHead = "bciqbjygkwo6kqd7xn2qzcgxgzwoa3kbfvv2cr2x2vd5gh63zd4teuay"
 
 func main() {
 	ctx := context.Background()
@@ -136,6 +136,15 @@ func main() {
 	must(g.Add(bobJr))
 
 	// --- 6. Agent: extract relations. ---
+	// Each relation/* edge carries an additional "conviction" field
+	// (paper §4.2: "additional implementation-defined fields") —
+	// demonstrates that arbitrary fields participate in the canonical
+	// encoding and thus in the edge's id. Variant impls must encode
+	// the same field key/value to reproduce the same ids.
+	high := map[string]string{"conviction": "high"}
+	low := map[string]string{"conviction": "low"}
+	medium := map[string]string{"conviction": "medium"}
+
 	likes := must(ranke.ClaimBuilder{
 		Type:        ranke.TypeRelation("likes"),
 		Content:     []byte("Alice expresses preference for apples in the email."),
@@ -143,8 +152,8 @@ func main() {
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationFrom})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: apples.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationTo})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationFrom, Fields: high})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: apples.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationTo, Fields: high})),
 		},
 	}.Sign())
 	must(g.Add(likes))
@@ -155,20 +164,20 @@ func main() {
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom, Fields: high})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo, Fields: high})),
 		},
 	}.Sign())
 	must(g.Add(knows))
 	ignores := must(ranke.ClaimBuilder{
 		Type:        ranke.TypeRelation("ignores"),
-		Content:     []byte("Bob does not respond to Alice (inferred; low conviction)."),
+		Content:     []byte("Bob does not respond to Alice (inferred from absence of reply)."),
 		Contributor: agent,
 		CreatedAt:   s.NextTimestamp(time.Second),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationFrom})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationTo})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationFrom, Fields: low})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationTo, Fields: low})),
 		},
 	}.Sign())
 	must(g.Add(ignores))
@@ -180,8 +189,8 @@ func main() {
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailFamily.ID(), Type: ranke.TypeDerivation("source")})),
 			// Symmetric: both members are RelationFrom (§4.7).
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("family"), RelationDirection: ranke.RelationFrom})),
-			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobJr.ID(), Type: ranke.TypeRelation("family"), RelationDirection: ranke.RelationFrom})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("family"), RelationDirection: ranke.RelationFrom, Fields: medium})),
+			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobJr.ID(), Type: ranke.TypeRelation("family"), RelationDirection: ranke.RelationFrom, Fields: medium})),
 		},
 	}.Sign())
 	must(g.Add(family))
