@@ -40,6 +40,7 @@ func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
 	if !ok {
 		return nil, errors.New("foreign Claim returned by Universe")
 	}
+	c.universe = u
 	if err := wireContributor(ctx, u, c); err != nil {
 		return nil, err
 	}

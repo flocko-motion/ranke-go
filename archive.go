@@ -92,6 +92,9 @@ func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]b
 
 func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
 	k := c.node.id.String()
+	if c.universe == nil {
+		c.universe = a.u
+	}
 	if _, ok := a.claims[k]; !ok {
 		a.claims[k] = c
 	}
@@ -120,41 +123,15 @@ func (a *archive) HasClaim(ctx context.Context, id Id) bool {
 	return err == nil
 }
 
-func (a *archive) GetClaim(ctx context.Context, head Id) (Graph, error) {
-	if head == nil {
-		return nil, errors.New("ranke.Archive.GetClaim: nil head")
+func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
+	if id == nil {
+		return nil, errors.New("ranke.Archive.GetClaim: nil id")
 	}
-	root, err := a.lookupClaim(ctx, head)
+	c, err := a.lookupClaim(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Archive.GetClaim: head %s: %w", head.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetClaim: %s: %w", id.String(), err)
 	}
-	g := &graph{
-		claims:     make(map[string]*claim),
-		referenced: make(map[string]struct{}),
-	}
-	queue := []*claim{root}
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		c := queue[0]
-		queue = queue[1:]
-		k := c.node.id.String()
-		if _, seen := g.claims[k]; seen {
-			continue
-		}
-		g.claims[k] = c
-		for _, e := range c.edges {
-			refKey := e.reference.String()
-			g.referenced[refKey] = struct{}{}
-			next, err := a.lookupClaim(ctx, e.reference)
-			if err != nil {
-				return nil, fmt.Errorf("ranke.Archive.GetClaim: missing claim %s referenced by %s: %w", refKey, k, err)
-			}
-			queue = append(queue, next)
-		}
-	}
-	return g, nil
+	return c, nil
 }
 
 // --- Branches ---
@@ -180,11 +157,11 @@ func (a *archive) VerifyBranch(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	g, err := a.GetClaim(ctx, b.Latest().Head())
+	c, err := a.GetClaim(ctx, b.Latest().Head())
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: GetClaim %s: %w", b.Latest().Head().String(), err)
+		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	return g.Validate()
+	return c.Validate(ctx)
 }
 
 func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error {
@@ -201,9 +178,13 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 		}
-		g, err = a.GetClaim(ctx, b.Latest().Head())
+		head, err := a.GetClaim(ctx, b.Latest().Head())
 		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddClaim: load branch state: %w", err)
+			return fmt.Errorf("ranke.Archive.AddClaim: load branch head: %w", err)
+		}
+		g, err = head.Graph(ctx)
+		if err != nil {
+			return fmt.Errorf("ranke.Archive.AddClaim: materialize branch closure: %w", err)
 		}
 	} else {
 		g = NewGraph(contributor)

@@ -223,6 +223,15 @@ type Claim interface {
 	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
 	// ID is the claim's content-addressed identifier (= Node().ID()).
 	ID() Id
+	// Graph materializes the claim's provenance as a Graph by
+	// walking edge references. For claims loaded from a Universe
+	// the walk uses that Universe; for in-memory-constructed
+	// claims it walks only what's reachable through already-wired
+	// contributor refs.
+	Graph(ctx context.Context) (Graph, error)
+	// Validate is the spec §5.10 check across the claim's
+	// provenance — convenience for Graph(ctx).Validate().
+	Validate(ctx context.Context) error
 }
 
 // Contributor is a typed view over a Claim whose node type is
@@ -273,7 +282,9 @@ type Contributor interface {
 // library honors ctx.Done() between Universe calls.
 type Archive interface {
 	HasClaim(ctx context.Context, id Id) bool
-	GetClaim(ctx context.Context, id Id) (Graph, error)
+	// GetClaim returns the claim at id. Call .Graph(ctx) on the
+	// result to materialize the provenance as a Graph.
+	GetClaim(ctx context.Context, id Id) (Claim, error)
 
 	HasBranch(ctx context.Context, name string) bool
 	GetBranch(ctx context.Context, name string) (Branch, error)

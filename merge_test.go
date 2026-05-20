@@ -66,9 +66,13 @@ func TestMergeClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewArchive(dst): %v", err)
 	}
-	merged, err := dstArc.GetClaim(ctx, head)
+	mergedClaim, err := dstArc.GetClaim(ctx, head)
 	if err != nil {
 		t.Fatalf("dst GetClaim: %v", err)
+	}
+	merged, err := mergedClaim.Graph(ctx)
+	if err != nil {
+		t.Fatalf("merged.Graph: %v", err)
 	}
 	for _, want := range []Id{head, em.ID(), op.ID()} {
 		if !merged.Contains(want) {
