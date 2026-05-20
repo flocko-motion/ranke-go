@@ -112,11 +112,11 @@ func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
 	return a.u.SaveContent(ctx, id, b)
 }
 
-func (a *archive) HasClosure(ctx context.Context, head Id) bool {
-	if head == nil {
+func (a *archive) HasClaim(ctx context.Context, id Id) bool {
+	if id == nil {
 		return false
 	}
-	_, err := a.lookupClaim(ctx, head)
+	_, err := a.lookupClaim(ctx, id)
 	return err == nil
 }
 

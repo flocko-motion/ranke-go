@@ -272,7 +272,7 @@ type Contributor interface {
 // Every method takes a ctx threaded from the entry point. The
 // library honors ctx.Done() between Universe calls.
 type Archive interface {
-	HasClosure(ctx context.Context, head Id) bool
+	HasClaim(ctx context.Context, id Id) bool
 	GetClosure(ctx context.Context, head Id) (Graph, error)
 
 	HasBranch(ctx context.Context, name string) bool
