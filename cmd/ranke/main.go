@@ -169,7 +169,7 @@ func showInArchive(ctx context.Context, dir, idStr string) error {
 	if err != nil {
 		return fmt.Errorf("show: parse id %q: %w", idStr, err)
 	}
-	g, err := a.GetClosure(ctx, id)
+	g, err := a.GetClaim(ctx, id)
 	if err != nil {
 		return fmt.Errorf("show: fetch claim: %w", err)
 	}
@@ -198,7 +198,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 	totalFailed := 0
 	for _, b := range branches {
 		fmt.Printf("branch %s → %s\n", b.Name(), b.Latest().Head().String())
-		g, err := a.GetClosure(ctx, b.Latest().Head())
+		g, err := a.GetClaim(ctx, b.Latest().Head())
 		if err != nil {
 			fmt.Printf("  ✗ load graph: %v\n", err)
 			totalFailed++

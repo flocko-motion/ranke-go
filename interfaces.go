@@ -273,7 +273,7 @@ type Contributor interface {
 // library honors ctx.Done() between Universe calls.
 type Archive interface {
 	HasClaim(ctx context.Context, id Id) bool
-	GetClosure(ctx context.Context, head Id) (Graph, error)
+	GetClaim(ctx context.Context, id Id) (Graph, error)
 
 	HasBranch(ctx context.Context, name string) bool
 	GetBranch(ctx context.Context, name string) (Branch, error)

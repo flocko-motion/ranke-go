@@ -6,36 +6,36 @@ import (
 	"fmt"
 )
 
-// DefaultMergeClosure walks the closure of head in src claim-by-claim
+// DefaultMergeClaim walks the provenance of id in src claim-by-claim
 // via LoadClaim and writes each into dst. Idempotent (content-addressed);
 // dst.HasClaim short-circuits anything already present. Used as the
-// MergeClosure implementation by backends that don't need a native
+// MergeClaim implementation by backends that don't need a native
 // fast path (mem, fs). Cloud backends should provide their own.
-func DefaultMergeClosure(ctx context.Context, dst, src Universe, head Id) error {
+func DefaultMergeClaim(ctx context.Context, dst, src Universe, id Id) error {
 	if dst == nil {
-		return errors.New("ranke.DefaultMergeClosure: nil dst")
+		return errors.New("ranke.DefaultMergeClaim: nil dst")
 	}
 	if src == nil {
-		return errors.New("ranke.DefaultMergeClosure: nil src")
+		return errors.New("ranke.DefaultMergeClaim: nil src")
 	}
-	if head == nil {
-		return errors.New("ranke.DefaultMergeClosure: nil head")
+	if id == nil {
+		return errors.New("ranke.DefaultMergeClaim: nil id")
 	}
 	visited := map[string]struct{}{}
-	queue := []Id{head}
+	queue := []Id{id}
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		id := queue[0]
+		next := queue[0]
 		queue = queue[1:]
-		k := id.String()
+		k := next.String()
 		if _, seen := visited[k]; seen {
 			continue
 		}
 		visited[k] = struct{}{}
 
-		has, err := dst.HasClaim(ctx, id)
+		has, err := dst.HasClaim(ctx, next)
 		if err != nil {
 			return fmt.Errorf("dst.HasClaim %s: %w", k, err)
 		}
@@ -43,7 +43,7 @@ func DefaultMergeClosure(ctx context.Context, dst, src Universe, head Id) error 
 			continue
 		}
 
-		c, err := src.LoadClaim(ctx, id)
+		c, err := src.LoadClaim(ctx, next)
 		if err != nil {
 			return fmt.Errorf("src.LoadClaim %s: %w", k, err)
 		}

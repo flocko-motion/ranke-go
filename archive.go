@@ -120,13 +120,13 @@ func (a *archive) HasClaim(ctx context.Context, id Id) bool {
 	return err == nil
 }
 
-func (a *archive) GetClosure(ctx context.Context, head Id) (Graph, error) {
+func (a *archive) GetClaim(ctx context.Context, head Id) (Graph, error) {
 	if head == nil {
-		return nil, errors.New("ranke.Archive.GetClosure: nil head")
+		return nil, errors.New("ranke.Archive.GetClaim: nil head")
 	}
 	root, err := a.lookupClaim(ctx, head)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Archive.GetClosure: head %s: %w", head.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetClaim: head %s: %w", head.String(), err)
 	}
 	g := &graph{
 		claims:     make(map[string]*claim),
@@ -149,7 +149,7 @@ func (a *archive) GetClosure(ctx context.Context, head Id) (Graph, error) {
 			g.referenced[refKey] = struct{}{}
 			next, err := a.lookupClaim(ctx, e.reference)
 			if err != nil {
-				return nil, fmt.Errorf("ranke.Archive.GetClosure: missing claim %s referenced by %s: %w", refKey, k, err)
+				return nil, fmt.Errorf("ranke.Archive.GetClaim: missing claim %s referenced by %s: %w", refKey, k, err)
 			}
 			queue = append(queue, next)
 		}
@@ -180,9 +180,9 @@ func (a *archive) VerifyBranch(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	g, err := a.GetClosure(ctx, b.Latest().Head())
+	g, err := a.GetClaim(ctx, b.Latest().Head())
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: GetClosure %s: %w", b.Latest().Head().String(), err)
+		return fmt.Errorf("ranke.Archive.VerifyBranch: GetClaim %s: %w", b.Latest().Head().String(), err)
 	}
 	return g.Validate()
 }
@@ -201,7 +201,7 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 		}
-		g, err = a.GetClosure(ctx, b.Latest().Head())
+		g, err = a.GetClaim(ctx, b.Latest().Head())
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.AddClaim: load branch state: %w", err)
 		}

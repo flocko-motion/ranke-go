@@ -19,13 +19,15 @@ type Universe interface {
 	SaveContent(ctx context.Context, hash Id, content []byte) error
 	HasContent(ctx context.Context, hash Id) (bool, error)
 
-	// MergeClosure pulls every claim and content blob reachable
-	// from head in src into the receiver. Implementations should
-	// use their native fast path (S3 batch copy, Neo4j graph dump,
-	// SQL bulk insert) — a 1M-claim merge against a cloud backend
-	// via per-claim round trips is unworkable. Trivial backends
-	// (mem, fs) can delegate to DefaultMergeClosure.
-	MergeClosure(ctx context.Context, src Universe, head Id) error
+	// MergeClaim pulls the claim at id from src into the receiver,
+	// along with its provenance (every claim reachable from id).
+	// In Ranke-Graph a claim is inseparable from its provenance, so
+	// "merge claim" means "merge claim + closure". Implementations
+	// should use their native fast path (S3 batch copy, Neo4j graph
+	// dump, SQL bulk insert) — a 1M-claim merge via per-claim round
+	// trips is unworkable on cloud backends. Trivial backends (mem,
+	// fs) can delegate to DefaultMergeClaim.
+	MergeClaim(ctx context.Context, src Universe, id Id) error
 
 	Close() error
 }

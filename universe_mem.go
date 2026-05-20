@@ -97,8 +97,8 @@ func (u *memUniverse) SaveContent(_ context.Context, hash Id, content []byte) er
 	return nil
 }
 
-func (u *memUniverse) MergeClosure(ctx context.Context, src Universe, head Id) error {
-	return DefaultMergeClosure(ctx, u, src, head)
+func (u *memUniverse) MergeClaim(ctx context.Context, src Universe, id Id) error {
+	return DefaultMergeClaim(ctx, u, src, id)
 }
 
 func (u *memUniverse) HasContent(_ context.Context, hash Id) (bool, error) {

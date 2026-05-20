@@ -24,7 +24,7 @@ func fetchMain(t *testing.T, ctx context.Context, ts *testArchive) (ranke.Graph,
 	require.True(t, ts.HasBranch(ctx, "main"), "branch main exists after reset")
 	b := must(ts.GetBranch(ctx, "main"))
 	head := b.Latest().Head()
-	g := must(ts.GetClosure(ctx, head))
+	g := must(ts.GetClaim(ctx, head))
 	t.Logf("    fetched main → head %s (%d open heads)", head.String()[:16]+"…", len(g.Heads()))
 	return g, head
 }
@@ -161,7 +161,7 @@ func runAddClaimExtendsBranch(t *testing.T, ctx context.Context, ts *testArchive
 
 	b, err := ts.GetBranch(ctx, branchName)
 	require.NoError(t, err)
-	g, err := ts.GetClosure(ctx, b.Latest().Head())
+	g, err := ts.GetClaim(ctx, b.Latest().Head())
 	require.NoError(t, err)
 
 	require.True(t, g.Contains(emA.ID()), "first claim still reachable after second AddClaim")
@@ -225,7 +225,7 @@ func runAddGraphAutoConsolidates(t *testing.T, ctx context.Context, ts *testArch
 	headId := b.Latest().Head()
 	t.Logf("    branch head: %s", headId.String()[:16]+"…")
 
-	fresh, err := ts.GetClosure(ctx, headId)
+	fresh, err := ts.GetClaim(ctx, headId)
 	require.NoError(t, err)
 	require.True(t, fresh.IsConsolidated(), "loaded graph should be single-headed")
 	require.True(t, fresh.Heads()[0].Equal(headId), "loaded graph's head matches branch head")
