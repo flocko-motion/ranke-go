@@ -46,18 +46,20 @@ func TestMain(m *testing.M) {
 }
 
 func TestIntegrationMem(t *testing.T) {
-	a, err := ranke.NewArchive(context.Background(), ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
+	ctx := context.Background()
+	a, err := ranke.NewArchive(ctx, ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
 	require.NoError(t, err)
-	IntegrationTest(t, func() ranke.Archive { return a })
+	IntegrationTest(t, ctx, func() ranke.Archive { return a })
 }
 
 func TestIntegrationFs(t *testing.T) {
-	IntegrationTest(t, func() ranke.Archive {
+	ctx := context.Background()
+	IntegrationTest(t, ctx, func() ranke.Archive {
 		u, err := ranke.NewFsUniverse(fsTestDir)
 		require.NoError(t, err)
 		bth, err := ranke.NewFsBranchTableHead(filepath.Join(fsTestDir, "B_h"))
 		require.NoError(t, err)
-		a, err := ranke.NewArchive(context.Background(), u, bth)
+		a, err := ranke.NewArchive(ctx, u, bth)
 		require.NoError(t, err)
 		return a
 	})

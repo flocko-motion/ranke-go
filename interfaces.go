@@ -269,9 +269,8 @@ type Contributor interface {
 // Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
 // are projections of claims that live in the underlying Universe.
 //
-// Every method takes a ctx; pass context.Background() if there's
-// nothing to cancel. The library honors ctx.Done() between Universe
-// calls.
+// Every method takes a ctx threaded from the entry point. The
+// library honors ctx.Done() between Universe calls.
 type Archive interface {
 	HasGraph(ctx context.Context, head Id) bool
 	GetGraph(ctx context.Context, head Id) (Graph, error)

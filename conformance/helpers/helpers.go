@@ -46,8 +46,7 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 	return s.at
 }
 
-func (s *Scenario) ReloadAndVerify(expectBranch, expectHead string) {
-	ctx := context.Background()
+func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead string) {
 	u := Must(ranke.NewFsUniverse(UniverseDir))
 	bth := Must(ranke.NewFsBranchTableHead(BranchTableHeadPath))
 	arc := Must(ranke.NewArchive(ctx, u, bth))

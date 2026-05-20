@@ -27,16 +27,17 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	ctx := context.Background()
 	args := os.Args[2:]
 	switch os.Args[1] {
 	case "info":
-		exit(cmdInfo(args))
+		exit(cmdInfo(ctx, args))
 	case "branches":
-		exit(cmdBranches(args))
+		exit(cmdBranches(ctx, args))
 	case "show":
-		exit(cmdShow(args))
+		exit(cmdShow(ctx, args))
 	case "validate":
-		exit(cmdValidate(args))
+		exit(cmdValidate(ctx, args))
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -80,11 +81,10 @@ func openArchive(ctx context.Context, dir string) (ranke.Archive, error) {
 
 // --- info ---
 
-func cmdInfo(args []string) error {
+func cmdInfo(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("info: usage: ranke info <dir>")
 	}
-	ctx := context.Background()
 	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
@@ -100,11 +100,10 @@ func cmdInfo(args []string) error {
 
 // --- branches ---
 
-func cmdBranches(args []string) error {
+func cmdBranches(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("branches: usage: ranke branches <dir>")
 	}
-	ctx := context.Background()
 	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
@@ -129,12 +128,12 @@ func cmdBranches(args []string) error {
 //
 //	ranke show <file>        heuristic: claim if CBOR-decodes, else content
 //	ranke show <dir> <id>    open the archive, resolve id with full wiring
-func cmdShow(args []string) error {
+func cmdShow(ctx context.Context, args []string) error {
 	switch len(args) {
 	case 1:
 		return showFile(args[0])
 	case 2:
-		return showInArchive(args[0], args[1])
+		return showInArchive(ctx, args[0], args[1])
 	default:
 		return fmt.Errorf("show: usage: ranke show <file>  OR  ranke show <dir> <id>")
 	}
@@ -161,8 +160,7 @@ func showFile(path string) error {
 	return nil
 }
 
-func showInArchive(dir, idStr string) error {
-	ctx := context.Background()
+func showInArchive(ctx context.Context, dir, idStr string) error {
 	a, err := openArchive(ctx, dir)
 	if err != nil {
 		return err
@@ -185,11 +183,10 @@ func showInArchive(dir, idStr string) error {
 
 // --- validate ---
 
-func cmdValidate(args []string) error {
+func cmdValidate(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("validate: usage: ranke validate <dir>")
 	}
-	ctx := context.Background()
 	a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err

@@ -21,6 +21,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
@@ -42,13 +43,13 @@ import (
 // suite is correct iff each Reset is observably a no-op: the handle
 // changes, but values previously returned remain valid (claims,
 // graphs, branches, branch entries are self-contained).
-func IntegrationTest(t *testing.T, factory func() ranke.Archive) {
+func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Archive) {
 	t.Helper()
 	t.Run("AliceEmail", func(t *testing.T) {
-		runAliceEmail(t, newTestArchive(factory))
+		runAliceEmail(t, ctx, newTestArchive(factory))
 	})
 	t.Run("AgentAnalyzesEmails", func(t *testing.T) {
-		runAgentAnalyzes(t, newTestArchive(factory))
+		runAgentAnalyzes(t, ctx, newTestArchive(factory))
 	})
 }
 

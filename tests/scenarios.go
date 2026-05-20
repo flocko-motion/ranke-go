@@ -17,9 +17,8 @@ import (
 // under "main", consolidating first if needed. After commit, the
 // archive is Reset — the work has been "persisted" (or no-op'd on
 // mem) and the test handle is fresh.
-func commit(t *testing.T, ts *testArchive, g ranke.Graph, contributor ranke.Contributor) {
+func commit(t *testing.T, ctx context.Context, ts *testArchive, g ranke.Graph, contributor ranke.Contributor) {
 	t.Helper()
-	ctx := context.Background()
 	if !g.IsConsolidated() {
 		t.Logf("    consolidating %d open heads", len(g.Heads()))
 		must(g.Consolidate(contributor))
@@ -32,9 +31,8 @@ func commit(t *testing.T, ts *testArchive, g ranke.Graph, contributor ranke.Cont
 
 // fetchMain returns the current state of branch "main" as a fresh
 // Graph plus the bound head id.
-func fetchMain(t *testing.T, ts *testArchive) (ranke.Graph, ranke.Id) {
+func fetchMain(t *testing.T, ctx context.Context, ts *testArchive) (ranke.Graph, ranke.Id) {
 	t.Helper()
-	ctx := context.Background()
 	require.True(t, ts.HasBranch(ctx, "main"), "branch main exists after reset")
 	b := must(ts.GetBranch(ctx, "main"))
 	head := b.Latest().Head()
@@ -153,7 +151,7 @@ func symRelation(t *testing.T, ctr ranke.Contributor, sub, text string, sources 
 
 // --- Scenario: AliceEmail ---
 
-func runAliceEmail(t *testing.T, ts *testArchive) {
+func runAliceEmail(t *testing.T, ctx context.Context, ts *testArchive) {
 	t.Logf("Scenario: a single email is ingested as a source claim.")
 	t.Logf("  Paper §1 — 'A file exists, attributed to Alice by its")
 	t.Logf("             headers, that appears to be a copy of an email")
@@ -163,38 +161,38 @@ func runAliceEmail(t *testing.T, ts *testArchive) {
 	t.Logf("[Stage 1] bootstrap with operator (the only no-edge claim, §4.3)")
 	t.Logf("    operator id: %s", operator.ID().String()[:16]+"…")
 	g := ranke.NewGraph(operator)
-	commit(t, ts, g, operator)
+	commit(t, ctx, ts, g, operator)
 
 	// Branch points at a contribution/head claim that wraps the
 	// graph's open head (operator), per §4.6 — not at operator itself.
-	g0, _ := fetchMain(t, ts)
+	g0, _ := fetchMain(t, ctx, ts)
 	require.True(t, g0.Contains(operator.ID()),
 		"operator reachable through new branch's head closure")
 
 	t.Logf("[Stage 2] add Alice's email as a source/email claim")
-	g2, _ := fetchMain(t, ts)
+	g2, _ := fetchMain(t, ctx, ts)
 	em := email(t, operator,
 		"alice@example.com", "bob@example.com",
 		"Bob, just so you know, I really do like apples.\r\n— Alice\r\n")
 	t.Logf("    email id: %s", em.ID().String()[:16]+"…")
 	must(g2.Add(em))
-	commit(t, ts, g2, operator)
+	commit(t, ctx, ts, g2, operator)
 
 	t.Logf("[Verify] reload, walk closure, validate")
-	g3, _ := fetchMain(t, ts)
+	g3, _ := fetchMain(t, ctx, ts)
 	require.True(t, g3.Contains(em.ID()), "email survived reset")
 	require.True(t, g3.Contains(operator.ID()), "operator survived reset")
 	require.NoError(t, g3.Validate(), "graph validates after reload")
 
 	t.Logf("[Verify] mid-fetch reload: drop handle, refetch, head id must be stable")
 	ts.Reset()
-	g4, _ := fetchMain(t, ts)
+	g4, _ := fetchMain(t, ctx, ts)
 	require.True(t, g4.Heads()[0].Equal(g3.Heads()[0]), "head id stable across reset")
 }
 
 // --- Scenario: AgentAnalyzesEmails ---
 
-func runAgentAnalyzes(t *testing.T, ts *testArchive) {
+func runAgentAnalyzes(t *testing.T, ctx context.Context, ts *testArchive) {
 	t.Logf("Scenario: an agent contributor analyzes two emails, extracting")
 	t.Logf("  derivations, entities, and semantic relations (paper §3.5,")
 	t.Logf("  §4.7). Two Bobs from two sources get distinct ids by")
@@ -210,8 +208,8 @@ func runAgentAnalyzes(t *testing.T, ts *testArchive) {
 
 	g := ranke.NewGraph(operator)
 	must(g.Add(ag))
-	commit(t, ts, g, operator)
-	g, _ = fetchMain(t, ts)
+	commit(t, ctx, ts, g, operator)
+	g, _ = fetchMain(t, ctx, ts)
 	require.True(t, g.Contains(ag.ID()), "agent survived reset 1")
 
 	t.Logf("[Stage 2] add two source/email claims (Alice → Bob, ingested by operator)")
@@ -223,8 +221,8 @@ func runAgentAnalyzes(t *testing.T, ts *testArchive) {
 		"Bob, please tell Bob Jr. I miss him.\r\n— Alice\r\n")
 	must(g.Add(emailApples))
 	must(g.Add(emailFamily))
-	commit(t, ts, g, operator)
-	g, _ = fetchMain(t, ts)
+	commit(t, ctx, ts, g, operator)
+	g, _ = fetchMain(t, ctx, ts)
 	require.True(t, g.Contains(emailApples.ID()))
 	require.True(t, g.Contains(emailFamily.ID()))
 
@@ -263,10 +261,10 @@ func runAgentAnalyzes(t *testing.T, ts *testArchive) {
 	require.False(t, bobSr.ID().Equal(bobJr.ID()),
 		"two Bob entities from different sources have distinct ids")
 
-	commit(t, ts, g, operator)
+	commit(t, ctx, ts, g, operator)
 
 	t.Logf("[Verify] final reload: walk closure end-to-end and validate")
-	g, _ = fetchMain(t, ts)
+	g, _ = fetchMain(t, ctx, ts)
 	for _, c := range []ranke.Claim{summary, alice, apples, bobSr, bobJr, likes, knows, ignores, family} {
 		require.True(t, g.Contains(c.ID()),
 			"%s/%s survived final reset", c.Node().TypeClass(), c.Node().TypeSub())

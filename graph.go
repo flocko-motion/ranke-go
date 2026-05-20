@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// NewGraph creates a graph rooted at the given contribution/contributor
-// claim. The root is the only no-edge claim a graph may contain
-// (§4.3); all subsequent AddClaim calls require at least one edge.
+// NewGraph creates a graph and adds the given contribution/contributor
+// claim . This claim might be an initial node without edges or a full
+// clojure.
 func NewGraph(root Contributor) Graph {
 	g := &graph{
 		claims:     make(map[string]*claim),
