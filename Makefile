@@ -116,21 +116,10 @@ conformance-bundle: verify-scenarios scenarios-docs
 	@BUNDLE=ranke-conformance-$(VERSION); \
 	WORK=$$(mktemp -d); \
 	mkdir -p "$$WORK/$$BUNDLE"; \
-	for d in $(SCENARIO_DIRS); do \
-		name=$$(basename "$$d"); \
-		mkdir -p "$$WORK/$$BUNDLE/scenarios/$$name"; \
-		cp -r "$$d/data_reference" "$$WORK/$$BUNDLE/scenarios/$$name/"; \
-		cp "$$d/main.go" "$$d/scenario.md" "$$WORK/$$BUNDLE/scenarios/$$name/"; \
-	done; \
-	cp -r conformance/fixtures "$$WORK/$$BUNDLE/"; \
+	(cd "$$WORK/$$BUNDLE" && mkdir conformance); \
+	git ls-files conformance/ | tar -cf - -T - | tar -xf - -C "$$WORK/$$BUNDLE/"; \
 	[ -f specification.txt ] && cp specification.txt "$$WORK/$$BUNDLE/" || true; \
-	echo "Ranke-Graph conformance bundle $(VERSION)" > "$$WORK/$$BUNDLE/README.md"; \
-	echo "" >> "$$WORK/$$BUNDLE/README.md"; \
-	echo "scenarios/<NN>_<name>/" >> "$$WORK/$$BUNDLE/README.md"; \
-	echo "  main.go         Go reference implementation" >> "$$WORK/$$BUNDLE/README.md"; \
-	echo "  scenario.md     prose description" >> "$$WORK/$$BUNDLE/README.md"; \
-	echo "  data_reference/ deterministic bundle to match byte-for-byte" >> "$$WORK/$$BUNDLE/README.md"; \
-	echo "fixtures/         keys + sources used by scenarios" >> "$$WORK/$$BUNDLE/README.md"; \
+	cp README.md "$$WORK/$$BUNDLE/" 2>/dev/null || true; \
 	tar -C "$$WORK" -czf "dist/$$BUNDLE.tar.gz" "$$BUNDLE"; \
 	rm -rf "$$WORK"; \
 	echo "wrote dist/$$BUNDLE.tar.gz"
