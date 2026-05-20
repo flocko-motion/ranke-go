@@ -4,15 +4,29 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build test test-verbose vet fmt tidy clean
+.PHONY: all build install uninstall test test-verbose vet fmt tidy clean scenarios verify-scenarios update-references
 
-# Default target: run the tests.
-all: test
+BINDIR ?= $(HOME)/.local/bin
+
+SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
+
+# Default target: build, run unit tests, run every scenario, and
+# assert the scenarios are byte-deterministic.
+all: build test verify-scenarios
 
 # Build the ranke CLI into bin/ranke.
 build:
 	@mkdir -p bin
 	go build -o bin/ranke ./cmd/ranke
+
+# Copy the built CLI to $(BINDIR)/ranke (default: ~/.local/bin).
+# No sudo needed; just make sure $(BINDIR) is on your PATH.
+install: build
+	@mkdir -p $(BINDIR)
+	install -m 0755 bin/ranke $(BINDIR)/ranke
+
+uninstall:
+	rm -f $(BINDIR)/ranke
 
 # Run user-perspective tests in /tests. The fs integration test
 # uses a fixed directory (RANKE_FS_DIR, default /tmp/ranke-go-test)
@@ -43,6 +57,40 @@ fmt:
 tidy:
 	go mod tidy
 
-# Remove future binary outputs (none yet).
+# Run every conformance scenario from a clean state.
+scenarios:
+	@conformance/run.sh
+
+# Run each scenario fresh, diff the produced archive + ids.txt
+# against the committed archive_reference/ + ids_reference.txt.
+# Fails on any drift — the cross-implementation conformance promise.
+# To update the references after an intentional change:
+# `make update-references`.
+verify-scenarios:
+	@for d in $(SCENARIO_DIRS); do \
+		echo "--- verify $$d ---"; \
+		(cd "$$d" && rm -rf archive ids.txt && go run . > /dev/null); \
+		diff -r "$$d/archive_reference" "$$d/archive" > /dev/null \
+			&& diff "$$d/ids_reference.txt" "$$d/ids.txt" > /dev/null \
+			&& echo "$$d: matches reference ✓" \
+			|| { echo "$$d: DRIFT — differs from checked-in reference"; exit 1; }; \
+	done
+
+# Replace each scenario's archive_reference/ + ids_reference.txt
+# with its current generated outputs. Run after an intentional
+# scenario change, review the diff, then commit.
+update-references:
+	@for d in $(SCENARIO_DIRS); do \
+		echo "--- update $$d ---"; \
+		(cd "$$d" && rm -rf archive ids.txt && go run . > /dev/null); \
+		rm -rf "$$d/archive_reference" "$$d/ids_reference.txt"; \
+		cp -r "$$d/archive" "$$d/archive_reference"; \
+		cp "$$d/ids.txt" "$$d/ids_reference.txt"; \
+	done
+	@echo "References updated. Review with: git diff conformance/scenarios/"
+
 clean:
 	rm -rf bin/
+	@for d in $(SCENARIO_DIRS); do \
+		rm -rf "$$d/archive" "$$d/ids.txt"; \
+	done

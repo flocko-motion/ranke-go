@@ -1,38 +1,46 @@
 package ranke
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
-// archiveBackend is the internal hook between *archive and its
-// persistence layer. NewMemArchive uses backend == nil (cache IS the
-// source of truth). NewFsArchive wires in an fsBackend that reads/
-// writes the filesystem on cache miss/write.
-//
-// The branches model collapses to a single hash B_h on disk: the
-// backend persists only the id of the current contribution/branches
-// claim. Everything else (the table itself, prior tables, per-branch
-// head claims) lives in U, durably persisted via saveClaim/saveContent.
-type archiveBackend interface {
-	loadClaim(idStr string) (*claim, error)
-	saveClaim(c *claim) error
-	loadContent(idStr string) ([]byte, error)
-	saveContent(idStr string, b []byte) error
-	saveBranchesHead(id Id) error // writes B_h
+// NewArchive composes a Universe (𝒰) with a BranchTableHead (B_h)
+// into a Ranke-Archive (spec §4.8). The Archive holds no resources
+// of its own — Close() does not close u or bth; the caller manages
+// their lifetimes, which is what lets multiple Archives share one
+// Universe.
+func NewArchive(u Universe, bth BranchTableHead) (Archive, error) {
+	if u == nil {
+		return nil, errors.New("ranke.NewArchive: nil Universe")
+	}
+	if bth == nil {
+		return nil, errors.New("ranke.NewArchive: nil BranchTableHead")
+	}
+	bh, err := bth.Load(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("ranke.NewArchive: load B_h: %w", err)
+	}
+	return &archive{
+		u:            u,
+		bth:          bth,
+		branchesHead: bh,
+		claims:       make(map[string]*claim),
+		content:      make(map[string][]byte),
+	}, nil
 }
 
-// errNotFound is returned by archiveBackend implementations when a
-// requested record is not present.
-var errNotFound = errors.New("not found")
+type archive struct {
+	u            Universe
+	bth          BranchTableHead
+	branchesHead Id
 
-// --- Lookup helpers ---
+	claims  map[string]*claim
+	content map[string][]byte
+}
 
-// lookupClaim returns the claim for id, consulting the cache first
-// and falling back to the backend. Eager-loads content for the
-// node and each edge that names a ContentHash (so e.g. branch-table
-// walks can read edge content without a separate fetch). Wires the
-// contributor field (recursively, if needed) before returning.
 func (a *archive) lookupClaim(id Id) (*claim, error) {
 	if id == nil {
 		return nil, errors.New("nil id")
@@ -41,52 +49,44 @@ func (a *archive) lookupClaim(id Id) (*claim, error) {
 	if c, ok := a.claims[k]; ok {
 		return c, nil
 	}
-	if a.backend == nil {
-		return nil, errNotFound
-	}
-	skel, err := a.backend.loadClaim(k)
+	cl, err := a.u.LoadClaim(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}
-	a.claims[k] = skel
-	if err := a.loadClaimContent(skel); err != nil {
+	c, ok := cl.(*claim)
+	if !ok {
+		return nil, errors.New("foreign Claim returned by Universe")
+	}
+	a.claims[k] = c
+	if err := a.loadClaimContent(c); err != nil {
 		delete(a.claims, k)
 		return nil, err
 	}
-	if err := a.wireContributor(skel); err != nil {
+	if err := a.wireContributor(c); err != nil {
 		delete(a.claims, k)
 		return nil, err
 	}
-	return skel, nil
+	return c, nil
 }
 
-// loadClaimContent fetches and attaches content bytes for the node
-// and each edge that has a ContentHash but no in-memory content yet.
-// Backed by fetchContent (cache + backend).
 func (a *archive) loadClaimContent(c *claim) error {
-	if c.node.contentHash != nil && c.node.content == nil {
-		b, err := a.fetchContent(c.node.contentHash)
-		if err != nil {
-			return fmt.Errorf("node content %s: %w", c.node.contentHash.String(), err)
-		}
-		c.node.content = b
+	if c.node.contentHash == nil || c.node.content != nil {
+		return nil
 	}
-	// Edge content is inline (paper §4.2 simplified schema) — already
-	// present after CBOR decode, no separate fetch needed.
+	b, err := a.fetchContent(c.node.contentHash, c.node.size)
+	if err != nil {
+		return fmt.Errorf("node content %s: %w", c.node.contentHash.String(), err)
+	}
+	c.node.content = b
 	return nil
 }
 
-// fetchContent returns content bytes for id, consulting the cache
-// then the backend. Caches successful loads.
-func (a *archive) fetchContent(id Id) ([]byte, error) {
+func (a *archive) fetchContent(id Id, expected uint64) ([]byte, error) {
 	k := id.String()
 	if b, ok := a.content[k]; ok {
 		return b, nil
 	}
-	if a.backend == nil {
-		return nil, errNotFound
-	}
-	b, err := a.backend.loadContent(k)
+	b, err := a.u.GetContent(context.Background(), id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -94,9 +94,6 @@ func (a *archive) fetchContent(id Id) ([]byte, error) {
 	return b, nil
 }
 
-// wireContributor sets c.contributor based on c's
-// contribution/contributor edge, or self-attributes if c is the
-// root (no edges).
 func (a *archive) wireContributor(c *claim) error {
 	if len(c.edges) == 0 {
 		c.contributor = c
@@ -115,38 +112,27 @@ func (a *archive) wireContributor(c *claim) error {
 	return errors.New("non-root claim missing contribution/contributor edge")
 }
 
-// absorbClaim writes c (and any node/edge content it carries) to
-// cache and the backend. Idempotent.
 func (a *archive) absorbClaim(c *claim) error {
 	k := c.node.id.String()
 	if _, ok := a.claims[k]; !ok {
 		a.claims[k] = c
 	}
-	if a.backend != nil {
-		if err := a.backend.saveClaim(c); err != nil {
-			return err
-		}
+	if err := a.u.SaveClaim(context.Background(), c); err != nil {
+		return err
 	}
 	if c.node.content != nil && c.node.contentHash != nil {
 		if err := a.absorbContent(c.node.contentHash, c.node.content); err != nil {
 			return err
 		}
 	}
-	// Edge content is inline (§4.2); persisted as part of the claim
-	// CBOR via saveClaim above. No separate content store entry.
 	return nil
 }
 
 func (a *archive) absorbContent(id Id, b []byte) error {
 	k := id.String()
 	a.content[k] = b
-	if a.backend != nil {
-		return a.backend.saveContent(k, b)
-	}
-	return nil
+	return a.u.SaveContent(context.Background(), id, b)
 }
-
-// --- Archive interface methods ---
 
 func (a *archive) HasGraph(head Id) bool {
 	if head == nil {
@@ -190,10 +176,6 @@ func (a *archive) GetGraph(head Id) (Graph, error) {
 	return g, nil
 }
 
-// --- Branches ---
-
-// resolveBranchesTable returns the current contribution/branches
-// claim, or nil if the archive has no branches yet.
 func (a *archive) resolveBranchesTable() (*claim, error) {
 	if a.branchesHead == nil {
 		return nil, nil
@@ -201,10 +183,6 @@ func (a *archive) resolveBranchesTable() (*claim, error) {
 	return a.lookupClaim(a.branchesHead)
 }
 
-// findBranchEdge walks the current branch table for a
-// contribution/branch edge whose content matches name. Returns the
-// table claim and the edge, or (table, nil, nil) if the table exists
-// but the name is not in it.
 func (a *archive) findBranchEdge(name string) (*claim, *edge, error) {
 	table, err := a.resolveBranchesTable()
 	if err != nil || table == nil {
@@ -234,8 +212,6 @@ func (a *archive) GetBranch(name string) (Branch, error) {
 	return a.buildBranchView(table, e)
 }
 
-// buildBranchView returns a Branch projection of one (name, head)
-// binding, with provenance pre-walked through prior branch tables.
 func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error) {
 	name := string(branchEdge.content)
 	head := branchEdge.reference
@@ -257,7 +233,6 @@ func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error
 		if prev == nil {
 			break
 		}
-		// Find this branch's binding in the prior table.
 		for _, e := range prev.edges {
 			if e.typeClass == EdgeContribution && e.typeSub == "branch" && string(e.content) == name {
 				chain = append(chain, &branchEntry{
@@ -278,6 +253,18 @@ func (a *archive) buildBranchView(table *claim, branchEdge *edge) (Branch, error
 	}, nil
 }
 
+func (a *archive) VerifyBranch(name string) error {
+	b, err := a.GetBranch(name)
+	if err != nil {
+		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
+	}
+	g, err := a.GetGraph(b.Latest().Head())
+	if err != nil {
+		return fmt.Errorf("ranke.Archive.VerifyBranch: GetGraph %s: %w", b.Latest().Head().String(), err)
+	}
+	return g.Validate()
+}
+
 func (a *archive) Branches() []Branch {
 	table, err := a.resolveBranchesTable()
 	if err != nil || table == nil {
@@ -295,21 +282,7 @@ func (a *archive) Branches() []Branch {
 	return out
 }
 
-// SetBranch advances the named branch per paper §4.6. Two new claims
-// are created and added to U:
-//
-//  1. A contribution/head claim that consolidates g's open heads.
-//     One contribution/head edge per open head; the branch will
-//     point at this claim.
-//  2. A new contribution/branches claim — the new branch table —
-//     carrying contribution/branch edges for every active branch
-//     (the named one updated to the new head, all others copied
-//     unchanged) plus a contribution/branches edge to the previous
-//     table (if any).
-//
-// Then B_h is updated to the new table's id and persisted via the
-// backend.
-func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error {
+func (a *archive) SetBranch(name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
 		return errors.New("ranke.Archive.SetBranch: nil graph")
 	}
@@ -324,17 +297,12 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		return errors.New("ranke.Archive.SetBranch: graph from foreign implementation")
 	}
 
-	// Absorb every claim in g first — atomic creation rule means
-	// references must be in U before we build new claims that point
-	// at them.
 	for _, c := range cg.claims {
 		if err := a.absorbClaim(c); err != nil {
 			return fmt.Errorf("ranke.Archive.SetBranch: absorb claim: %w", err)
 		}
 	}
 
-	// Step 1: build the contribution/head claim consolidating g's
-	// open heads.
 	headEdges := make([]Edge, 0, len(g.Heads()))
 	for _, h := range g.Heads() {
 		e, err := NewEdge(EdgeConfig{
@@ -347,12 +315,13 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		}
 		headEdges = append(headEdges, e)
 	}
-	headClaim, err := NewClaim(ClaimConfig{
-		TypeClass:   NodeContribution,
-		TypeSub:     "head",
+	at := firstNonZero(createdAt)
+	headClaim, err := ClaimBuilder{
+		Type:        NodeHead,
 		Contributor: contributor,
 		Edges:       headEdges,
-	})
+		CreatedAt:   at,
+	}.Sign()
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build head claim: %w", err)
 	}
@@ -361,7 +330,6 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		return fmt.Errorf("ranke.Archive.SetBranch: absorb head claim: %w", err)
 	}
 
-	// Step 2: build the new contribution/branches table.
 	var prevTable *claim
 	if a.branchesHead != nil {
 		prevTable, err = a.lookupClaim(a.branchesHead)
@@ -371,12 +339,11 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 	}
 
 	tableEdges := make([]Edge, 0)
-	// Carry forward every other branch unchanged.
 	if prevTable != nil {
 		for _, e := range prevTable.edges {
 			if e.typeClass == EdgeContribution && e.typeSub == "branch" {
 				if string(e.content) == name {
-					continue // updating this one
+					continue
 				}
 				copyE, err := NewEdge(EdgeConfig{
 					Reference: e.reference,
@@ -391,7 +358,6 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 			}
 		}
 	}
-	// New/updated branch edge.
 	newBranch, err := NewEdge(EdgeConfig{
 		Reference: headC.node.id,
 		TypeClass: EdgeContribution,
@@ -402,7 +368,6 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		return fmt.Errorf("ranke.Archive.SetBranch: build new branch edge: %w", err)
 	}
 	tableEdges = append(tableEdges, newBranch)
-	// Chain edge to previous table (if any).
 	if prevTable != nil {
 		chain, err := NewEdge(EdgeConfig{
 			Reference: prevTable.node.id,
@@ -415,12 +380,12 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		tableEdges = append(tableEdges, chain)
 	}
 
-	tableClaim, err := NewClaim(ClaimConfig{
-		TypeClass:   NodeContribution,
-		TypeSub:     "branches",
+	tableClaim, err := ClaimBuilder{
+		Type:        NodeBranches,
 		Contributor: contributor,
 		Edges:       tableEdges,
-	})
+		CreatedAt:   at,
+	}.Sign()
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.SetBranch: build branches claim: %w", err)
 	}
@@ -429,12 +394,9 @@ func (a *archive) SetBranch(name string, g Graph, contributor Contributor) error
 		return fmt.Errorf("ranke.Archive.SetBranch: absorb branches claim: %w", err)
 	}
 
-	// Step 3: update B_h.
 	a.branchesHead = tableC.node.id
-	if a.backend != nil {
-		if err := a.backend.saveBranchesHead(a.branchesHead); err != nil {
-			return fmt.Errorf("ranke.Archive.SetBranch: persist B_h: %w", err)
-		}
+	if err := a.bth.Save(context.Background(), a.branchesHead); err != nil {
+		return fmt.Errorf("ranke.Archive.SetBranch: persist B_h: %w", err)
 	}
 	return nil
 }

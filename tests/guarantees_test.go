@@ -18,15 +18,15 @@ import (
 // interpretation of existing claims cites its sources. source/* and
 // contribution/* claims have no such requirement.
 func TestProvenanceRequired(t *testing.T) {
-	operator := mkContributor(t, "operator@example.com")
-	agent := mkAgent(t, operator, "extraction-agent")
+	operator := contributor(t, "operator@example.com")
+	ag := agent(t, operator, "extraction-agent")
 	// We need entities to anchor the relation case — use ones that
 	// already have provenance, so only the relation under test is
 	// missing it.
-	emailApples := mkEmail(t, operator,
+	emailApples := email(t, operator,
 		"alice@example.com", "bob@example.com", "I like apples.")
-	alice := mkEntity(t, agent, "person", "Alice", emailApples)
-	apples := mkEntity(t, agent, "object", "apples", emailApples)
+	alice := entity(t, ag, "person", "Alice", emailApples)
+	apples := entity(t, ag, "object", "apples", emailApples)
 
 	// Build the relation/* edges that the relation node would carry.
 	// These are NOT derivation edges — the rule we're testing is
@@ -72,17 +72,15 @@ func TestProvenanceRequired(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ranke.NewClaim(ranke.ClaimConfig{
-				TypeClass:     tc.typeClass,
-				TypeSub:       tc.typeSub,
-				EncodingClass: ranke.EncodingText,
-				EncodingSub:   "plain",
-				Content:       []byte("..."),
-				Contributor:   agent,
-				Edges:         tc.edges,
-			})
+			_, err := ranke.ClaimBuilder{
+				TypeClass:   tc.typeClass,
+				TypeSub:     tc.typeSub,
+				Content:     []byte("..."),
+				Contributor: ag,
+				Edges:       tc.edges,
+			}.Sign()
 			require.Error(t, err,
-				"NewClaim must reject %s/%s with no derivation/* edge",
+				"Sign must reject %s/%s with no derivation/* edge",
 				tc.typeClass, tc.typeSub)
 		})
 	}

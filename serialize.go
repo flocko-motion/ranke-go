@@ -44,6 +44,20 @@ type encNode struct {
 	// Fields appear under tag 8 as a map sorted by key (CBOR
 	// Deterministic ensures sort order).
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
+	// Pubkey is the contributor's multikey-encoded public key (§5.7).
+	// Empty (omitted) on non-contributor claims and unsigned
+	// contributors. Participates in id computation like any field.
+	Pubkey []byte `cbor:"9,keyasint,omitempty"`
+	// Title is an optional short text label. Omitted from the
+	// encoding (and thus from the id) when empty, so adding the
+	// field doesn't change existing claims' bytes.
+	Title string `cbor:"10,keyasint,omitempty"`
+	// Size is the byte-length of the content addressed by
+	// ContentHash. Paired with ContentHash so a verifier can detect
+	// truncation/extension without rehashing — and so storage layers
+	// can know the size without loading the bytes. Emitted iff
+	// ContentHash is present (see buildEncNode).
+	Size uint64 `cbor:"11,keyasint,omitempty"`
 }
 
 // encEdge is the wire shape of an edge (§4.2 simplified schema):
@@ -86,9 +100,12 @@ func buildEncNode(n *node) (encNode, error) {
 		EncodingSub:   n.encodingSub,
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 		Fields:        n.fields,
+		Pubkey:        n.pubkey,
+		Title:         n.title,
 	}
 	if n.contentHash != nil {
 		en.ContentHash = idBytes(n.contentHash)
+		en.Size = n.size
 	}
 	if len(n.edges) > 0 {
 		en.Edges = make([][]byte, len(n.edges))

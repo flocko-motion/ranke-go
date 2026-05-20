@@ -15,9 +15,9 @@
 //	}
 //
 // Internally the package owns the helpers, scenarios, and guarantee
-// tests that drive both our own bundled backends (NewMemArchive,
-// NewFsArchive) and any 3rd-party Archive that satisfies the
-// interface.
+// tests that drive any Archive that satisfies the interface — both
+// the bundled compositions (Fs/Mem Universe + BranchTableHead) and
+// any 3rd-party stack.
 package tests
 
 import (

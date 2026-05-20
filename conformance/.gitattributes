@@ -1,0 +1,2 @@
+fixtures/keys/*.pem    binary
+fixtures/sources/*.eml binary

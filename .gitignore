@@ -1,1 +1,16 @@
 bin/
+
+# Scenario binaries land at repo root when invoked as
+# `go build ./conformance/scenarios/<name>` from there.
+/01_*
+/02_*
+/03_*
+
+# Per-scenario generated outputs — compared against the committed
+# archive_reference/ and ids_reference.txt by `make verify-scenarios`.
+conformance/scenarios/*/archive/
+conformance/scenarios/*/ids.txt
+
+# Local copy of the spec, kept at repo root for convenience.
+/specification.typ
+/specification.txt
