@@ -7,6 +7,19 @@ import "time"
 // underlying table claim, so they're self-contained and survive
 // Archive reload.
 
+type branch struct {
+	name  string
+	head  Id             // contribution/head claim this branch points at
+	table *claim         // contribution/branches claim that holds this binding
+	chain []*branchEntry // historical entries from prior tables, most-recent first
+}
+
+type branchEntry struct {
+	name  string
+	head  Id
+	table *claim
+}
+
 // --- Branch ---
 
 func (b *branch) Name() string { return b.name }

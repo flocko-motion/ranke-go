@@ -11,6 +11,14 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
+// hash is the concrete implementation of Id. Wraps an IPFS multihash
+// (raw) and caches its multibase-encoded string form for cheap
+// String() calls and for use as a map key.
+type hash struct {
+	raw []byte // multihash bytes (sha2-256 prefix + digest)
+	str string // multibase-encoded form, cached
+}
+
 // idFromBytes wraps an opaque self-describing id payload (multihash
 // for identity-Sign ids, or multikey signature bytes for signed ids
 // per §4.1) and pre-computes the multibase string representation.

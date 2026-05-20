@@ -4,15 +4,15 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-verbose vet fmt tidy clean scenarios verify-scenarios update-references
+.PHONY: all build install uninstall test test-verbose vet fmt tidy clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
 
 BINDIR ?= $(HOME)/.local/bin
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
 # Default target: build, run unit tests, run every scenario, and
-# assert the scenarios are byte-deterministic.
-all: build test verify-scenarios
+# assert the scenarios are byte-deterministic + docs are in sync.
+all: build test verify-scenarios verify-docs
 
 # Build the ranke CLI into bin/ranke.
 build:
@@ -88,7 +88,49 @@ update-references:
 	@echo "References updated. Review with: git diff conformance/scenarios/"
 
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/
 	@for d in $(SCENARIO_DIRS); do \
 		rm -rf "$$d/data"; \
 	done
+
+# Regenerate each scenario.md from comments in main.go + the
+# template at conformance/helpers/scenario.md.tmpl.
+scenarios-docs:
+	@go run ./cmd/scenariodoc
+
+# Verify scenario.md files are in sync with main.go comments.
+# Regenerates and diffs against checked-in state — fails on drift.
+verify-docs: scenarios-docs
+	@git diff --exit-code conformance/scenarios/*/scenario.md \
+		|| { echo "scenario.md out of sync — run 'make scenarios-docs' and commit"; exit 1; }
+
+# Build a self-contained conformance bundle suitable for downstream
+# variant implementations (Python, ...) to verify against. Output:
+# dist/ranke-conformance-<VERSION>.tar.gz.
+#
+# VERSION defaults to the current git describe (tag if on one, else
+# short SHA). Override with `make conformance-bundle VERSION=v0.2.0`.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+conformance-bundle: verify-scenarios scenarios-docs
+	@mkdir -p dist
+	@BUNDLE=ranke-conformance-$(VERSION); \
+	WORK=$$(mktemp -d); \
+	mkdir -p "$$WORK/$$BUNDLE"; \
+	for d in $(SCENARIO_DIRS); do \
+		name=$$(basename "$$d"); \
+		mkdir -p "$$WORK/$$BUNDLE/scenarios/$$name"; \
+		cp -r "$$d/data_reference" "$$WORK/$$BUNDLE/scenarios/$$name/"; \
+		cp "$$d/main.go" "$$d/scenario.md" "$$WORK/$$BUNDLE/scenarios/$$name/"; \
+	done; \
+	cp -r conformance/fixtures "$$WORK/$$BUNDLE/"; \
+	[ -f specification.txt ] && cp specification.txt "$$WORK/$$BUNDLE/" || true; \
+	echo "Ranke-Graph conformance bundle $(VERSION)" > "$$WORK/$$BUNDLE/README.md"; \
+	echo "" >> "$$WORK/$$BUNDLE/README.md"; \
+	echo "scenarios/<NN>_<name>/" >> "$$WORK/$$BUNDLE/README.md"; \
+	echo "  main.go         Go reference implementation" >> "$$WORK/$$BUNDLE/README.md"; \
+	echo "  scenario.md     prose description" >> "$$WORK/$$BUNDLE/README.md"; \
+	echo "  data_reference/ deterministic bundle to match byte-for-byte" >> "$$WORK/$$BUNDLE/README.md"; \
+	echo "fixtures/         keys + sources used by scenarios" >> "$$WORK/$$BUNDLE/README.md"; \
+	tar -C "$$WORK" -czf "dist/$$BUNDLE.tar.gz" "$$BUNDLE"; \
+	rm -rf "$$WORK"; \
+	echo "wrote dist/$$BUNDLE.tar.gz"

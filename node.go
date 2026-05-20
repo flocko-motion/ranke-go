@@ -7,6 +7,25 @@ import (
 	"time"
 )
 
+// node is the concrete implementation of Node. The edges field carries
+// the ids of edges created with the owning claim, in canonical sort
+// order; this set participates in the node hash.
+type node struct {
+	typeClass     NodeClass
+	typeSub       string
+	encodingClass EncodingClass
+	encodingSub   string
+	title         string
+	contentHash   Id     // nil when no content
+	content       []byte // raw content bytes, kept with the node
+	size          uint64 // = len(content); paired with contentHash to defend against truncation/extension
+	createdAt     time.Time
+	edges         []Id // edge ids, sorted canonically
+	fields        map[string]string
+	pubkey        []byte // multikey-encoded pubkey on contributor nodes (§5.7); empty otherwise
+	id            Id     // = Sign(H(S(node))); also the claim id
+}
+
 // node accessor methods. Construction lives in claim.go (the node is
 // built as part of NewClaim) since a node's id is the claim id and
 // its edge list is finalized at claim construction.

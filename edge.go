@@ -6,6 +6,35 @@ import (
 	"sort"
 )
 
+// EdgeConfig is the data-only input to NewEdge.
+//
+// Required: Reference plus a type (either Type or TypeClass+TypeSub).
+// Content is the edge's inline content (paper §4.2 simplified schema).
+// RelationDirection must be set (RelationFrom or RelationTo) for
+// relation/* edges and left zero otherwise; NewEdge enforces this.
+type EdgeConfig struct {
+	Reference         Id
+	Type              string
+	TypeClass         EdgeClass
+	TypeSub           string
+	Content           []byte
+	RelationDirection RelationDirection
+	Fields            map[string]string
+}
+
+// edge is the concrete implementation of Edge. Created via NewEdge and
+// immutable after. id is computed once at construction from the
+// canonical serialization of the other fields.
+type edge struct {
+	reference         Id
+	typeClass         EdgeClass
+	typeSub           string
+	content           []byte
+	relationDirection RelationDirection
+	fields            map[string]string
+	id                Id // = H(S(edge))
+}
+
 // NewEdge constructs an Edge from the given config (paper §4.2
 // simplified schema). Validates type and relation_direction
 // consistency; computes the edge's id as H(canonical(edge)).
