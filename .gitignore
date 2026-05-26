@@ -17,3 +17,6 @@ conformance/scenarios/*/data/
 # Local copy of the spec, kept at repo root for convenience.
 /specification.typ
 /specification.txt
+
+# Local Claude config
+/.claude/
