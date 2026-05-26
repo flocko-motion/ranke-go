@@ -7,6 +7,41 @@ import (
 	"time"
 )
 
+// Node is the structural component of a claim. A node's id is the
+// claim id. Two nodes with identical content but different
+// provenance produce different ids (spec §4.1).
+type Node interface {
+	Type() string
+	TypeClass() NodeClass
+	TypeSub() string
+	// ContentHash is H(content); nil if the node carries no content.
+	ContentHash() Id
+	// Size is the byte-length of the content addressed by ContentHash;
+	// 0 when no content. Paired with ContentHash to defend against
+	// truncation/extension and let storage layers know size without
+	// loading the bytes.
+	Size() uint64
+	// Content returns the node's content bytes, or (nil, nil) if none.
+	Content() ([]byte, error)
+	Encoding() string
+	EncodingClass() EncodingClass
+	EncodingSub() string
+	CreatedAt() time.Time
+	// Edges returns the ids of edges created with this claim, in
+	// canonical (sort) order.
+	Edges() []Id
+	HasField(name string) bool
+	GetField(name string) (string, error)
+	Fields() []string
+	// Pubkey returns the multikey-encoded public key on this node
+	// (§5.7). Non-empty only on signed contributor claims.
+	Pubkey() []byte
+	// Title is the node's optional short text label, or "" if unset.
+	// Omitted from the canonical encoding when empty.
+	Title() string
+	ID() Id
+}
+
 // node is the concrete implementation of Node. The edges field carries
 // the ids of edges created with the owning claim, in canonical sort
 // order; this set participates in the node hash.

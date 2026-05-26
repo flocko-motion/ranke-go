@@ -2,12 +2,106 @@ package ranke
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"errors"
 	"fmt"
 	"sort"
 	"time"
 )
+
+// Graph materializes the claim's provenance. For claims loaded from
+// a Universe, walks via that Universe. For in-memory-constructed
+// claims (no Universe binding) the result contains only the claim
+// itself plus any contributor chain wired during construction.
+func (c *claim) Graph(ctx context.Context) (Graph, error) {
+	g := &graph{
+		claims:     make(map[string]*claim),
+		referenced: make(map[string]struct{}),
+	}
+	queue := []*claim{c}
+	for len(queue) > 0 {
+		_ = ctx // walked below via loadClaimAs
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		k := cur.node.id.String()
+		if _, seen := g.claims[k]; seen {
+			continue
+		}
+		g.claims[k] = cur
+		for _, e := range cur.edges {
+			g.referenced[e.reference.String()] = struct{}{}
+			if cur.universe == nil {
+				// Best effort for in-memory claims: include the
+				// resolved contributor if it's the edge target.
+				if cur.contributor != nil && cur.contributor.ID() != nil &&
+					cur.contributor.ID().Equal(e.reference) {
+					if cc, ok := cur.contributor.(*claim); ok {
+						queue = append(queue, cc)
+					}
+				}
+				continue
+			}
+			next, err := loadClaimAs(ctx, cur.universe, e.reference)
+			if err != nil {
+				return nil, fmt.Errorf("Claim.Graph: load %s: %w", e.reference.String(), err)
+			}
+			queue = append(queue, next)
+		}
+	}
+	return g, nil
+}
+
+func (c *claim) Validate(ctx context.Context) error {
+	g, err := c.Graph(ctx)
+	if err != nil {
+		return err
+	}
+	return g.Validate()
+}
+
+// Claim is a node together with the edges in its edges set.
+// Atomically created (spec §4.3); immutable after.
+type Claim interface {
+	Node() Node
+	// Edges returns the edges in canonical order. With filters,
+	// only edges matching every filter (AND) are returned.
+	Edges(filters ...Filter) []Edge
+	// Contributor returns the contributor for this claim — always
+	// a contribution/contributor claim. Self-attribution for the
+	// root (no-edge) contributor.
+	Contributor() Contributor
+	IsContributor() bool
+	// AsContributor returns this claim as a Contributor. Errors if
+	// the claim isn't of type contribution/contributor. If a signing
+	// key is supplied it must match the contributor's pubkey; the
+	// returned Contributor is wrapped via WithSigningKey so
+	// subsequent claims attributed to it sign automatically.
+	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
+	ID() Id
+	// Graph materializes the claim's provenance by walking edge
+	// references. For claims loaded from a Universe the walk uses
+	// that Universe; in-memory claims walk only what's reachable
+	// through already-wired contributor refs.
+	Graph(ctx context.Context) (Graph, error)
+	// Validate is the §5.10 check across the claim's provenance —
+	// convenience for Graph(ctx).Validate().
+	Validate(ctx context.Context) error
+}
+
+// Contributor is a typed view over a Claim whose node type is
+// "contribution/contributor". Obtain via Claim.AsContributor,
+// Claim.Contributor, Branch.Contributor, or BranchEntry.Contributor.
+type Contributor interface {
+	Claim
+	// SigningKey returns the private key matching this contributor's
+	// pubkey, or nil for identity-Sign (§5.7) or unbound contributors
+	// loaded from disk. Attach a key via WithSigningKey for a session.
+	SigningKey() crypto.Signer
+}
 
 // ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
 //
@@ -43,10 +137,16 @@ type ClaimBuilder struct {
 // claim is the concrete implementation of Claim. A claim is its node
 // together with the full edge records (the node only carries edge ids).
 // Atomically created at Sign; immutable after.
+//
+// universe is the Universe the claim was loaded from, used by
+// Claim.Graph() to walk the provenance. nil for claims constructed
+// in-memory (via ClaimBuilder.Sign()) — their .Graph() returns just
+// what's reachable via in-memory contributor wiring.
 type claim struct {
 	node        *node
 	edges       []*edge // same order as node.edges
 	contributor Contributor
+	universe    Universe
 }
 
 // Edge ids stay as plain H(S(e)) multihashes regardless of signing.
@@ -494,7 +594,13 @@ func (s *signedContributor) AsContributor(key ...crypto.Signer) (Contributor, er
 	return s.contributor.AsContributor(key...)
 }
 func (s *signedContributor) ID() Id                              { return s.contributor.ID() }
-func (s *signedContributor) SigningKey() crypto.Signer           { return s.key }
+func (s *signedContributor) Graph(ctx context.Context) (Graph, error) {
+	return s.contributor.Graph(ctx)
+}
+func (s *signedContributor) Validate(ctx context.Context) error {
+	return s.contributor.Validate(ctx)
+}
+func (s *signedContributor) SigningKey() crypto.Signer { return s.key }
 
 // requiresProvenance reports whether claims of this class need at
 // least one derivation/* edge per §3.5.

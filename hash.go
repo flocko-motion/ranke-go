@@ -11,6 +11,18 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
+// Id is a self-describing, content-addressed identifier. Per spec
+// §4, id(v) = Sign(H(S(v))) for nodes and id(e) = H(S(e)) for edges.
+// The reference implementation uses multibase-encoded multihash;
+// the public interface treats it as opaque.
+type Id interface {
+	String() string
+	Equal(other Id) bool
+	// Algorithm returns the human-readable name of the scheme used
+	// to build this id (e.g. "sha2-256", "ed25519-pub").
+	Algorithm() string
+}
+
 // hash is the concrete implementation of Id. Wraps an IPFS multihash
 // (raw) and caches its multibase-encoded string form for cheap
 // String() calls and for use as a map key.

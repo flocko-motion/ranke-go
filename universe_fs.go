@@ -176,6 +176,10 @@ func (u *fsUniverse) SaveContent(_ context.Context, hash Id, content []byte) err
 	return atomicWrite(path, content)
 }
 
+func (u *fsUniverse) MergeClaim(ctx context.Context, src Universe, id Id) error {
+	return DefaultMergeClaim(ctx, u, src, id)
+}
+
 func (u *fsUniverse) HasContent(_ context.Context, hash Id) (bool, error) {
 	if hash == nil {
 		return false, nil

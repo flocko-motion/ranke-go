@@ -7,6 +7,35 @@ import (
 	"time"
 )
 
+// Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
+// are projections of claims that live in the underlying Universe.
+// Every method takes a ctx threaded from the entry point.
+type Archive interface {
+	HasClaim(ctx context.Context, id Id) bool
+	// GetClaim returns the claim at id. Call .Graph(ctx) on the
+	// result to materialize the provenance.
+	GetClaim(ctx context.Context, id Id) (Claim, error)
+
+	HasBranch(ctx context.Context, name string) bool
+	GetBranch(ctx context.Context, name string) (Branch, error)
+	Branches(ctx context.Context) []Branch
+
+	// AddClaim appends a single claim to the named branch. Loads
+	// the branch's current closure, adds the claim, commits via
+	// AddGraph. Use AddGraph directly for multi-claim transactions.
+	AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error
+
+	// AddGraph commits g to the named branch. Every claim in g is
+	// absorbed into 𝒰, a contribution/head claim wraps g's open
+	// heads (auto-consolidating multi-headed graphs), and a new
+	// contribution/branches table records the binding.
+	AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error
+
+	// VerifyBranch loads the claim at the branch's latest head and
+	// runs the §5.10 checks across its provenance.
+	VerifyBranch(ctx context.Context, name string) error
+}
+
 // NewArchive composes a Universe (𝒰) with a BranchTableHead (B_h)
 // into a Ranke-Archive (spec §4.8). The Archive holds no resources
 // of its own — closing it does not close u or bth; the caller
@@ -92,6 +121,9 @@ func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]b
 
 func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
 	k := c.node.id.String()
+	if c.universe == nil {
+		c.universe = a.u
+	}
 	if _, ok := a.claims[k]; !ok {
 		a.claims[k] = c
 	}
@@ -112,49 +144,23 @@ func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
 	return a.u.SaveContent(ctx, id, b)
 }
 
-func (a *archive) HasClosure(ctx context.Context, head Id) bool {
-	if head == nil {
+func (a *archive) HasClaim(ctx context.Context, id Id) bool {
+	if id == nil {
 		return false
 	}
-	_, err := a.lookupClaim(ctx, head)
+	_, err := a.lookupClaim(ctx, id)
 	return err == nil
 }
 
-func (a *archive) GetClosure(ctx context.Context, head Id) (Graph, error) {
-	if head == nil {
-		return nil, errors.New("ranke.Archive.GetClosure: nil head")
+func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
+	if id == nil {
+		return nil, errors.New("ranke.Archive.GetClaim: nil id")
 	}
-	root, err := a.lookupClaim(ctx, head)
+	c, err := a.lookupClaim(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Archive.GetClosure: head %s: %w", head.String(), err)
+		return nil, fmt.Errorf("ranke.Archive.GetClaim: %s: %w", id.String(), err)
 	}
-	g := &graph{
-		claims:     make(map[string]*claim),
-		referenced: make(map[string]struct{}),
-	}
-	queue := []*claim{root}
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		c := queue[0]
-		queue = queue[1:]
-		k := c.node.id.String()
-		if _, seen := g.claims[k]; seen {
-			continue
-		}
-		g.claims[k] = c
-		for _, e := range c.edges {
-			refKey := e.reference.String()
-			g.referenced[refKey] = struct{}{}
-			next, err := a.lookupClaim(ctx, e.reference)
-			if err != nil {
-				return nil, fmt.Errorf("ranke.Archive.GetClosure: missing claim %s referenced by %s: %w", refKey, k, err)
-			}
-			queue = append(queue, next)
-		}
-	}
-	return g, nil
+	return c, nil
 }
 
 // --- Branches ---
@@ -180,14 +186,14 @@ func (a *archive) VerifyBranch(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	g, err := a.GetClosure(ctx, b.Latest().Head())
+	c, err := a.GetClaim(ctx, b.Latest().Head())
 	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: GetClosure %s: %w", b.Latest().Head().String(), err)
+		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
 	}
-	return g.Validate()
+	return c.Validate(ctx)
 }
 
-func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt ...time.Time) error {
+func (a *archive) AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error {
 	if c == nil {
 		return errors.New("ranke.Archive.AddClaim: nil claim")
 	}
@@ -196,14 +202,18 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 		return errors.New("ranke.Archive.AddClaim: claim has no contributor")
 	}
 	var g Graph
-	if a.table.Has(name) {
-		b, err := a.table.Get(ctx, name)
+	if a.table.Has(branchName) {
+		b, err := a.table.Get(ctx, branchName)
 		if err != nil {
 			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 		}
-		g, err = a.GetClosure(ctx, b.Latest().Head())
+		head, err := a.GetClaim(ctx, b.Latest().Head())
 		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddClaim: load branch state: %w", err)
+			return fmt.Errorf("ranke.Archive.AddClaim: load branch head: %w", err)
+		}
+		g, err = head.Graph(ctx)
+		if err != nil {
+			return fmt.Errorf("ranke.Archive.AddClaim: materialize branch closure: %w", err)
 		}
 	} else {
 		g = NewGraph(contributor)
@@ -211,7 +221,7 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 	if err := g.Add(c); err != nil {
 		return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
 	}
-	return a.AddGraph(ctx, name, g, contributor, createdAt...)
+	return a.AddGraph(ctx, branchName, g, contributor, createdAt...)
 }
 
 // AddGraph advances the named branch per spec §4.7:
@@ -219,7 +229,7 @@ func (a *archive) AddClaim(ctx context.Context, name string, c Claim, createdAt 
 //  2. Build a contribution/head claim consolidating g's open heads.
 //  3. Delegate the branches-claim mint to a.table.Set.
 //  4. Persist the new B_h via a.bth.
-func (a *archive) AddGraph(ctx context.Context, name string, g Graph, contributor Contributor, createdAt ...time.Time) error {
+func (a *archive) AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error {
 	if g == nil {
 		return errors.New("ranke.Archive.AddGraph: nil graph")
 	}
@@ -267,7 +277,7 @@ func (a *archive) AddGraph(ctx context.Context, name string, g Graph, contributo
 		return fmt.Errorf("ranke.Archive.AddGraph: absorb head claim: %w", err)
 	}
 
-	nextTable, err := a.table.Set(ctx, name, headC.node.id, contributor, at)
+	nextTable, err := a.table.Set(ctx, branchName, headC.node.id, contributor, at)
 	if err != nil {
 		return fmt.Errorf("ranke.Archive.AddGraph: %w", err)
 	}

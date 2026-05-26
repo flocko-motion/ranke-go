@@ -6,6 +6,35 @@ import (
 	"sort"
 )
 
+// Filter selects a subset of edges matching some criterion. Passed
+// to Claim.Edges as a variadic list — every filter must match (AND).
+// Callers can implement their own; NewTypeFilter and NewEncodingFilter
+// cover the common cases.
+type Filter interface {
+	Match(e Edge) bool
+}
+
+// Edge is a directed reference from the owning claim to a prior claim
+// (spec §4.2). Each edge is part of exactly one claim. Direction is
+// universal: every edge runs from an older claim (its Reference) to
+// the newer claim that owns it.
+type Edge interface {
+	Reference() Id
+	Type() string
+	TypeClass() EdgeClass
+	TypeSub() string
+	// Content is inline (paper §4.2 simplified schema) — no separate
+	// content_hash for edges.
+	Content() []byte
+	// RelationDirection is RelationFrom (+1) or RelationTo (-1) on
+	// relation/* edges, 0 elsewhere (§4.7).
+	RelationDirection() RelationDirection
+	HasField(name string) bool
+	GetField(name string) (string, error)
+	Fields() []string
+	ID() Id
+}
+
 // EdgeConfig is the data-only input to NewEdge.
 //
 // Required: Reference plus a type (either Type or TypeClass+TypeSub).
