@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/adaptertest"
+	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
 )
 
 // TestConformance runs the shared Universe suite against the rest adapter,

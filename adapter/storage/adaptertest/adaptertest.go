@@ -1,7 +1,7 @@
 // package: adaptertest / conformance
 // type:    test
 // job:     black-box conformance suite exercising any ranke.Universe via the public API
-// limits:  no medium-specific scenarios; each adapter adds those alongside (-> adapter/fs, adapter/mem)
+// limits:  no medium-specific scenarios; each adapter adds those alongside (-> adapter/storage/fs, adapter/storage/mem)
 //
 // Package adaptertest is a black-box conformance suite for ranke.Universe
 // implementations. It exercises an adapter purely through the public
@@ -26,6 +26,16 @@ import (
 
 	"github.com/flocko-motion/ranke-go"
 )
+
+// memHead is a throwaway in-memory BranchTableHead for the copy test. The
+// contract suite depends only on ranke's interfaces — never on a concrete
+// adapter — so it carries its own instead of importing adapter/mem (which
+// would cycle: adapter/mem's test imports this package).
+type memHead struct{ id ranke.Id }
+
+func (h *memHead) Load(context.Context) (ranke.Id, error)    { return h.id, nil }
+func (h *memHead) Save(_ context.Context, id ranke.Id) error { h.id = id; return nil }
+func (h *memHead) Close() error                              { return nil }
 
 // Factory returns a fresh, empty Universe. Run calls it more than once
 // (e.g. a source and a destination for copy tests), so each call must
@@ -179,7 +189,7 @@ func testCopyClosure(t *testing.T, newU Factory) {
 	dst := newU(t)
 	defer dst.Close()
 
-	srcArc, err := ranke.NewArchive(ctx, src, ranke.NewMemBranchTableHead())
+	srcArc, err := ranke.NewArchive(ctx, src, &memHead{})
 	if err != nil {
 		t.Fatalf("NewArchive(src): %v", err)
 	}
@@ -202,7 +212,7 @@ func testCopyClosure(t *testing.T, newU Factory) {
 		t.Fatalf("CopyClaims: %v", err)
 	}
 
-	dstArc, err := ranke.NewArchive(ctx, dst, ranke.NewMemBranchTableHead())
+	dstArc, err := ranke.NewArchive(ctx, dst, &memHead{})
 	if err != nil {
 		t.Fatalf("NewArchive(dst): %v", err)
 	}

@@ -11,7 +11,7 @@
 //	PUT    {baseURL}/{id}   <- bytes,        200/201
 //	HEAD   {baseURL}/{id}   -> 200, or 404
 //
-// adapter.NewBlobUniverse supplies the claim codec, content integrity, and
+// storage.NewBlobUniverse supplies the claim codec, content integrity, and
 // copy machinery on top. Any object store or blob service exposing this
 // shape (or trivially wrapped to) is a ranke Universe.
 package rest
@@ -26,7 +26,7 @@ import (
 	"strings"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter"
+	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 // New returns a Universe backed by the blob API rooted at baseURL, using
@@ -40,7 +40,7 @@ func New(baseURL string, client *http.Client) (ranke.Universe, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return adapter.NewBlobUniverse(&store{
+	return storage.NewBlobUniverse(&store{
 		base:   strings.TrimRight(baseURL, "/"),
 		client: client,
 	}), nil

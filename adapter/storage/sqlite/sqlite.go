@@ -1,13 +1,13 @@
 // package: sqlite / persistence
 // type:    adapter
 // job:     stores claims and content blobs as rows in a single SQLite table
-// limits:  no indexing or codec logic; a BlobStore behind adapter.NewBlobUniverse (-> adapter)
+// limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
 // Package sqlite is a SQLite persistence adapter for a ranke Universe. It
 // stores claims and content blobs as rows in one flat table, addressed by
 // their id strings — the database analogue of the fs adapter's flat
-// directory. It is a thin adapter.BlobStore; the claim/content/copy
-// machinery comes from adapter.NewBlobUniverse.
+// directory. It is a thin storage.BlobStore; the claim/content/copy
+// machinery comes from storage.NewBlobUniverse.
 //
 // Backed by the pure-Go modernc.org/sqlite driver, so it needs no cgo and
 // no external infrastructure.
@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter"
+	"github.com/flocko-motion/ranke-go/adapter/storage"
 
 	_ "modernc.org/sqlite"
 )
@@ -45,7 +45,7 @@ func New(dsn string) (ranke.Universe, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("adapter/sqlite.New: create schema: %w", err)
 	}
-	return adapter.NewBlobUniverse(&store{db: db}), nil
+	return storage.NewBlobUniverse(&store{db: db}), nil
 }
 
 type store struct {

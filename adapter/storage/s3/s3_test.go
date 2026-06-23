@@ -12,7 +12,7 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/adaptertest"
+	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
 )
 
 // TestConformance runs the shared black-box Universe suite against the s3

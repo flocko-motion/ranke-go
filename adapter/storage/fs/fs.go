@@ -1,13 +1,13 @@
 // package: fs / persistence
 // type:    adapter
 // job:     stores claims and content blobs as files in a single flat directory
-// limits:  no indexing or codec logic; a BlobStore behind adapter.NewBlobUniverse (-> adapter)
+// limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
 // Package fs is a filesystem persistence adapter for a ranke Universe: it
 // stores claims and content blobs as files in a single flat directory,
-// named by their id strings. It is a thin adapter.BlobStore — the
-// claim/content/copy machinery comes from adapter.NewBlobUniverse — plus
-// an Open method (adapter.Streamer) so large content streams straight off
+// named by their id strings. It is a thin storage.BlobStore — the
+// claim/content/copy machinery comes from storage.NewBlobUniverse — plus
+// an Open method (storage.Streamer) so large content streams straight off
 // disk without buffering.
 package fs
 
@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter"
+	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 // New returns a Universe backed by a single flat directory. Claims and
@@ -33,7 +33,7 @@ func New(dir string) (ranke.Universe, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("adapter/fs.New: mkdir %s: %w", dir, err)
 	}
-	return adapter.NewBlobUniverse(&store{dir: dir}), nil
+	return storage.NewBlobUniverse(&store{dir: dir}), nil
 }
 
 type store struct {
@@ -74,7 +74,7 @@ func (s *store) Has(_ context.Context, key string) (bool, error) {
 	return false, err
 }
 
-// Open implements adapter.Streamer: a raw file handle, so content streams
+// Open implements storage.Streamer: a raw file handle, so content streams
 // off disk instead of being read whole into memory.
 func (s *store) Open(_ context.Context, key string) (io.ReadCloser, error) {
 	f, err := os.Open(s.path(key))

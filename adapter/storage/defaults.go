@@ -1,14 +1,14 @@
-// package: adapter / persistence
+// package: storage / persistence
 // type:    adapter
 // job:     shared default Copy* walkers every concrete adapter can delegate to
 // limits:  no storage of its own; concrete backends live in sub-packages (-> adapter/fs, adapter/mem)
 //
-// Package adapter holds persistence adapters for a ranke Universe and the
+// Package storage holds persistence adapters for a ranke Universe and the
 // default building blocks they share. Each concrete adapter lives in its
 // own sub-package (adapter/fs, adapter/mem, ...) and implements
 // ranke.Universe strictly against ranke's public API. The shared default
 // Copy* walkers live here so every adapter can delegate to them.
-package adapter
+package storage
 
 import (
 	"context"

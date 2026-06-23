@@ -1,14 +1,14 @@
 // package: s3 / persistence
 // type:    adapter
 // job:     stores claims and content blobs as objects in an S3 bucket
-// limits:  no indexing or codec logic; a BlobStore behind adapter.NewBlobUniverse (-> adapter)
+// limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
 // Package s3 is an S3 persistence adapter for a ranke Universe. It stores
 // claims and content blobs as objects in a single bucket, keyed by their
 // id strings — the object-store analogue of the fs adapter's flat
-// directory. It is a thin adapter.BlobStore — the claim/content/copy
-// machinery comes from adapter.NewBlobUniverse — plus an Open method
-// (adapter.Streamer) so large content streams from the response body
+// directory. It is a thin storage.BlobStore — the claim/content/copy
+// machinery comes from storage.NewBlobUniverse — plus an Open method
+// (storage.Streamer) so large content streams from the response body
 // without buffering.
 //
 // New takes an already-configured *s3.Client so the adapter stays free of
@@ -29,7 +29,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter"
+	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 // New returns a Universe backed by the given bucket on client. The bucket
@@ -42,7 +42,7 @@ func New(client *s3.Client, bucket string) (ranke.Universe, error) {
 	if bucket == "" {
 		return nil, errors.New("adapter/s3.New: empty bucket")
 	}
-	return adapter.NewBlobUniverse(&store{client: client, bucket: bucket}), nil
+	return storage.NewBlobUniverse(&store{client: client, bucket: bucket}), nil
 }
 
 type store struct {
@@ -81,7 +81,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Open implements adapter.Streamer: the raw GetObject body, so content
+// Open implements storage.Streamer: the raw GetObject body, so content
 // streams from S3 instead of being read whole into memory.
 func (s *store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{

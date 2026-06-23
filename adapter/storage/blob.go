@@ -4,7 +4,11 @@
 // checks, bulk loops — is identical across all of them and lives here, so
 // a new adapter only has to implement three primitives.
 
-package adapter
+// package: adapter / blobstore
+// type:    logic
+// job:     the BlobStore seam — three byte primitives (Get/Put/Has) become a full ranke.Universe
+// limits:  no storage of its own; concrete blob backends live in sub-packages (-> adapter/fs, adapter/mem)
+package storage
 
 import (
 	"bytes"

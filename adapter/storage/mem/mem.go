@@ -9,7 +9,7 @@
 // persists across process restarts.
 //
 // mem deliberately stays standalone rather than folding onto
-// adapter.BlobStore: holding live claim objects (not encoded bytes) avoids
+// storage.BlobStore: holding live claim objects (not encoded bytes) avoids
 // codec round-trips and leaves room to optimize over time. The frozen,
 // minimal BlobStore illustration lives in adapter/minimal.
 package mem
@@ -21,7 +21,7 @@ import (
 	"sync"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter"
+	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 // New returns an ephemeral, in-memory Universe.
@@ -143,11 +143,11 @@ func (u *memUniverse) HasContents(_ context.Context, hashes []ranke.Id) ([]bool,
 }
 
 func (u *memUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return adapter.DefaultCopyClaims(ctx, u, src, ids, opts...)
+	return storage.DefaultCopyClaims(ctx, u, src, ids, opts...)
 }
 
 func (u *memUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return adapter.DefaultCopyContents(ctx, u, src, refs, opts...)
+	return storage.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
 type bytesReaderT struct {
