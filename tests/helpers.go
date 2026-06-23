@@ -1,3 +1,7 @@
+// package: tests / conformance
+// type:    test
+// job:     small error-checking helper shared across the integration suite
+// limits:  no test logic itself (-> tests/scenarios.go, tests/integration.go)
 package tests
 
 // must panics if any returned value is a non-nil error, else returns

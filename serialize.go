@@ -1,3 +1,7 @@
+// package: ranke / serialize
+// type:    io
+// job:     CBOR Deterministic encoding of node and edge records and the shared encoder config
+// limits:  claim-level codec is in codec.go; persists nothing (-> adapter)
 package ranke
 
 import (
@@ -89,9 +93,9 @@ func encodeEdge(e *edge) ([]byte, error) {
 	return encodingMode.Marshal(ee)
 }
 
-// buildEncNode constructs the encNode payload for a *node — used
-// both in id computation (encodeNode wraps this) and when persisting
-// claim files to disk.
+// buildEncNode constructs the encNode payload for a *node — used both
+// in id computation (encodeNode wraps this) and in the claim codec
+// (EncodeClaim), independent of where the bytes are later stored.
 func buildEncNode(n *node) (encNode, error) {
 	en := encNode{
 		TypeClass:     string(n.typeClass),
@@ -133,21 +137,21 @@ func parseRFC3339Nano(s string) (time.Time, error) {
 	return time.Parse("2006-01-02T15:04:05.000000000Z", s)
 }
 
-// idBytes extracts the raw multihash bytes from an Id. Used only by
-// canonical encoding paths within this package.
-func idBytes(id Id) []byte {
-	if id == nil {
+// idBytes extracts the raw self-describing payload bytes from an Id.
+// Used only by canonical encoding paths within this package.
+func idBytes(v Id) []byte {
+	if v == nil {
 		return nil
 	}
-	if h, ok := id.(*hash); ok {
+	if h, ok := v.(*id); ok {
 		return h.raw
 	}
 	// Fallback: round-trip through ParseId on the string form. Only
 	// hit if a non-package Id implementation flows in, which we
 	// don't expect.
-	parsed, err := ParseId(id.String())
+	parsed, err := ParseId(v.String())
 	if err != nil {
 		return nil
 	}
-	return parsed.(*hash).raw
+	return parsed.(*id).raw
 }

@@ -1,3 +1,8 @@
+// package: main / cli
+// type:    cmd
+// job:     read-only CLI to inspect filesystem-backed Ranke-Graph archives
+// limits:  no mutation commands; building claims lives in tests + downstream apps (-> tests)
+//
 // ranke is a small CLI for inspecting filesystem-backed Ranke-Graph
 // archives. It opens an archive at <dir> and runs read-only queries
 // against it. No mutation commands yet — building claims live in
@@ -20,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
 )
 
 func main() {
@@ -68,7 +74,7 @@ func exit(err error) {
 }
 
 func openArchive(ctx context.Context, dir string) (ranke.Archive, error) {
-	u, err := ranke.NewFsUniverse(filepath.Join(dir, "universe"))
+	u, err := fs.New(filepath.Join(dir, "universe"))
 	if err != nil {
 		return nil, fmt.Errorf("open universe in %s: %w", dir, err)
 	}

@@ -1,3 +1,7 @@
+// package: ranke / branch_table
+// type:    logic
+// job:     loads a contribution/branches claim as an immutable aggregate of branches and mints the next table version on Set
+// limits:  does not persist B_h (-> branch_table_head); does not own the Universe lifecycle (-> universe)
 package ranke
 
 import (
@@ -58,7 +62,7 @@ func LoadBranchTable(ctx context.Context, u Universe, bh Id) (BranchTable, error
 // the recursively-wired claim referenced by its contribution/contributor
 // edge.
 func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
-	cl, err := u.LoadClaim(ctx, id)
+	cl, err := GetClaim(ctx, u, id)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +251,7 @@ func (b *branchTable) Set(ctx context.Context, name string, head Id, contributor
 		return nil, fmt.Errorf("ranke.BranchTable.Set: build claim: %w", err)
 	}
 	tc := tableClaim.(*claim)
-	if err := b.u.SaveClaim(ctx, tc); err != nil {
+	if err := PutClaim(ctx, b.u, tc); err != nil {
 		return nil, fmt.Errorf("ranke.BranchTable.Set: save claim: %w", err)
 	}
 	return &branchTable{u: b.u, bh: tc.node.id, claim: tc}, nil

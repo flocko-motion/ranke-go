@@ -4,7 +4,30 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-verbose vet fmt tidy clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
+.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
+
+# "The library" for coverage purposes = the root package plus the mem
+# adapter. mem is the fundamental, always-present, dependency-free
+# Universe — root behaviour can only be exercised through some adapter,
+# and mem is the one that ships everywhere. Other adapters (fs, future
+# s3, …) are verified against the Universe contract via adapter/adaptertest,
+# not counted here.
+MODULE  := github.com/flocko-motion/ranke-go
+COVERPKG := $(MODULE),$(MODULE)/adapter/mem
+# Test packages that drive the number — explicitly enumerated, NOT a
+# ./adapter/... glob, so a new adapter (s3, …) is opted into the core
+# test deliberately rather than swept in by accident:
+#   ./tests/...           the library's feature suite
+#   ./adapter/mem/...     the fundamental adapter (also counted in COVERPKG)
+#   ./adapter/fs/...      exercises root through a second real backend
+#   ./adapter/sqlite/...  pure-Go SQLite backend (modernc, no cgo)
+#   ./adapter/s3/...      S3 backend against an in-process gofakes3 server
+#   ./adapter/minimal/... smallest possible adapter (map behind BlobStore)
+#   ./adapter/rest/...    HTTP blob backend against an in-process server
+# Every adapter here runs with NO special infrastructure. Adapter
+# statements are NOT in COVERPKG — they're verified against the Universe
+# contract, not counted. conformance scenarios are deliberately excluded.
+COVERDRIVERS := ./tests/... ./adapter/mem/... ./adapter/fs/... ./adapter/sqlite/... ./adapter/s3/... ./adapter/minimal/... ./adapter/rest/...
 
 BINDIR ?= $(HOME)/.local/bin
 
@@ -41,6 +64,24 @@ test:
 
 test-verbose:
 	go test -v ./tests/...
+
+# Merged library coverage from `go test ./...`. -coverpkg attributes
+# coverage to the /tests package, which imports the library. (Packages
+# without _test.go files, like conformance, are skipped by go test.)
+coverage:
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test -coverpkg=$(COVERPKG) \
+		-covermode=atomic -coverprofile=coverage.out $(COVERDRIVERS)
+	@go tool cover -func=coverage.out | tail -1
+
+# Map of where coverage is missing: every library function below 100%,
+# worst first. Refreshes the profile via `coverage` first.
+coverage-gaps: coverage
+	@echo ""
+	@echo "Functions below 100% coverage (worst first):"
+	@go tool cover -func=coverage.out \
+		| awk '$$3+0<100 && $$1 ~ /\.go:/ { print $$3"\t"$$0 }' \
+		| sort -n \
+		| sed 's#$(MODULE)/##'
 
 # Narrative output: scenarios print what they are doing at every step.
 # Useful for understanding what the integration suite covers.

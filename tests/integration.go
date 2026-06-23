@@ -1,3 +1,8 @@
+// package: tests / conformance
+// type:    test
+// job:     public IntegrationTest entry point + testArchive Reset harness for any Archive backend
+// limits:  no scenario bodies here; those live alongside (-> tests/scenarios.go)
+//
 // Package tests is the public conformance suite for the Ranke-Graph
 // library. Third-party Archive implementations should call
 // IntegrationTest from a *_test.go to verify their backend conforms

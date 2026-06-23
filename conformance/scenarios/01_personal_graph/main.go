@@ -14,6 +14,10 @@
 //
 //	conformance/scenarios/01_personal_graph/run.sh
 
+// package: main / scenario
+// type:    cmd
+// job:     build & persist the scenario-01 personal-graph data bundle
+// limits:  doesn't verify variant reproductions; that's the run.sh harness (-> conformance/helpers)
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
@@ -205,7 +210,7 @@ func main() {
 	// would stack a MemUniverse on top, or swap S3Universe in below —
 	// this scenario keeps it flat so the bundle is just a directory.
 	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
-	u := must(ranke.NewFsUniverse(helpers.UniverseDir))
+	u := must(fs.New(helpers.UniverseDir))
 	bth := must(ranke.NewFsBranchTableHead(helpers.BranchTableHeadPath))
 	arc := must(ranke.NewArchive(ctx, u, bth))
 	must(arc.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))

@@ -1,3 +1,8 @@
+// package: main / cli
+// type:    cmd
+// job:     regenerate conformance/scenarios/*/scenario.md from each scenario's main.go comments
+// limits:  doesn't run scenarios; only extracts their doc comments (-> conformance/scenarios)
+//
 // scenariodoc regenerates conformance/scenarios/*/scenario.md from
 // comments in each scenario's main.go plus the template at
 // conformance/helpers/scenario.md.tmpl. Run via `make scenarios-docs`.
@@ -74,6 +79,7 @@ type Scenario struct {
 	Sections []Section
 }
 
+// Section is one numbered "--- N. Title ---" block of a Scenario.
 type Section struct {
 	Num   string
 	Title string
@@ -105,9 +111,12 @@ func extractScenario(dir, mainGo string) (Scenario, error) {
 	// Intro: comment groups whose End is before file.Package. Go
 	// only attaches file.Doc when there's no blank line between
 	// the comment and `package`; scenarios leave one for readability.
+	// The canonical four-field file header (a "package:" block sitting
+	// directly above package) is structural metadata, not prose, so it
+	// is skipped here.
 	var intro []string
 	for _, cg := range file.Comments {
-		if cg.End() < file.Package {
+		if cg.End() < file.Package && !isFileHeader(cg.Text()) {
 			intro = append(intro, commentText(cg.Text()))
 		}
 	}
@@ -158,6 +167,20 @@ func commentText(s string) string {
 		out = out[:len(out)-1]
 	}
 	return strings.Join(out, "\n")
+}
+
+// isFileHeader reports whether a comment group is the canonical
+// four-field file header (its first non-blank line starts with the
+// "package:" label), so it can be excluded from scenario prose.
+func isFileHeader(s string) bool {
+	for _, l := range splitLines(s) {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		return strings.HasPrefix(l, "package:")
+	}
+	return false
 }
 
 func splitLines(s string) []string {

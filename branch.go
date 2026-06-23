@@ -1,3 +1,7 @@
+// package: ranke / branch
+// type:    data
+// job:     read-only views over one (name, head) binding and its history, projected from a contribution/branches claim
+// limits:  does not mutate branches (-> archive); does not load the table (-> branch_table)
 package ranke
 
 import "time"

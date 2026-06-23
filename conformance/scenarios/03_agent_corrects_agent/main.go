@@ -21,6 +21,10 @@
 // Maps to spec §2.2 ("contradictions in the evidence base are
 // themselves evidence") and §3.5 (conviction values).
 
+// package: main / scenario
+// type:    cmd
+// job:     build & persist the scenario-03 agent-corrects-agent data bundle
+// limits:  doesn't verify variant reproductions; that's the run.sh harness (-> conformance/helpers)
 package main
 
 import (
@@ -29,6 +33,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
@@ -154,7 +159,7 @@ func main() {
 	must(g.Add(employedBy))
 
 	// --- 6. AddGraph — archive auto-consolidates the open heads. ---
-	u := must(ranke.NewFsUniverse(helpers.UniverseDir))
+	u := must(fs.New(helpers.UniverseDir))
 	bth := must(ranke.NewFsBranchTableHead(filepath.Join(helpers.DataDir, "branches", "B_h")))
 	arc := must(ranke.NewArchive(ctx, u, bth))
 	must(arc.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))

@@ -1,3 +1,7 @@
+// package: ranke / graph
+// type:    logic
+// job:     in-memory Ranke-Graph (RG ⊆ 𝒰) — adds claims under the atomic-creation rule, tracks heads, consolidates, and validates closures
+// limits:  does not persist claims (-> universe); does not bind graphs to branches (-> archive)
 package ranke
 
 import (
@@ -278,9 +282,9 @@ func (g *graph) verifyOne(c *claim) error {
 	if err != nil {
 		return fmt.Errorf("resolve pubkey: %w", err)
 	}
-	idH, ok := c.node.id.(*hash)
+	idH, ok := c.node.id.(*id)
 	if !ok {
-		return errors.New("id not a *hash (foreign id type)")
+		return errors.New("id not a concrete *id (foreign id type)")
 	}
 	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
 		return fmt.Errorf("§5.7: %w", err)

@@ -1,5 +1,6 @@
 bin/
 dist/
+coverage.out
 
 # Stray binaries from `go build ./cmd/<tool>` at repo root.
 /scenariodoc
@@ -20,3 +21,6 @@ conformance/scenarios/*/data/
 
 # Local Claude config
 /.claude/
+
+# Sindri runtime hub (sockets, local db) — not source.
+/.sindri/

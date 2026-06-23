@@ -1,3 +1,8 @@
+// package: helpers / conformance
+// type:    test
+// job:     shared boilerplate for ../scenarios/<n>/main.go (bundle setup, reload+verify, id collection)
+// limits:  builds no claims itself; scenarios do that inline (-> conformance/scenarios)
+//
 // Package helpers: shared boilerplate for ../scenarios/<n>/main.go.
 package helpers
 
@@ -12,6 +17,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
 )
 
 const (
@@ -25,11 +31,15 @@ const (
 	IdsPath             = DataDir + "/ids.txt"
 )
 
+// Scenario holds the running state of one conformance scenario: its
+// title and an advancing logical clock used to stamp claims.
 type Scenario struct {
 	Title string
 	at    time.Time
 }
 
+// New wipes the scenario's output bundle and returns a fresh Scenario
+// whose logical clock starts at at.
 func New(title string, at time.Time) *Scenario {
 	fmt.Printf("scenario %s\n\n", title)
 	fmt.Printf("output bundle:\n  %s/\n    universe/   (claims + content)\n    branches/B_h\n    ids.txt\n\n", DataDir)
@@ -39,6 +49,8 @@ func New(title string, at time.Time) *Scenario {
 	return &Scenario{Title: title, at: at.UTC()}
 }
 
+// NextTimestamp advances the scenario clock by the given durations (if
+// any) and returns the new current time.
 func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 	for _, dd := range d {
 		s.at = s.at.Add(dd)
@@ -46,8 +58,11 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 	return s.at
 }
 
+// ReloadAndVerify reopens the persisted bundle, validates every branch,
+// asserts expectBranch resolves to expectHead, and writes the sorted ids
+// file. It log.Fatals on any mismatch.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead string) {
-	u := Must(ranke.NewFsUniverse(UniverseDir))
+	u := Must(fs.New(UniverseDir))
 	bth := Must(ranke.NewFsBranchTableHead(BranchTableHeadPath))
 	arc := Must(ranke.NewArchive(ctx, u, bth))
 	allIds := make(map[string]struct{})
@@ -110,8 +125,10 @@ func shortIdStr(s string) string {
 	return s
 }
 
+// KeyPath returns the path to filename inside the fixtures keys dir.
 func KeyPath(filename string) string { return filepath.Join(KeysDir, filename) }
 
+// LoadSource reads filename from the fixtures sources dir.
 func LoadSource(filename string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(SourcesDir, filename))
 }
@@ -131,6 +148,8 @@ func Must[T any](v T, rest ...any) T {
 	return v
 }
 
+// CollectIds walks the graph from its heads and returns the sorted set
+// of all reachable claim ids.
 func CollectIds(g ranke.Graph) []string {
 	seen := map[string]bool{}
 	queue := append([]ranke.Id{}, g.Heads()...)
