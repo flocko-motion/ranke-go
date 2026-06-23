@@ -74,9 +74,10 @@ type claim struct {
 	universe    Universe
 }
 
-// Graph materializes the claim's provenance. For claims loaded from a
-// Universe, walks via that Universe; for in-memory claims it includes
-// only the claim and any contributor chain wired at construction.
+// Graph materializes the claim's provenance. Universe-backed claims walk
+// the full closure (every reachable claim); in-memory claims return only
+// the claim and the contributor chain wired at construction — a partial
+// graph, not a guaranteed closure.
 func (c *claim) Graph(ctx context.Context) (Graph, error) {
 	g := &graph{
 		claims:     make(map[string]*claim),

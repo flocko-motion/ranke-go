@@ -7,27 +7,27 @@
 .PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
 
 # "The library" for coverage purposes = the root package plus the mem
-# adapter. mem is the fundamental, always-present, dependency-free
+# storage adapter. mem is the fundamental, always-present, dependency-free
 # Universe — root behaviour can only be exercised through some adapter,
-# and mem is the one that ships everywhere. Other adapters (fs, future
-# s3, …) are verified against the Universe contract via adapter/adaptertest,
-# not counted here.
+# and mem is the one that ships everywhere. Other adapters are verified
+# against the Universe contract via adapter/storage/adaptertest, not counted.
 MODULE  := github.com/flocko-motion/ranke-go
-COVERPKG := $(MODULE),$(MODULE)/adapter/mem
+COVERPKG := $(MODULE),$(MODULE)/adapter/storage/mem
 # Test packages that drive the number — explicitly enumerated, NOT a
-# ./adapter/... glob, so a new adapter (s3, …) is opted into the core
-# test deliberately rather than swept in by accident:
-#   ./tests/...           the library's feature suite
-#   ./adapter/mem/...     the fundamental adapter (also counted in COVERPKG)
-#   ./adapter/fs/...      exercises root through a second real backend
-#   ./adapter/sqlite/...  pure-Go SQLite backend (modernc, no cgo)
-#   ./adapter/s3/...      S3 backend against an in-process gofakes3 server
-#   ./adapter/minimal/... smallest possible adapter (map behind BlobStore)
-#   ./adapter/rest/...    HTTP blob backend against an in-process server
+# ./adapter/... glob, so a new adapter is opted into the core test
+# deliberately rather than swept in by accident:
+#   ./tests/...                    the library's feature suite
+#   ./adapter/storage/mem/...      fundamental adapter (also counted in COVERPKG)
+#   ./adapter/storage/fs/...       exercises root through a second real backend
+#   ./adapter/storage/sqlite/...   pure-Go SQLite backend (modernc, no cgo)
+#   ./adapter/storage/s3/...       S3 backend against an in-process gofakes3 server
+#   ./adapter/storage/minimal/...  smallest possible adapter (map behind BlobStore)
+#   ./adapter/storage/rest/...     HTTP blob backend against an in-process server
+#   ./adapter/sequencer/...        BranchTableHead backends (mem/file/func)
 # Every adapter here runs with NO special infrastructure. Adapter
-# statements are NOT in COVERPKG — they're verified against the Universe
-# contract, not counted. conformance scenarios are deliberately excluded.
-COVERDRIVERS := ./tests/... ./adapter/mem/... ./adapter/fs/... ./adapter/sqlite/... ./adapter/s3/... ./adapter/minimal/... ./adapter/rest/...
+# statements are NOT in COVERPKG — they're verified against their contract,
+# not counted. conformance scenarios are deliberately excluded.
+COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... ./adapter/storage/sqlite/... ./adapter/storage/s3/... ./adapter/storage/minimal/... ./adapter/storage/rest/... ./adapter/sequencer/...
 
 BINDIR ?= $(HOME)/.local/bin
 

@@ -7,12 +7,14 @@
 //     immutable. Build one with ClaimBuilder; a claim's id is the
 //     signature over its canonical encoding.
 //   - Universe (𝒰, §4.5) — a content-addressed store of claims and
-//     content bytes, with no notion of branches. The in-memory form is
-//     core (NewMemUniverse via adapter/mem); persistence adapters live
-//     one-per-package under adapter/ (adapter/fs, plus downstream S3,
-//     Neo4j, ...), each implemented against this package's public API.
-//   - BranchTableHead (B_h, §4.7) — the single mutable Id of the current
-//     branches claim (NewFsBranchTableHead, NewMemBranchTableHead, ...).
+//     content bytes, with no notion of branches. Storage adapters live
+//     one-per-package under adapter/storage/ (mem, fs, sqlite, s3, plus
+//     downstream backends), each implemented against this package's
+//     public API.
+//   - BranchTableHead (B_h, §4.7) — the single mutable Id naming the
+//     current branch-table revision; the system's sequencing point and a
+//     separate seam from the Universe. Implementations live under
+//     adapter/sequencer/ (sequencer.Mem, sequencer.File, sequencer.Func).
 //   - Archive (§4.8) — the (𝒰, B_h) tuple, composed by NewArchive(u, bth).
 //     It owns neither dependency, so multiple Archives can share one
 //     Universe; closing an Archive closes nothing underneath it.

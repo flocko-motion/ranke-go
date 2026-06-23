@@ -1,7 +1,7 @@
 // package: ranke / branch_table_head
 // type:    io
 // job:     interface for persisting B_h — the single mutable Id of the current contribution/branches claim
-// limits:  defines the contract only; concrete stores live elsewhere (-> branch_table_head_fs, branch_table_head_mem)
+// limits:  defines the contract only; concrete stores are adapters (-> adapter/fs, adapter/mem)
 package ranke
 
 import "context"

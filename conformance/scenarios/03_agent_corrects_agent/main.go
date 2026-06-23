@@ -33,7 +33,8 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/fs"
+	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
@@ -160,7 +161,7 @@ func main() {
 
 	// --- 6. AddGraph — archive auto-consolidates the open heads. ---
 	u := must(fs.New(helpers.UniverseDir))
-	bth := must(ranke.NewFsBranchTableHead(filepath.Join(helpers.DataDir, "branches", "B_h")))
+	bth := must(sequencer.File(filepath.Join(helpers.DataDir, "branches", "B_h")))
 	arc := must(ranke.NewArchive(ctx, u, bth))
 	must(arc.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
 

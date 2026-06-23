@@ -25,7 +25,8 @@ import (
 	"strings"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/fs"
+	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 )
 
 func main() {
@@ -78,7 +79,7 @@ func openArchive(ctx context.Context, dir string) (ranke.Archive, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open universe in %s: %w", dir, err)
 	}
-	bth, err := ranke.NewFsBranchTableHead(filepath.Join(dir, "branches", "B_h"))
+	bth, err := sequencer.File(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
 		return nil, fmt.Errorf("open branch table head in %s: %w", dir, err)
 	}
