@@ -1,3 +1,7 @@
+// package: tests / conformance
+// type:    test
+// job:     multi-stage scenario stories that build graphs, commit, reset, and verify survival
+// limits:  no public entry point; driven by IntegrationTest (-> tests/integration.go)
 package tests
 
 import (
@@ -239,4 +243,3 @@ func runAliceEmail(t *testing.T, ctx context.Context, ts *testArchive) {
 	g4, _ := fetchMain(t, ctx, ts)
 	require.True(t, g4.Heads()[0].Equal(g3.Heads()[0]), "head id stable across reset")
 }
-

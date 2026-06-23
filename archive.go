@@ -1,3 +1,7 @@
+// package: ranke / archive
+// type:    logic
+// job:     composes a Universe and BranchTableHead into the (𝒰, B_h) Archive; commits graphs/claims to branches and verifies them
+// limits:  stores nothing itself (-> universe, branch_table_head); does not validate per-claim integrity (-> graph)
 package ranke
 
 import (
@@ -111,7 +115,7 @@ func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]b
 	if b, ok := a.content[k]; ok {
 		return b, nil
 	}
-	b, err := a.u.GetContent(ctx, id, expected)
+	b, err := GetContent(ctx, a.u, id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +131,7 @@ func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
 	if _, ok := a.claims[k]; !ok {
 		a.claims[k] = c
 	}
-	if err := a.u.SaveClaim(ctx, c); err != nil {
+	if err := PutClaim(ctx, a.u, c); err != nil {
 		return err
 	}
 	if c.node.content != nil && c.node.contentHash != nil {
@@ -141,7 +145,7 @@ func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
 func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
 	k := id.String()
 	a.content[k] = b
-	return a.u.SaveContent(ctx, id, b)
+	return PutContent(ctx, a.u, id, b)
 }
 
 func (a *archive) HasClaim(ctx context.Context, id Id) bool {

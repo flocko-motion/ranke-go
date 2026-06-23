@@ -1,3 +1,7 @@
+// package: ranke / sign
+// type:    crypto
+// job:     multikey-framed Sign/verify (§4.1) plus Ed25519 key encoding and PEM loading
+// limits:  does not compute the hash being signed (-> hash); supports only Ed25519 today
 package ranke
 
 import (
@@ -174,6 +178,8 @@ func LoadEd25519PrivateKeyPEM(path string) (ed25519.PrivateKey, error) {
 // LoadEd25519PublicKeyPEM loads an Ed25519 public key from a
 // SubjectPublicKeyInfo PEM file (as produced by `openssl pkey
 // -pubout`).
+//
+//deadcode:keep
 func LoadEd25519PublicKeyPEM(path string) (ed25519.PublicKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

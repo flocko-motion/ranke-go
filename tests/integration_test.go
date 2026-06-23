@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
+	"github.com/flocko-motion/ranke-go/adapter/mem"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,7 +49,7 @@ func TestMain(m *testing.M) {
 
 func TestIntegrationMem(t *testing.T) {
 	ctx := context.Background()
-	a, err := ranke.NewArchive(ctx, ranke.NewMemUniverse(), ranke.NewMemBranchTableHead())
+	a, err := ranke.NewArchive(ctx, mem.New(), ranke.NewMemBranchTableHead())
 	require.NoError(t, err)
 	IntegrationTest(t, ctx, func() ranke.Archive { return a })
 }
@@ -55,7 +57,7 @@ func TestIntegrationMem(t *testing.T) {
 func TestIntegrationFs(t *testing.T) {
 	ctx := context.Background()
 	IntegrationTest(t, ctx, func() ranke.Archive {
-		u, err := ranke.NewFsUniverse(fsTestDir)
+		u, err := fs.New(fsTestDir)
 		require.NoError(t, err)
 		bth, err := ranke.NewFsBranchTableHead(filepath.Join(fsTestDir, "B_h"))
 		require.NoError(t, err)

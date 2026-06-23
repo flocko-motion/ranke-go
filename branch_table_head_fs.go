@@ -1,3 +1,7 @@
+// package: ranke / branch_table_head
+// type:    io
+// job:     file-backed BranchTableHead storing B_h as a single-line text file with atomic rename writes
+// limits:  no in-memory variant (-> branch_table_head_mem); does not interpret the Id (-> branch_table)
 package ranke
 
 import (
@@ -46,3 +50,17 @@ func (b *fsBranchTableHead) Save(_ context.Context, id Id) error {
 }
 
 func (b *fsBranchTableHead) Close() error { return nil }
+
+// atomicWrite writes data to path via a temp file + rename, so a reader
+// never sees a partially-written file.
+func atomicWrite(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write tmp %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+	}
+	return nil
+}

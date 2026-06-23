@@ -1,3 +1,7 @@
+// package: ranke / branch_table_head
+// type:    io
+// job:     in-memory BranchTableHead holding B_h in a mutex-guarded field; lost on process exit
+// limits:  not durable (-> branch_table_head_fs); does not interpret the Id (-> branch_table)
 package ranke
 
 import (

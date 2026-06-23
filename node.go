@@ -1,3 +1,7 @@
+// package: ranke / node
+// type:    data
+// job:     the Node structural component of a claim, plus the closed node/encoding type vocabularies
+// limits:  does not build nodes (-> claim) or serialize them (-> serialize)
 package ranke
 
 import (
@@ -133,3 +137,104 @@ func (n *node) Pubkey() []byte {
 }
 
 func (n *node) Title() string { return n.title }
+
+// --- Node type vocabulary (spec §4.8) ---
+
+// NodeClass is the closed top-level vocabulary for node types.
+type NodeClass string
+
+const (
+	NodeSource       NodeClass = "source"
+	NodeDerivation   NodeClass = "derivation"
+	NodeEntity       NodeClass = "entity"
+	NodeRelation     NodeClass = "relation"
+	NodeContribution NodeClass = "contribution"
+)
+
+// EncodingClass is the closed top-level MIME vocabulary (RFC 6838
+// media types); the subtype is open.
+type EncodingClass string
+
+const (
+	encApplication EncodingClass = "application"
+	encAudio       EncodingClass = "audio"
+	encExample     EncodingClass = "example"
+	encFont        EncodingClass = "font"
+	encImage       EncodingClass = "image"
+	encMessage     EncodingClass = "message"
+	encModel       EncodingClass = "model"
+	encMultipart   EncodingClass = "multipart"
+	encText        EncodingClass = "text"
+	encVideo       EncodingClass = "video"
+)
+
+// EncodingApplication returns the "application/<sub>" media type.
+//
+//deadcode:keep
+func EncodingApplication(sub string) string { return encType(encApplication, sub) }
+
+// EncodingAudio returns the "audio/<sub>" media type.
+//
+//deadcode:keep
+func EncodingAudio(sub string) string { return encType(encAudio, sub) }
+
+// EncodingExample returns the "example/<sub>" media type.
+//
+//deadcode:keep
+func EncodingExample(sub string) string { return encType(encExample, sub) }
+
+// EncodingFont returns the "font/<sub>" media type.
+//
+//deadcode:keep
+func EncodingFont(sub string) string { return encType(encFont, sub) }
+
+// EncodingImage returns the "image/<sub>" media type.
+//
+//deadcode:keep
+func EncodingImage(sub string) string { return encType(encImage, sub) }
+
+// EncodingMessage returns the "message/<sub>" media type.
+func EncodingMessage(sub string) string { return encType(encMessage, sub) }
+
+// EncodingModel returns the "model/<sub>" media type.
+//
+//deadcode:keep
+func EncodingModel(sub string) string { return encType(encModel, sub) }
+
+// EncodingMultipart returns the "multipart/<sub>" media type.
+//
+//deadcode:keep
+func EncodingMultipart(sub string) string { return encType(encMultipart, sub) }
+
+// EncodingText returns the "text/<sub>" media type.
+//
+//deadcode:keep
+func EncodingText(sub string) string { return encType(encText, sub) }
+
+// EncodingVideo returns the "video/<sub>" media type.
+//
+//deadcode:keep
+func EncodingVideo(sub string) string { return encType(encVideo, sub) }
+
+func encType(class EncodingClass, sub string) string { return string(class) + "/" + sub }
+
+// TypeSource returns the "source/<sub>" node type.
+func TypeSource(sub string) string { return nodeType(NodeSource, sub) }
+
+// TypeDerivation returns the "derivation/<sub>" node type.
+func TypeDerivation(sub string) string { return nodeType(NodeDerivation, sub) }
+
+// TypeEntity returns the "entity/<sub>" node type.
+func TypeEntity(sub string) string { return nodeType(NodeEntity, sub) }
+
+// TypeRelation returns the "relation/<sub>" node type.
+func TypeRelation(sub string) string { return nodeType(NodeRelation, sub) }
+
+func nodeType(class NodeClass, sub string) string { return string(class) + "/" + sub }
+
+// Closed contribution/* node type strings, for ClaimBuilder.Type.
+const (
+	NodeContributor = string(NodeContribution) + "/contributor"
+	NodeHead        = string(NodeContribution) + "/head"
+	NodeBranches    = string(NodeContribution) + "/branches"
+)

@@ -1,4 +1,4 @@
-package ranke
+package fs
 
 import (
 	"context"
@@ -7,21 +7,41 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/adaptertest"
 )
 
-// Exercises every termination branch of fsUniverse.StreamContent.
+// TestConformance runs the shared black-box Universe suite against the fs
+// adapter, each universe rooted at a fresh temp dir.
+func TestConformance(t *testing.T) {
+	adaptertest.Run(t, func(t *testing.T) ranke.Universe {
+		u, err := New(t.TempDir())
+		if err != nil {
+			t.Fatalf("fs.New: %v", err)
+		}
+		return u
+	})
+}
+
+// TestStreamContent is fs-specific: it corrupts/truncates/extends the
+// backing file on disk to exercise every termination branch of the
+// streaming integrity check — a scenario only a file-backed adapter has.
 func TestStreamContent(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	u := &fsUniverse{dir: dir}
+	u, err := New(dir)
+	if err != nil {
+		t.Fatalf("fs.New: %v", err)
+	}
 
 	payload := []byte("hello, ranke")
-	h, err := hashContent(payload)
+	h, err := ranke.HashContent(payload)
 	if err != nil {
-		t.Fatalf("hashContent: %v", err)
+		t.Fatalf("HashContent: %v", err)
 	}
-	if err := u.SaveContent(ctx, h, payload); err != nil {
-		t.Fatalf("SaveContent: %v", err)
+	if err := ranke.PutContent(ctx, u, h, payload); err != nil {
+		t.Fatalf("PutContent: %v", err)
 	}
 	size := uint64(len(payload))
 	path := filepath.Join(dir, h.String())

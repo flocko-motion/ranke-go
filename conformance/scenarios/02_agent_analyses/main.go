@@ -15,6 +15,10 @@
 // the §3.5 derivation chain (every derived claim cites its source
 // via a derivation/source edge).
 
+// package: main / scenario
+// type:    cmd
+// job:     build & persist the scenario-02 agent-analyses data bundle
+// limits:  doesn't verify variant reproductions; that's the run.sh harness (-> conformance/helpers)
 package main
 
 import (
@@ -23,6 +27,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/adapter/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
@@ -199,7 +204,7 @@ func main() {
 	must(g.Add(family))
 
 	// --- 7. AddGraph — archive auto-consolidates the open heads and persists. ---
-	u := must(ranke.NewFsUniverse(helpers.UniverseDir))
+	u := must(fs.New(helpers.UniverseDir))
 	bth := must(ranke.NewFsBranchTableHead(filepath.Join(helpers.DataDir, "branches", "B_h")))
 	arc := must(ranke.NewArchive(ctx, u, bth))
 	must(arc.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
