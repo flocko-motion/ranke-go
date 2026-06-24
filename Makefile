@@ -4,7 +4,7 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
+.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -164,3 +164,17 @@ conformance-bundle: verify-scenarios scenarios-docs
 	tar -C "$$WORK" -czf "dist/$$BUNDLE.tar.gz" "$$BUNDLE"; \
 	rm -rf "$$WORK"; \
 	echo "wrote dist/$$BUNDLE.tar.gz"
+
+# sindri static-analysis gate: canonical headers, exported-doc coverage,
+# deadcode (with --test), and the line-count limit.
+lint:
+	sindri lint all
+
+# One-shot "is everything green": compile all packages, vet, lint, and
+# run the FULL test suite (feature suite + every adapter's conformance
+# test), not just ./tests/... like `make test`.
+check:
+	go build ./...
+	go vet ./...
+	sindri lint all
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./...
