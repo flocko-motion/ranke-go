@@ -13,8 +13,9 @@
 //     public API.
 //   - BranchTableHead (B_h, §4.7) — the single mutable Id naming the
 //     current branch-table revision; the system's sequencing point and a
-//     separate seam from the Universe. Implementations live under
-//     adapter/sequencer/ (sequencer.Mem, sequencer.File, sequencer.Func).
+//     separate seam from the Universe. Backends live one-per-package under
+//     adapter/sequencer/ (mem.New, file.New) plus the generic closure
+//     injector sequencer.New.
 //   - Archive (§4.8) — the (𝒰, B_h) tuple, composed by NewArchive(u, bth).
 //     It owns neither dependency, so multiple Archives can share one
 //     Universe; closing an Archive closes nothing underneath it.

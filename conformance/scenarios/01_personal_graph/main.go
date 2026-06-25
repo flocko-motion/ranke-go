@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
@@ -212,7 +212,7 @@ func main() {
 	// this scenario keeps it flat so the bundle is just a directory.
 	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
 	u := must(fs.New(helpers.UniverseDir))
-	bth := must(sequencer.File(helpers.BranchTableHeadPath))
+	bth := must(file.New(helpers.BranchTableHeadPath))
 	arc := must(ranke.NewArchive(ctx, u, bth))
 	must(arc.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
 

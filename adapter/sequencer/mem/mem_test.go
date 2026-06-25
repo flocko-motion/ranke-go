@@ -1,22 +1,16 @@
-package sequencer_test
+package mem_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	"github.com/flocko-motion/ranke-go/adapter/sequencer/mem"
 )
 
-// TestInjected backs B_h with a plain in-process variable via injected
-// closures — the "no dedicated adapter needed" path.
-func TestInjected(t *testing.T) {
+func TestRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	var cell ranke.Id
-	h := sequencer.New(
-		func(context.Context) (ranke.Id, error) { return cell, nil },
-		func(_ context.Context, id ranke.Id) error { cell = id; return nil },
-	)
+	h := mem.New()
 
 	if got, _ := h.Load(ctx); got != nil {
 		t.Fatalf("Load (empty) = %v, want nil", got)
