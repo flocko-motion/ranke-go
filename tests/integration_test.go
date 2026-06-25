@@ -11,7 +11,8 @@ import (
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	seqfile "github.com/flocko-motion/ranke-go/adapter/sequencer/file"
+	seqmem "github.com/flocko-motion/ranke-go/adapter/sequencer/mem"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,7 @@ func TestMain(m *testing.M) {
 
 func TestIntegrationMem(t *testing.T) {
 	ctx := context.Background()
-	a, err := ranke.NewArchive(ctx, mem.New(), sequencer.Mem())
+	a, err := ranke.NewArchive(ctx, mem.New(), seqmem.New())
 	require.NoError(t, err)
 	IntegrationTest(t, ctx, func() ranke.Archive { return a })
 }
@@ -60,7 +61,7 @@ func TestIntegrationFs(t *testing.T) {
 	IntegrationTest(t, ctx, func() ranke.Archive {
 		u, err := fs.New(fsTestDir)
 		require.NoError(t, err)
-		bth, err := sequencer.File(filepath.Join(fsTestDir, "B_h"))
+		bth, err := seqfile.New(filepath.Join(fsTestDir, "B_h"))
 		require.NoError(t, err)
 		a, err := ranke.NewArchive(ctx, u, bth)
 		require.NoError(t, err)

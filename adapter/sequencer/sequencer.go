@@ -1,15 +1,14 @@
 // package: sequencer / coordination
 // type:    adapter
-// job:     persists B_h — the single mutable Id naming the current branch-table revision
-// limits:  storing 256 bits is trivial; pick a place. Not a content store (-> adapter/storage)
+// job:     generic BranchTableHead from injected load/save closures — back B_h with any existing store
+// limits:  concrete backends live in sub-packages (-> adapter/sequencer/mem, adapter/sequencer/file)
 //
-// Package sequencer holds BranchTableHead implementations. B_h is the one
-// mutable handle in an otherwise immutable, content-addressed system — the
-// pointer to the latest branch-table revision, and thus the sequencing
+// Package sequencer holds the generic BranchTableHead constructor. B_h is
+// the one mutable handle in an otherwise immutable, content-addressed
+// system — the pointer to the latest branch-table revision, the sequencing
 // point of a distributed deployment. It is 256 bits: there is no storage
-// *technology* here, only a choice of *where*. So this package stays tiny
-// — Mem (mem.go) and File (file.go) conveniences plus the generic
-// New below, which injects any place you like.
+// *technology* here, only a choice of *where*. New injects that choice as a
+// load/save pair; the mem and file conveniences live in sub-packages.
 //
 // This is a deliberately separate seam from the Universe (adapter/storage):
 // 𝒰 wants capacity (S3, fs, …); B_h wants a durable, ideally
@@ -22,10 +21,10 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// New builds a BranchTableHead from a load/save pair, so any existing
-// store — a users-database row, a KV entry, a config value — backs B_h
-// without a dedicated adapter. load returns a nil Id when no head is set
-// yet; save persists (id == nil means clear). Close is a no-op.
+// New builds a BranchTableHead from a load/save pair, so any existing store
+// — a users-database row, a KV entry, a config value — backs B_h without a
+// dedicated adapter. load returns a nil Id when no head is set yet; save
+// persists (id == nil means clear). Close is a no-op.
 func New(
 	load func(context.Context) (ranke.Id, error),
 	save func(context.Context, ranke.Id) error,

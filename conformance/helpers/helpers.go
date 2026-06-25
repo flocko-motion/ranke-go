@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer"
+	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 )
 
@@ -64,7 +64,7 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 // file. It log.Fatals on any mismatch.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead string) {
 	u := Must(fs.New(UniverseDir))
-	bth := Must(sequencer.File(BranchTableHeadPath))
+	bth := Must(file.New(BranchTableHeadPath))
 	arc := Must(ranke.NewArchive(ctx, u, bth))
 	allIds := make(map[string]struct{})
 	found := false
