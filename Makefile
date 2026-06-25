@@ -4,7 +4,7 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle
+.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -97,6 +97,18 @@ fmt:
 
 tidy:
 	go mod tidy
+
+# Cut a release: clean tree → merge to the default branch via PR → tag the
+# merged tip → push the tag → return to your branch. The merged-PR CI is the
+# test gate (no local e2e). Usage: make release <major|minor|patch>
+# (aliases: breaking|feature|fix).
+release:
+	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
+
+# Absorb the positional bump word in `make release <bump>` so it isn't treated
+# as a missing target.
+major minor patch breaking feature fix:
+	@:
 
 # Run every conformance scenario from a clean state.
 scenarios:
