@@ -49,9 +49,7 @@ func (s *store) Get(_ context.Context, key string) ([]byte, error) {
 func (s *store) Put(_ context.Context, key string, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[key]; !ok {
-		s.m[key] = data
-	}
+	s.m[key] = data
 	return nil
 }
 
@@ -63,3 +61,9 @@ func (s *store) Has(_ context.Context, key string) (bool, error) {
 }
 
 func (s *store) Close() error { return nil }
+
+// Capabilities: the minimal floor exposes only get/put/has over an ephemeral
+// map — Put overwrites; it claims nothing more.
+func (s *store) Capabilities() ranke.Capabilities {
+	return ranke.Capabilities{Overwrite: true}
+}

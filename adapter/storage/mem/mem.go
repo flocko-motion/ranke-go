@@ -64,10 +64,7 @@ func (u *memUniverse) PutClaims(_ context.Context, cs []ranke.Claim) error {
 		if c == nil || c.ID() == nil {
 			return errors.New("adapter/mem.PutClaims: nil claim or id")
 		}
-		k := c.ID().String()
-		if _, ok := u.claims[k]; !ok {
-			u.claims[k] = c
-		}
+		u.claims[c.ID().String()] = c
 	}
 	return nil
 }
@@ -119,12 +116,9 @@ func (u *memUniverse) PutContents(_ context.Context, blobs []ranke.ContentBlob) 
 		if bl.Hash == nil {
 			return errors.New("adapter/mem.PutContents: nil hash")
 		}
-		k := bl.Hash.String()
-		if _, ok := u.content[k]; !ok {
-			cp := make([]byte, len(bl.Content))
-			copy(cp, bl.Content)
-			u.content[k] = cp
-		}
+		cp := make([]byte, len(bl.Content))
+		copy(cp, bl.Content)
+		u.content[bl.Hash.String()] = cp
 	}
 	return nil
 }
@@ -148,6 +142,12 @@ func (u *memUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids []
 
 func (u *memUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
 	return storage.DefaultCopyContents(ctx, u, src, refs, opts...)
+}
+
+// Capabilities reports the in-memory store can overwrite, delete, and enumerate
+// (a map does all three), but is not persistent — it is lost on process exit.
+func (u *memUniverse) Capabilities() ranke.Capabilities {
+	return ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true}
 }
 
 type bytesReaderT struct {

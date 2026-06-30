@@ -32,22 +32,85 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
-// New returns a Universe backed by the given bucket on client. The bucket
-// is assumed to already exist; the adapter does not create or own it (nor
-// the client — Close is a no-op).
-func New(client *s3.Client, bucket string) (ranke.Universe, error) {
+// New returns a Universe backed by the given bucket on client. The bucket is
+// assumed to already exist; the adapter does not create or own it (nor the
+// client — Close is a no-op). New learns the bucket's capabilities with a
+// sentinel probe (see probeCaps). Pass ReadOnly for a bucket you may only read
+// (or one under object-lock/WORM) so the probe never writes.
+func New(client *s3.Client, bucket string, opts ...Option) (ranke.Universe, error) {
 	if client == nil {
 		return nil, errors.New("adapter/s3.New: nil client")
 	}
 	if bucket == "" {
 		return nil, errors.New("adapter/s3.New: empty bucket")
 	}
-	return storage.NewBlobUniverse(&store{client: client, bucket: bucket}), nil
+	var cfg config
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return storage.NewBlobUniverse(&store{
+		client: client,
+		bucket: bucket,
+		caps:   probeCaps(context.Background(), client, bucket, cfg.readOnly),
+	}), nil
 }
 
 type store struct {
 	client *s3.Client
 	bucket string
+	caps   ranke.Capabilities
+}
+
+type config struct{ readOnly bool }
+
+// Option configures an s3 store.
+type Option func(*config)
+
+// ReadOnly declares the bucket read-only (or append-only / object-locked): the
+// probe never writes a sentinel — which on a WORM bucket could never be removed
+// — and the Universe reports no Overwrite or Delete. A write probe cannot tell
+// read-only from append-only (a first PUT of a new key succeeds on the latter),
+// so the operator states it.
+func ReadOnly() Option { return func(c *config) { c.readOnly = true } }
+
+// sentinelKey is a fixed, harmless object key used once at New to learn what
+// the bucket allows.
+const sentinelKey = "ranke-graph-sentinel"
+
+// probeCaps learns the bucket's capabilities. Listing (Enumerate) is a read and
+// is always probed. When readOnly is set, no write is attempted. Otherwise it
+// PUTs the sentinel twice — the second PUT is a real overwrite, which separates
+// a read-write bucket from append-only/object-lock — then DeleteObject probes
+// delete and cleans up. S3 storage is durable, so Persistent is intrinsic; a
+// failed probe just leaves that capability false and never fails New.
+func probeCaps(ctx context.Context, client *s3.Client, bucket string, readOnly bool) ranke.Capabilities {
+	caps := ranke.Capabilities{Persistent: true}
+	if _, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  aws.String(bucket),
+		MaxKeys: aws.Int32(1),
+	}); err == nil {
+		caps.Enumerate = true
+	}
+	if readOnly {
+		return caps
+	}
+	put := func(body string) error {
+		_, err := client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(sentinelKey),
+			Body:   bytes.NewReader([]byte(body)),
+		})
+		return err
+	}
+	if put("ranke capability probe 1") == nil {
+		caps.Overwrite = put("ranke capability probe 2") == nil
+		_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(sentinelKey),
+		})
+		caps.Delete = err == nil
+	}
+	return caps
 }
 
 // isNotFound reports whether err is S3's "object does not exist", across
@@ -126,3 +189,8 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 }
 
 func (s *store) Close() error { return nil }
+
+// Capabilities returns the bucket's capabilities as probed at New (see probeCaps).
+func (s *store) Capabilities() ranke.Capabilities {
+	return s.caps
+}

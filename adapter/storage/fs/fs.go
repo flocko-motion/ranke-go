@@ -33,11 +33,30 @@ func New(dir string) (ranke.Universe, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("adapter/fs.New: mkdir %s: %w", dir, err)
 	}
-	return storage.NewBlobUniverse(&store{dir: dir}), nil
+	return storage.NewBlobUniverse(&store{dir: dir, caps: detectCaps(dir)}), nil
 }
 
 type store struct {
-	dir string
+	dir  string
+	caps ranke.Capabilities
+}
+
+// detectCaps probes the directory's actual access once, at startup. A read-only
+// mount (or restrictive ACL) can still show writable permission bits, so it
+// attempts a real create+remove rather than trusting os.Stat. Persistence is
+// intrinsic to a filesystem; read/enumerate and write/delete are discovered.
+func detectCaps(dir string) ranke.Capabilities {
+	caps := ranke.Capabilities{Persistent: true}
+	if _, err := os.ReadDir(dir); err == nil {
+		caps.Enumerate = true
+	}
+	if f, err := os.CreateTemp(dir, ".ranke-probe-*"); err == nil {
+		name := f.Name()
+		_ = f.Close()
+		caps.Overwrite = true
+		caps.Delete = os.Remove(name) == nil
+	}
+	return caps
 }
 
 func (s *store) path(key string) string { return filepath.Join(s.dir, key) }
@@ -53,14 +72,12 @@ func (s *store) Get(_ context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Put writes key idempotently — an existing file is left untouched
-// (content-addressed: the bytes already match).
+// Put writes data under key, overwriting any existing file (atomic
+// temp+rename). Content-addressed, so a normal re-put writes identical bytes;
+// the overwrite is what repairs a corrupted file in place. Callers dedup via
+// Has when they want to skip a redundant write.
 func (s *store) Put(_ context.Context, key string, data []byte) error {
-	path := s.path(key)
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	return atomicWrite(path, data)
+	return atomicWrite(s.path(key), data)
 }
 
 func (s *store) Has(_ context.Context, key string) (bool, error) {
@@ -88,6 +105,13 @@ func (s *store) Open(_ context.Context, key string) (io.ReadCloser, error) {
 }
 
 func (s *store) Close() error { return nil }
+
+// Capabilities returns the access rights probed at New: persistence is intrinsic
+// to a filesystem, while overwrite/delete/enumerate reflect the directory's
+// actual permissions (a read-only mount reports neither overwrite nor delete).
+func (s *store) Capabilities() ranke.Capabilities {
+	return s.caps
+}
 
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"

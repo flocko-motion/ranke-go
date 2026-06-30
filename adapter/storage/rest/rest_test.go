@@ -20,7 +20,7 @@ func TestConformance(t *testing.T) {
 	adaptertest.Run(t, func(t *testing.T) ranke.Universe {
 		ts := httptest.NewServer(newBlobServer())
 		t.Cleanup(ts.Close)
-		u, err := New(ts.URL, ts.Client())
+		u, err := New(ts.URL, ts.Client(), ranke.Capabilities{Overwrite: true})
 		if err != nil {
 			t.Fatalf("rest.New: %v", err)
 		}
