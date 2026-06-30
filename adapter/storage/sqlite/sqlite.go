@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage"
@@ -38,18 +39,57 @@ func New(dsn string) (ranke.Universe, error) {
 	if err != nil {
 		return nil, fmt.Errorf("adapter/sqlite.New: open %s: %w", dsn, err)
 	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS blobs (
-		id   TEXT PRIMARY KEY,
-		data BLOB NOT NULL
-	)`); err != nil {
+	ctx := context.Background()
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("adapter/sqlite.New: create schema: %w", err)
+		return nil, fmt.Errorf("adapter/sqlite.New: connect %s: %w", dsn, err)
 	}
-	return storage.NewBlobUniverse(&store{db: db}), nil
+	writable := probeWritable(ctx, db)
+	if writable {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS blobs (
+			id   TEXT PRIMARY KEY,
+			data BLOB NOT NULL
+		)`); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("adapter/sqlite.New: create schema: %w", err)
+		}
+	}
+	caps := ranke.Capabilities{
+		Overwrite:  writable,
+		Delete:     writable,
+		Enumerate:  true, // a SELECT works on any readable database
+		Persistent: persistentDSN(dsn),
+	}
+	return storage.NewBlobUniverse(&store{db: db, caps: caps}), nil
 }
 
 type store struct {
-	db *sql.DB
+	db   *sql.DB
+	caps ranke.Capabilities
+}
+
+// probeWritable tests write access without mutating: BEGIN IMMEDIATE takes a
+// write lock (failing at once on a read-only database), then ROLLBACK releases
+// it. It uses one dedicated connection so the BEGIN/ROLLBACK pair is not split
+// across the pool.
+func probeWritable(ctx context.Context, db *sql.DB) bool {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return false
+	}
+	_, _ = conn.ExecContext(ctx, "ROLLBACK")
+	return true
+}
+
+// persistentDSN reports whether the DSN names durable storage rather than an
+// in-memory database (":memory:" or "mode=memory").
+func persistentDSN(dsn string) bool {
+	d := strings.ToLower(dsn)
+	return !strings.Contains(d, ":memory:") && !strings.Contains(d, "mode=memory")
 }
 
 func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
@@ -64,10 +104,11 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Put stores key idempotently — INSERT OR IGNORE leaves an existing row
-// untouched (content-addressed: the bytes already match).
+// Put stores data under key, overwriting any existing row (INSERT OR REPLACE).
+// Content-addressed, so a normal re-put writes identical bytes; the overwrite
+// is what repairs a corrupted row in place. Callers dedup via Has.
 func (s *store) Put(ctx context.Context, key string, data []byte) error {
-	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO blobs (id, data) VALUES (?, ?)`, key, data); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO blobs (id, data) VALUES (?, ?)`, key, data); err != nil {
 		return fmt.Errorf("write %s: %w", key, err)
 	}
 	return nil
@@ -86,3 +127,10 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 }
 
 func (s *store) Close() error { return s.db.Close() }
+
+// Capabilities returns what New probed: persistence from the DSN (file vs
+// in-memory) and overwrite/delete from a write-lock probe (a read-only database
+// reports neither).
+func (s *store) Capabilities() ranke.Capabilities {
+	return s.caps
+}

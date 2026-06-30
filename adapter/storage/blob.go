@@ -28,11 +28,18 @@ type BlobStore interface {
 	// Get returns the bytes stored under key, or ranke.ErrNotFound if the
 	// key is absent.
 	Get(ctx context.Context, key string) ([]byte, error)
-	// Put stores data under key. Must be idempotent: keys are
-	// content-addressed, so re-putting a key writes identical bytes.
+	// Put stores data under key, overwriting any existing bytes. Keys are
+	// content-addressed, so a normal re-put writes identical bytes; the
+	// overwrite is what lets a read-through repair restore a corrupted
+	// entry. Callers that want to skip a redundant write check Has first.
 	Put(ctx context.Context, key string, data []byte) error
 	// Has reports whether key is present.
 	Has(ctx context.Context, key string) (bool, error)
+	// Capabilities reports what this backend can do (see ranke.Capabilities) —
+	// its nature (durable medium? can it delete / enumerate?), not merely the
+	// three primitives it exposes here. NewBlobUniverse surfaces it as the
+	// Universe's capabilities.
+	Capabilities() ranke.Capabilities
 	// Close releases any resources the store holds.
 	Close() error
 }
@@ -196,4 +203,12 @@ func (u *blobUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids [
 //deadcode:keep
 func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
 	return DefaultCopyContents(ctx, u, src, refs, opts...)
+}
+
+// Capabilities surfaces the backing store's declared capabilities as the
+// Universe's.
+//
+//deadcode:keep
+func (u *blobUniverse) Capabilities() ranke.Capabilities {
+	return u.store.Capabilities()
 }

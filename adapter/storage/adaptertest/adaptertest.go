@@ -49,6 +49,18 @@ func Run(t *testing.T, newU Factory) {
 	t.Run("content round-trip and stream", func(t *testing.T) { testContentRoundTrip(t, newU) })
 	t.Run("absent lookups", func(t *testing.T) { testAbsentLookups(t, newU) })
 	t.Run("copy closure merges provenance", func(t *testing.T) { testCopyClosure(t, newU) })
+	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, newU) })
+}
+
+// testCapabilities verifies the adapter reports usable capabilities. Every
+// in-tree backend can overwrite (Put replaces existing bytes), which the
+// read-through repair in adapter/storage/stack relies on.
+func testCapabilities(t *testing.T, newU Factory) {
+	u := newU(t)
+	defer u.Close()
+	if !u.Capabilities().Overwrite {
+		t.Fatal("Capabilities: expected Overwrite=true for an in-tree backend")
+	}
 }
 
 // sample builds a tiny signed graph: a contributor op and an email claim

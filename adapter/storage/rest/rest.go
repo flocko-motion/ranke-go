@@ -30,10 +30,13 @@ import (
 )
 
 // New returns a Universe backed by the blob API rooted at baseURL, using
-// the given client (nil = http.DefaultClient).
+// the given client (nil = http.DefaultClient). caps declares what the remote
+// behind baseURL can do: the adapter is a thin GET/PUT/HEAD proxy and cannot
+// discover the remote's durability or delete/enumerate support itself, so the
+// operator wiring it supplies them.
 //
 //deadcode:keep
-func New(baseURL string, client *http.Client) (ranke.Universe, error) {
+func New(baseURL string, client *http.Client, caps ranke.Capabilities) (ranke.Universe, error) {
 	if baseURL == "" {
 		return nil, fmt.Errorf("adapter/rest.New: empty baseURL")
 	}
@@ -43,12 +46,14 @@ func New(baseURL string, client *http.Client) (ranke.Universe, error) {
 	return storage.NewBlobUniverse(&store{
 		base:   strings.TrimRight(baseURL, "/"),
 		client: client,
+		caps:   caps,
 	}), nil
 }
 
 type store struct {
 	base   string
 	client *http.Client
+	caps   ranke.Capabilities
 }
 
 func (s *store) url(key string) string { return s.base + "/" + url.PathEscape(key) }
@@ -114,3 +119,11 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 
 //deadcode:keep
 func (s *store) Close() error { return nil }
+
+// Capabilities returns the remote's capabilities as declared at construction —
+// the adapter cannot discover them through its GET/PUT/HEAD contract.
+//
+//deadcode:keep
+func (s *store) Capabilities() ranke.Capabilities {
+	return s.caps
+}

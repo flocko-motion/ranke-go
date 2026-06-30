@@ -23,6 +23,33 @@ type ContentBlob struct {
 	Content []byte
 }
 
+// Capabilities is an honest descriptor of what a Universe's backend can do
+// beyond the base get/put/has contract, so composites (stack, partition) can
+// derive their own and callers + config can reason about a deployment —
+// repair, deletion, recovery, durability, query. The zero value is the most
+// restrictive (everything false).
+type Capabilities struct {
+	// Overwrite: Put replaces an existing key's bytes rather than leaving them
+	// untouched — lets a read-through repair restore a corrupted entry in
+	// place. Add-only backends (WORM, immutable buckets) report false.
+	Overwrite bool
+	// Delete: a stored key can be removed — for lawful deletion (R6) and cache
+	// eviction. Append-only backends report false.
+	Delete bool
+	// Enumerate: stored keys can be listed/iterated — needed to recover or
+	// audit a Universe without a known head; impossible on a backend that
+	// cannot enumerate (e.g. a plain GET/PUT/HEAD blob service).
+	Enumerate bool
+	// Persistent: stored data survives a process restart (a durable medium).
+	// In-memory backends report false.
+	Persistent bool
+	// GQL: the backend offers a GQL (Cypher) query surface that a query
+	// endpoint can push down to (e.g. a graph-native store like neo4j). This is
+	// the optional graph-query language, NOT the native filtered query — that
+	// is a separate, always-available read.
+	GQL bool
+}
+
 // Universe is 𝒰 from spec §4.5 — a content-addressed bag of claims
 // and the content bytes they reference. No notion of branches, no
 // validation. Multiple Archives can share one Universe.
@@ -83,6 +110,10 @@ type Universe interface {
 	// already has). WithClosure/WithContent are no-ops here; only
 	// WithProgress is honored.
 	CopyContents(ctx context.Context, src Universe, refs []ContentRef, opts ...CopyOption) error
+
+	// Capabilities reports optional backend abilities (see Capabilities).
+	// Composites (stack, partition) derive theirs from their members'.
+	Capabilities() Capabilities
 
 	Close() error
 }

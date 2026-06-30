@@ -27,7 +27,7 @@ COVERPKG := $(MODULE),$(MODULE)/adapter/storage/mem
 # Every adapter here runs with NO special infrastructure. Adapter
 # statements are NOT in COVERPKG — they're verified against their contract,
 # not counted. conformance scenarios are deliberately excluded.
-COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... ./adapter/storage/sqlite/... ./adapter/storage/s3/... ./adapter/storage/minimal/... ./adapter/storage/rest/... ./adapter/sequencer/...
+COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... ./adapter/storage/sqlite/... ./adapter/storage/s3/... ./adapter/storage/minimal/... ./adapter/storage/rest/... ./adapter/storage/stack/... ./adapter/storage/partition/... ./adapter/sequencer/...
 
 BINDIR ?= $(HOME)/.local/bin
 
@@ -177,10 +177,10 @@ conformance-bundle: verify-scenarios scenarios-docs
 	rm -rf "$$WORK"; \
 	echo "wrote dist/$$BUNDLE.tar.gz"
 
-# sindri static-analysis gate: canonical headers, exported-doc coverage,
+# brokkr static-analysis gate: canonical headers, exported-doc coverage,
 # deadcode (with --test), and the line-count limit.
 lint:
-	sindri lint all
+	brokkr lint
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance
@@ -188,5 +188,5 @@ lint:
 check:
 	go build ./...
 	go vet ./...
-	sindri lint all
+	brokkr lint
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./...

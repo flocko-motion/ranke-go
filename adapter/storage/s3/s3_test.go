@@ -31,6 +31,19 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// TestReadOnly verifies the ReadOnly option: no write probe is attempted, and
+// the Universe reports no overwrite/delete (durability stays intrinsic).
+func TestReadOnly(t *testing.T) {
+	client, bucket := fakeS3(t)
+	u, err := New(client, bucket, ReadOnly())
+	if err != nil {
+		t.Fatalf("s3.New: %v", err)
+	}
+	if c := u.Capabilities(); c.Overwrite || c.Delete || !c.Persistent {
+		t.Fatalf("read-only s3 caps = %+v; want no overwrite/delete, persistent", c)
+	}
+}
+
 // fakeS3 spins up an in-process gofakes3 server with one empty bucket and
 // returns a client pointed at it. The server is torn down at test end.
 func fakeS3(t *testing.T) (*awss3.Client, string) {
