@@ -19,6 +19,12 @@ import (
 // mints a SealedProof for Submit — it persists claims into the
 // content-addressed 𝒰 (idempotent) but moves no branch. Every method
 // takes a ctx threaded from the entry point.
+//
+// Snapshot lifetime: a claim reachable from a live snapshot stays
+// resolvable for that snapshot's lifetime — a reader holding an Archive
+// never has the ground pulled from under it. This holds trivially on the
+// append-only mem/fs backends today; any future garbage collection or
+// eviction must honour it (retain what a live snapshot can reach).
 type Archive interface {
 	HasClaim(ctx context.Context, id Id) bool
 	// GetClaim returns the claim at id. Call .Graph(ctx) on the
