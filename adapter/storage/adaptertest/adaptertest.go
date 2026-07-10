@@ -201,18 +201,23 @@ func testCopyClosure(t *testing.T, newU Factory) {
 	dst := newU(t)
 	defer dst.Close()
 
-	srcArc, err := ranke.NewArchive(ctx, src, &memHead{})
-	if err != nil {
-		t.Fatalf("NewArchive(src): %v", err)
-	}
 	op, em := sample(t)
+
+	srcSeq, err := ranke.NewSequencer(ctx, src, &memHead{}, op)
+	if err != nil {
+		t.Fatalf("NewSequencer(src): %v", err)
+	}
 
 	g := ranke.NewGraph(op)
 	if err := g.Add(em); err != nil {
 		t.Fatalf("g.Add: %v", err)
 	}
-	if err := srcArc.AddGraph(ctx, "main", g, op); err != nil {
+	if err := srcSeq.AddGraph(ctx, "main", g, op); err != nil {
 		t.Fatalf("AddGraph: %v", err)
+	}
+	srcArc, _, err := srcSeq.GetArchive(ctx)
+	if err != nil {
+		t.Fatalf("GetArchive(src): %v", err)
 	}
 	srcBranch, err := srcArc.GetBranch(ctx, "main")
 	if err != nil {

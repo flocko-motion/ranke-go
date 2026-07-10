@@ -49,22 +49,30 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// seqSelf is the server contributor the test Sequencer attests branch
+// advances with. Identity-Sign (no key), deterministic id, so re-opening
+// across a Reset yields the same self.
+func seqSelf() ranke.Contributor {
+	c := must(ranke.ClaimBuilder{Type: ranke.NodeContributor, Content: []byte("sequencer")}.Sign())
+	return must(c.AsContributor())
+}
+
 func TestIntegrationMem(t *testing.T) {
 	ctx := context.Background()
-	a, err := ranke.NewArchive(ctx, mem.New(), seqmem.New())
+	s, err := ranke.NewSequencer(ctx, mem.New(), seqmem.New(), seqSelf())
 	require.NoError(t, err)
-	IntegrationTest(t, ctx, func() ranke.Archive { return a })
+	IntegrationTest(t, ctx, func() ranke.Sequencer { return s })
 }
 
 func TestIntegrationFs(t *testing.T) {
 	ctx := context.Background()
-	IntegrationTest(t, ctx, func() ranke.Archive {
+	IntegrationTest(t, ctx, func() ranke.Sequencer {
 		u, err := fs.New(fsTestDir)
 		require.NoError(t, err)
 		bth, err := seqfile.New(filepath.Join(fsTestDir, "B_h"))
 		require.NoError(t, err)
-		a, err := ranke.NewArchive(ctx, u, bth)
+		s, err := ranke.NewSequencer(ctx, u, bth, seqSelf())
 		require.NoError(t, err)
-		return a
+		return s
 	})
 }

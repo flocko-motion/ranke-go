@@ -213,8 +213,8 @@ func main() {
 	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
 	u := must(fs.New(helpers.UniverseDir))
 	bth := must(file.New(helpers.BranchTableHeadPath))
-	arc := must(ranke.NewArchive(ctx, u, bth))
-	must(arc.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
+	seq := must(ranke.NewSequencer(ctx, u, bth, alice))
+	must(seq.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)

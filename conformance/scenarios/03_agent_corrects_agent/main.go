@@ -162,8 +162,8 @@ func main() {
 	// --- 6. AddGraph — archive auto-consolidates the open heads. ---
 	u := must(fs.New(helpers.UniverseDir))
 	bth := must(file.New(filepath.Join(helpers.DataDir, "branches", "B_h")))
-	arc := must(ranke.NewArchive(ctx, u, bth))
-	must(arc.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
+	seq := must(ranke.NewSequencer(ctx, u, bth, operator))
+	must(seq.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
 
 	// --- 7. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)

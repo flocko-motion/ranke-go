@@ -16,9 +16,16 @@
 //     separate seam from the Universe. Backends live one-per-package under
 //     adapter/sequencer/ (mem.New, file.New) plus the generic closure
 //     injector sequencer.New.
-//   - Archive (§4.8) — the (𝒰, B_h) tuple, composed by NewArchive(u, bth).
-//     It owns neither dependency, so multiple Archives can share one
-//     Universe; closing an Archive closes nothing underneath it.
+//   - Archive (§4.8) — an immutable read snapshot of the (𝒰, B_h) tuple,
+//     opened by NewArchive(u, bth) or handed out by Sequencer.GetArchive.
+//     It reads claims and branches and Prepares a verified, height-stamped
+//     contribution; it advances no branch. It owns neither dependency, so
+//     multiple Archives can share one Universe.
+//   - Sequencer (§4.7) — the sole writer: it owns B_h, hands out Archive
+//     snapshots, and commits contributions through the Prepare (verify,
+//     concurrent) → Submit (advance B_h, serial) pipeline. Built with
+//     NewSequencer(u, bth, self), where self is the contributor it attests
+//     branch advances with.
 //
 // See README.md for a runnable walkthrough.
 

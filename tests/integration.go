@@ -12,10 +12,10 @@
 //
 //	func TestMyArchive(t *testing.T) {
 //	    dir := t.TempDir()
-//	    tests.IntegrationTest(t, func() ranke.Archive {
-//	        a, err := mybackend.New(dir)
+//	    tests.IntegrationTest(t, ctx, func() ranke.Sequencer {
+//	        s, err := mybackend.NewSequencer(dir)
 //	        if err != nil { t.Fatal(err) }
-//	        return a
+//	        return s
 //	    })
 //	}
 //
@@ -48,7 +48,7 @@ import (
 // suite is correct iff each Reset is observably a no-op: the handle
 // changes, but values previously returned remain valid (claims,
 // graphs, branches, branch entries are self-contained).
-func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Archive) {
+func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Sequencer) {
 	t.Helper()
 	t.Run("AliceEmail", func(t *testing.T) {
 		runAliceEmail(t, ctx, newTestArchive(factory))
@@ -61,15 +61,36 @@ func IntegrationTest(t *testing.T, ctx context.Context, factory func() ranke.Arc
 	})
 }
 
-// testArchive wraps a ranke.Archive with a Reset method that drops
-// the current handle and reloads via the open closure.
+// testArchive wraps a ranke.Sequencer with a Reset method that drops
+// the current handle and reloads via the open closure. It embeds the
+// Sequencer (for the write shims AddGraph/AddClaim and GetArchive) and
+// delegates reads to a fresh snapshot, so scenarios can call GetClaim /
+// GetBranch / HasBranch directly against the current committed state.
 type testArchive struct {
-	ranke.Archive
-	open func() ranke.Archive
+	ranke.Sequencer
+	open func() ranke.Sequencer
 }
 
-func newTestArchive(open func() ranke.Archive) *testArchive {
-	return &testArchive{Archive: open(), open: open}
+func newTestArchive(open func() ranke.Sequencer) *testArchive {
+	return &testArchive{Sequencer: open(), open: open}
 }
 
-func (a *testArchive) Reset() { a.Archive = a.open() }
+func (a *testArchive) Reset() { a.Sequencer = a.open() }
+
+// snapshot returns an immutable read view of the current committed state.
+func (a *testArchive) snapshot(ctx context.Context) ranke.Archive {
+	arc, _, _ := a.Sequencer.GetArchive(ctx)
+	return arc
+}
+
+func (a *testArchive) GetClaim(ctx context.Context, id ranke.Id) (ranke.Claim, error) {
+	return a.snapshot(ctx).GetClaim(ctx, id)
+}
+
+func (a *testArchive) HasBranch(ctx context.Context, name string) bool {
+	return a.snapshot(ctx).HasBranch(ctx, name)
+}
+
+func (a *testArchive) GetBranch(ctx context.Context, name string) (ranke.Branch, error) {
+	return a.snapshot(ctx).GetBranch(ctx, name)
+}

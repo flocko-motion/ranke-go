@@ -145,11 +145,17 @@ func runAddGraphAutoConsolidates(t *testing.T, ctx context.Context, ts *testArch
 
 	// Phase 2 — RELOAD the contributor from the archive. This is the
 	// pattern: never mint a fresh contributor when one already exists
-	// in the archive; load and reuse.
+	// in the archive; load and reuse. The content contributor lives on
+	// the branch head (the client-signed contribution/head), not on the
+	// branch entry — since the split, the branch table itself is
+	// attested by the server (the Sequencer's self), so
+	// BranchEntry.Contributor() names who advanced the branch.
 	b, err := ts.GetBranch(ctx, "main")
 	require.NoError(t, err)
-	existing := b.Latest().Contributor()
-	require.NotNil(t, existing, "branch entry exposes its contributor")
+	headClaim, err := ts.GetClaim(ctx, b.Latest().Head())
+	require.NoError(t, err)
+	existing := headClaim.Contributor()
+	require.NotNil(t, existing, "branch head exposes its content contributor")
 	require.True(t, existing.ID().Equal(operator.ID()),
 		"loaded contributor id matches the original — same identity, no new claim")
 	t.Logf("    loaded contributor from archive: %s", existing.ID().String()[:16]+"…")
