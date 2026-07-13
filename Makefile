@@ -4,7 +4,7 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -30,6 +30,13 @@ COVERPKG := $(MODULE),$(MODULE)/adapter/storage/mem
 COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... ./adapter/storage/sqlite/... ./adapter/storage/s3/... ./adapter/storage/minimal/... ./adapter/storage/rest/... ./adapter/storage/stack/... ./adapter/storage/partition/... ./adapter/sequencer/...
 
 BINDIR ?= $(HOME)/.local/bin
+
+# Foundational papers live in the ranke-graph repo. `make docs` pulls a
+# fresh copy into docs/papers/ for local reference; the directory is
+# gitignored and never committed — always fetched, never vendored.
+RANKE_GRAPH_REPO ?= https://github.com/flocko-motion/ranke-graph
+RANKE_GRAPH_REF  ?= main
+PAPERS_DIR       := docs/papers
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
@@ -176,6 +183,23 @@ conformance-bundle: verify-scenarios scenarios-docs
 	tar -C "$$WORK" -czf "dist/$$BUNDLE.tar.gz" "$$BUNDLE"; \
 	rm -rf "$$WORK"; \
 	echo "wrote dist/$$BUNDLE.tar.gz"
+
+# Pull the latest ranke-graph papers into docs/papers/ for reference.
+# Not committed — fetched fresh (see .gitignore).
+docs:
+	@echo ">> fetching ranke-graph papers into $(PAPERS_DIR)/"
+	@tmp=$$(mktemp -d) && \
+		git clone --depth 1 --branch $(RANKE_GRAPH_REF) $(RANKE_GRAPH_REPO) $$tmp >/dev/null 2>&1 && \
+		rm -rf $(PAPERS_DIR) && mkdir -p $(PAPERS_DIR) && \
+		cp -r $$tmp/[0-9]*-* $(PAPERS_DIR)/ && \
+		{ [ -d $$tmp/shared ] && cp -r $$tmp/shared $(PAPERS_DIR)/ || true; } && \
+		cp $$tmp/LICENSE $(PAPERS_DIR)/LICENSE 2>/dev/null || true; \
+		rm -rf $$tmp; \
+		echo ">> pulled $$(find $(PAPERS_DIR) -name '*.typ' | wc -l | tr -d ' ') paper(s)"
+
+# Remove the pulled paper references.
+docs-clean:
+	rm -rf $(PAPERS_DIR)
 
 # brokkr static-analysis gate: canonical headers, exported-doc coverage,
 # deadcode (with --test), and the line-count limit.

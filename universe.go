@@ -82,6 +82,21 @@ type Universe interface {
 	// of GetContents for large content. Inherently singular.
 	StreamContent(ctx context.Context, hash Id, size uint64) (io.ReadCloser, error)
 
+	// InClosure reports whether id is in the closure of head — head and
+	// every claim reachable from it by following edges. Closure traversal
+	// is engine-dependent (a graph-native backend answers with one query;
+	// a plain byte store walks the edges), so it lives on the Universe
+	// port and each backend implements it its own way.
+	//
+	// TODO: implement across backends (edge walk for byte stores, native
+	// query pushdown for graph engines).
+	InClosure(ctx context.Context, head, id Id) (bool, error)
+	// GetFromClosure returns the claim at id, but only if it is in head's
+	// closure; ErrNotFound otherwise. Engine-dependent, like InClosure.
+	//
+	// TODO: implement across backends.
+	GetFromClosure(ctx context.Context, head, id Id) (Claim, error)
+
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:
 	//
