@@ -21,91 +21,21 @@ import (
 var ErrContributionStale = errors.New("ranke.Sequencer.Submit: contribution stale — a limiting claim intervened")
 
 // Sequencer is the single writer of a Ranke-Archive (spec §4.7, §4.8).
-// It owns B_h — the one mutable handle — and is the point through which
-// all state advances. Reads run on immutable snapshots from GetArchive;
-// writes are the two-phase Archive.Prepare (verify, concurrent) →
-// Sequencer.Submit (advance B_h, serial). Because a Submit absorbs a
-// whole verified subgraph in one step, it merges large contributions
-// cheaply; the cost is the verification, which Prepare runs off the lock.
 type Sequencer interface {
 	// GetArchive returns an immutable read snapshot pinned at the
-	// current height, together with that height. Snapshot and height
-	// are captured atomically, so a proof prepared against the snapshot
-	// is stamped with exactly the height it saw.
-	GetArchive(ctx context.Context) (Archive, Height, error)
+	// current height.
+	GetArchive(ctx context.Context) (ranke.Archive, error)
 
-	// Submit commits a SealedProof, advancing B_h. On the clean path it
-	// trusts the proof and binds the branch; if the branch head moved
-	// under the contribution it consolidates both heads (no re-verify —
-	// concurrent additive contributions never conflict). It returns a
-	// Receipt, or ErrContributionStale when the dirty path is required.
-	Submit(ctx context.Context, proof SealedProof) (Receipt, error)
+	GetContributor() Contributor
 
-	// Close releases the Sequencer's hold on B_h. It does not close the
-	// Universe — the caller owns that lifetime.
-	Close() error
+	NewContribution(ctx context.Context) (ranke.Contribution, error)
 
-	// AddGraph commits g to a branch in one call, running the
-	// Prepare → Submit pipeline internally.
-	//
-	// Deprecated: use GetArchive + Archive.Prepare + Submit. Kept for
-	// the split's interim; to be removed a release later.
-	AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error
-
-	// AddClaim appends a single claim to a branch in one call, loading
-	// the branch's current closure first.
-	//
-	// Deprecated: use GetArchive + Archive.Prepare + Submit. Kept for
-	// the split's interim; to be removed a release later.
-	AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error
-}
-
-// NewSequencer opens a Sequencer over a Universe (𝒰) and a
-// BranchTableHead (B_h). self is the contributor the Sequencer attests
-// branch advances with — every contribution/branches claim it mints, and
-// any consolidation head it builds, is signed by self's key (attach it
-// with ranke.WithSigningKey; a bare contributor gives identity-Sign).
-// self is absorbed into 𝒰 so its attribution resolves.
-func NewSequencer(ctx context.Context, u Universe, bth BranchTableHead, self Contributor) (Sequencer, error) {
-	if u == nil {
-		return nil, errors.New("ranke.NewSequencer: nil Universe")
-	}
-	if bth == nil {
-		return nil, errors.New("ranke.NewSequencer: nil BranchTableHead")
-	}
-	if self == nil {
-		return nil, errors.New("ranke.NewSequencer: nil self contributor")
-	}
-	bh, err := bth.Load(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewSequencer: load B_h: %w", err)
-	}
-	table, err := LoadBranchTable(ctx, u, bh)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewSequencer: load branch table: %w", err)
-	}
-	height, err := tableHeight(ctx, table)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewSequencer: height: %w", err)
-	}
-	selfClaim, ok := self.(*claim)
-	if ok {
-		if err := PutClaim(ctx, u, selfClaim); err != nil {
-			return nil, fmt.Errorf("ranke.NewSequencer: absorb self contributor: %w", err)
-		}
-	}
-	return &sequencer{
-		u:      u,
-		bth:    bth,
-		self:   self,
-		table:  table,
-		height: height,
-	}, nil
+	// MergeContribution merges a completed, verified, persisted contribution to the sequencer.
+	MergeContribution(ctx context.Context, contribution ranke.VerifiedContribution) (Receipt, error)
 }
 
 type sequencer struct {
 	u    Universe
-	bth  BranchTableHead
 	self Contributor
 
 	mu     sync.Mutex
