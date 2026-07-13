@@ -17,6 +17,7 @@ const (
 	EdgeBranches    = string(EdgeContribution) + "/branches"
 	EdgeBranch      = string(EdgeContribution) + "/branch"
 	EdgePrune       = string(EdgeContribution) + "/prune"
+	EdgeDiff        = string(EdgeContribution) + "/diff"
 )
 
 // RelationDirection tags an entity's role on a relation/* edge (§4.7):

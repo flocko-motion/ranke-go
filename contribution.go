@@ -13,10 +13,10 @@ import (
 
 type Contribution interface {
 	// Base is the (k, t) the contribution was opened against.
-	Base() (id ranke.Id, t time.Time)
+	Base() (k ranke.Id, t time.Time)
 	// Add fills the contribution with a graph of claims (step 2).
 	// Refused once the contribution is sealed.
-	AddGraph(g ranke.Graph) error
+	AddGraph(graph ranke.Graph) error
 	AddClaims(claims []ranke.Claim) error
 	// Seal verifies the claims against the base closure and fixes the
 	// contents (steps 3–4); Add is refused afterwards.

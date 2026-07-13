@@ -5,18 +5,11 @@
 package ranke
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
 )
-
-// Filter selects a subset of edges matching some criterion. Passed
-// to Claim.Edges as a variadic list — every filter must match (AND).
-// Callers can implement their own; NewTypeFilter and NewEncodingFilter
-// cover the common cases.
-type Filter interface {
-	Match(e Edge) bool
-}
 
 // Edge is a directed reference from the owning claim to a prior claim
 // (spec §4.2). Each edge is part of exactly one claim. Direction is
@@ -29,7 +22,7 @@ type Edge interface {
 	TypeSub() string
 	// Content is inline (paper §4.2 simplified schema) — no separate
 	// content_hash for edges.
-	Content() []byte
+	GetContent(ctx context.Context) ([]byte, error)
 	// RelationDirection is RelationFrom (+1) or RelationTo (-1) on
 	// relation/* edges, 0 elsewhere (§4.7).
 	RelationDirection() RelationDirection

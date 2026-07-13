@@ -24,14 +24,14 @@ var ErrContributionStale = errors.New("ranke.Sequencer.Submit: contribution stal
 type Sequencer interface {
 	// GetArchive returns an immutable read snapshot pinned at the
 	// current height.
-	GetArchive(ctx context.Context) (ranke.Archive, error)
+	GetArchive(ctx context.Context) (Archive, error)
 
 	GetContributor() Contributor
 
-	NewContribution(ctx context.Context) (ranke.Contribution, error)
+	NewContribution(ctx context.Context) (Contribution, error)
 
 	// MergeContribution merges a completed, verified, persisted contribution to the sequencer.
-	MergeContribution(ctx context.Context, contribution ranke.VerifiedContribution) (Receipt, error)
+	MergeContribution(ctx context.Context, contribution VerifiedContribution) (Receipt, error)
 }
 
 type sequencer struct {
@@ -48,6 +48,10 @@ type sequencer struct {
 	lastLimitingHeight Height
 }
 
+type mergeRun struct {
+	// TOOD: implement
+}
+
 func (s *sequencer) GetArchive(ctx context.Context) (Archive, Height, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,7 +61,7 @@ func (s *sequencer) GetArchive(ctx context.Context) (Archive, Height, error) {
 	return newArchiveSnapshot(s.u, s.table, s.height), s.height, nil
 }
 
-func (s *sequencer) Submit(ctx context.Context, proof SealedProof) (Receipt, error) {
+func (s *sequencer) MergeContribution(ctx context.Context, contribution VerifiedContribution) (MergeRun, error) {
 	sp, ok := proof.(*sealedProof)
 	if !ok || sp == nil {
 		return nil, errors.New("ranke.Sequencer.Submit: foreign or nil proof")
