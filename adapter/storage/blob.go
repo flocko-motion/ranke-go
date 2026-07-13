@@ -212,3 +212,20 @@ func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, ref
 func (u *blobUniverse) Capabilities() ranke.Capabilities {
 	return u.store.Capabilities()
 }
+
+// InClosure reports whether id is in head's closure.
+//
+// TODO: implement — walk the edge closure from head over the blob store
+// (no graph engine here, so a manual traversal; a graph-native backend
+// would override with a query).
+func (u *blobUniverse) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+	panic("TODO: blobUniverse.InClosure not implemented")
+}
+
+// GetFromClosure returns the claim at id if it is in head's closure.
+//
+// TODO: implement — resolve id via GetClaims after confirming membership
+// with the closure walk.
+func (u *blobUniverse) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+	panic("TODO: blobUniverse.GetFromClosure not implemented")
+}

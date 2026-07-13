@@ -146,6 +146,21 @@ func (u *memUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs
 
 // Capabilities reports the in-memory store can overwrite, delete, and enumerate
 // (a map does all three), but is not persistent — it is lost on process exit.
+// InClosure reports whether id is in head's closure.
+//
+// TODO: implement — walk the edge closure from head over the in-memory
+// claim map.
+func (u *memUniverse) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+	panic("TODO: memUniverse.InClosure not implemented")
+}
+
+// GetFromClosure returns the claim at id if it is in head's closure.
+//
+// TODO: implement — closure-membership check, then resolve via GetClaims.
+func (u *memUniverse) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+	panic("TODO: memUniverse.GetFromClosure not implemented")
+}
+
 func (u *memUniverse) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true}
 }

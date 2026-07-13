@@ -298,6 +298,21 @@ func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ran
 	return storage.DefaultCopyContents(ctx, s, src, refs, opts...)
 }
 
+// InClosure reports whether id is in head's closure.
+//
+// TODO: implement — delegate to the most capable layer (a graph engine
+// answers natively); otherwise fall through the layers like a read.
+func (s *stack) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+	panic("TODO: stack.InClosure not implemented")
+}
+
+// GetFromClosure returns the claim at id if it is in head's closure.
+//
+// TODO: implement — delegate to the layer that answers InClosure.
+func (s *stack) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+	panic("TODO: stack.GetFromClosure not implemented")
+}
+
 // Capabilities derives the stack's from its layers, per capability:
 //   - Overwrite: every eager layer can (repair must reach the durable tier);
 //   - Delete: every layer can (else a deleted key lingers in some layer);

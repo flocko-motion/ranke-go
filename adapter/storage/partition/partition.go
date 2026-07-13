@@ -199,6 +199,23 @@ func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs [
 // Capabilities reports an ability only if every shard has it: a key may land on
 // any shard, so the partition can promise a capability only when all shards can
 // (Enumerate and a GQL query likewise span every shard).
+// InClosure reports whether id is in head's closure.
+//
+// TODO: implement — a closure can span shards, so this cannot route by a
+// single id; it needs a traversal that resolves each referenced claim
+// through the partition. Likely delegates per-claim as the walk proceeds.
+func (p *partition) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+	panic("TODO: partition.InClosure not implemented")
+}
+
+// GetFromClosure returns the claim at id if it is in head's closure.
+//
+// TODO: implement — closure-membership check, then route the id to its
+// shard via the normal partition read.
+func (p *partition) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+	panic("TODO: partition.GetFromClosure not implemented")
+}
+
 func (p *partition) Capabilities() ranke.Capabilities {
 	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true}
 	for _, s := range p.shards {
