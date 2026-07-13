@@ -32,36 +32,12 @@ type Graph interface {
 	// time.Now().UTC() when zero / omitted; must satisfy
 	// monotonicity (§4.3).
 	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
-	// Validate walks the closure from every open head and runs the
+	// Verify walks the closure from every open head and runs the
 	// §5.10 per-claim integrity + authenticity check. Walks the
 	// full closure (so verbose callers see every claim) and returns
 	// the first error, or nil. Optional report callbacks are called
 	// once per visited claim with its depth and result.
-	Validate(report ...func(c Claim, depth int, err error)) error
-	// ValidateWithExceptions skips integrity checks for ids in skip
-	// (known-good subsets). Other checks still run.
-	ValidateWithExceptions(skip ...Id) error
-	// VerifyDelta verifies only the claims NOT in trusted, treating
-	// every trusted id as a known-good anchor: the walk prunes at a
-	// trusted claim — it is neither re-verified nor descended into. So
-	// the cost is the delta frontier above the trusted set, not the
-	// whole closure. This is the incremental-merge primitive: after a
-	// committed head's closure has been verified once, the next
-	// contribution re-verifies only what it added, trusting the prior
-	// closure as the anchor set.
-	//
-	// This differs from ValidateWithExceptions, which walks the full
-	// closure and only suppresses errors for skipped ids: VerifyDelta
-	// skips the §5.10 work itself.
-	//
-	// Sound only when trusted is closed under references (every trusted
-	// claim's provenance is trusted too), so pruning never hides an
-	// unverified claim. A committed head's closure satisfies this by
-	// construction: the append-only Merkle structure (§4.3) forbids a
-	// trusted (older) claim from referencing a newer, non-trusted one.
-	// VerifyDelta asserts the invariant on the trusted claims present
-	// in the graph and refuses a trusted set that violates it.
-	VerifyDelta(trusted ...Id) error
+	Verify(report ...func(c Claim, depth int, err error)) error
 }
 
 // graph is the concrete implementation of Graph (= RG ⊆ 𝒰, spec §4.5).
@@ -228,93 +204,16 @@ func firstNonZero(ts []time.Time) time.Time {
 	return time.Time{}
 }
 
-func (g *graph) Validate(report ...func(c Claim, depth int, err error)) error {
+func (g *graph) Verify(report ...func(c Claim, depth int, err error)) error {
 	seen := map[string]bool{}
 	var firstErr error
 	for _, h := range g.Heads() {
-		g.validateRecursive(h, 0, seen, report, &firstErr)
+		g.verifyRecursive(h, 0, seen, report, &firstErr)
 	}
 	return firstErr
 }
 
-func (g *graph) ValidateWithExceptions(skip ...Id) error {
-	skipSet := make(map[string]struct{}, len(skip))
-	for _, s := range skip {
-		if s != nil {
-			skipSet[s.String()] = struct{}{}
-		}
-	}
-	var firstErr error
-	g.Validate(func(c Claim, _ int, err error) {
-		if firstErr != nil || err == nil {
-			return
-		}
-		if _, sk := skipSet[c.ID().String()]; sk {
-			return
-		}
-		firstErr = fmt.Errorf("validate %s: %w", c.ID().String(), err)
-	})
-	return firstErr
-}
-
-// VerifyDelta implements the Graph interface: verify only the claims
-// outside trusted, pruning the closure walk at every trusted anchor.
-func (g *graph) VerifyDelta(trusted ...Id) error {
-	trustedSet := make(map[string]struct{}, len(trusted))
-	for _, t := range trusted {
-		if t != nil {
-			trustedSet[t.String()] = struct{}{}
-		}
-	}
-	// Soundness guard: pruning at a trusted claim skips its provenance,
-	// so the trusted set must be closed under references. Assert it on
-	// the trusted claims present in the graph — a violation means the
-	// caller passed a set that is not a committed-head closure, and
-	// pruning would silently skip an unverified claim.
-	for k := range trustedSet {
-		c, ok := g.claims[k]
-		if !ok {
-			continue // trusted id whose claim isn't loaded — nothing local to check
-		}
-		for _, e := range c.edges {
-			if _, ok := trustedSet[e.reference.String()]; !ok {
-				return fmt.Errorf("verify delta: trusted claim %s references untrusted claim %s (trusted set not closed under references)", k, e.reference.String())
-			}
-		}
-	}
-	seen := map[string]bool{}
-	var firstErr error
-	for _, h := range g.Heads() {
-		g.verifyDeltaRecursive(h, seen, trustedSet, &firstErr)
-	}
-	return firstErr
-}
-
-// verifyDeltaRecursive walks the closure like validateRecursive but
-// prunes at any id in trusted: a trusted claim is a known-good anchor,
-// so it is neither verified nor descended into.
-func (g *graph) verifyDeltaRecursive(id Id, seen map[string]bool, trusted map[string]struct{}, firstErr *error) {
-	k := id.String()
-	if seen[k] {
-		return
-	}
-	seen[k] = true
-	if _, ok := trusted[k]; ok {
-		return // prune: known-good anchor — no verifyOne, no descent
-	}
-	c, ok := g.claims[k]
-	if !ok {
-		return
-	}
-	if err := g.verifyOne(c); err != nil && *firstErr == nil {
-		*firstErr = fmt.Errorf("validate %s: %w", k, err)
-	}
-	for _, e := range c.edges {
-		g.verifyDeltaRecursive(e.reference, seen, trusted, firstErr)
-	}
-}
-
-func (g *graph) validateRecursive(id Id, depth int, seen map[string]bool, report []func(Claim, int, error), firstErr *error) {
+func (g *graph) verifyRecursive(id Id, depth int, seen map[string]bool, report []func(Claim, int, error), firstErr *error) {
 	k := id.String()
 	if seen[k] {
 		return
