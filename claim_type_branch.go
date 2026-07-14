@@ -1,98 +1,76 @@
 // package: ranke / claim_type_branch
 // type:    logic
-// job:     the Branch extension of Claim — a contribution/branch claim viewed as a named, navigable, verifiable head
-// limits:  the base Claim + concrete claim live in claim.go; mutation goes through the Sequencer (-> sequencer)
+// job:     the Branch view over a contribution/branch edge — a named pointer into an archive's branch table
+// limits:  the branch-table logic (materialising the diff chain) lives in the Archive (-> archive); a Branch only navigates the subgraph its edge references
 package ranke
 
 import (
 	"context"
 	"io"
-	"time"
 )
 
-// Branch is a convenience view over a contribution/branch claim: a Claim
-// (all its methods, including Contributor() and the §5.10 Verify) plus
-// branch-specific properties, provenance navigation, closure access, and
-// a long-running branch verification.
+// Branch is one entry of an archive's branch table: a named
+// contribution/branch edge pointing at the root of that branch's
+// subgraph. A Branch *is* an Edge — the named edge is the branch — with
+// navigation into the referenced subgraph on top. Obtain branches from an
+// Archive; nobody mints them directly.
 type Branch interface {
-	Claim
+	Edge
 
-	// Properties
+	// Name is the branch name — the edge's "name" field.
 	Name() string
+	// Head is the root of the branch's subgraph — the edge's Reference().
 	Head() Id
-	Time() time.Time
 
-	// Navigate provenance — the previous revision of this branch, its
-	// contribution/diff predecessor (nil when this is the first).
+	// Prev is the previous revision of this branch: the branch pointing at
+	// the current head's contribution/diff predecessor, or nil when the
+	// head has no predecessor (first revision).
 	Prev(ctx context.Context) (Branch, error)
 
-	// Access the branch's closure (rooted at this branch's head).
+	// Subgraph access — membership and lookup within the branch's closure,
+	// resolved against the Universe the branch was read from.
 	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
 	GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 
-	// VerifyBranch runs a (possibly long-running) verification over this
-	// branch's closure. Named distinctly from the embedded Claim.Verify
-	// (the single-claim §5.10 check) since a Branch is a special Claim.
-	VerifyBranch(ctx context.Context) (VerificationRun, error)
+	// Verify runs a (possibly long-running) verification over the branch's
+	// closure. See verify.go for options.
+	Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error)
 }
 
-// branch is a thin wrapper embedding the underlying head claim, so every
-// Claim method is promoted, plus the Universe the branch reads its closure
-// from. The wrapped claim is the branch's head, so its own id is the
-// closure root.
+// branch wraps the named contribution/branch edge with the Universe its
+// subgraph is read from. Embedding Edge promotes Reference/Type/GetField/
+// ID/… so the branch is an Edge with subgraph navigation added.
 type branch struct {
-	*claim
+	Edge
 	u Universe
 }
 
-// newBranch loads the claim at id (the branch's head) and wraps it as a
-// Branch scoped to u.
-func newBranch(ctx context.Context, u Universe, id Id) (Branch, error) {
-	c, err := GetClaim(ctx, u, id)
-	if err != nil {
-		return nil, err
-	}
-	cc, ok := c.(*claim)
-	if !ok {
-		return nil, errForeignClaim
-	}
-	return &branch{claim: cc, u: u}, nil
+// newBranch wraps a contribution/branch edge as a Branch scoped to u.
+func newBranch(u Universe, e Edge) Branch {
+	return &branch{Edge: e, u: u}
 }
 
 func (b *branch) Name() string {
-	name, _ := b.Node().GetField("name")
+	name, _ := b.GetField(FieldName)
 	return name
 }
 
-// Head is the branch's head id — the branch wraps its head claim, so that
-// is this claim's own id.
-func (b *branch) Head() Id { return b.ID() }
-
-func (b *branch) Time() time.Time { return b.Node().CreatedAt() }
-
-// Prev returns the previous revision of this branch — the claim its
-// contribution/diff edge references — or nil when this is the first.
-func (b *branch) Prev(ctx context.Context) (Branch, error) {
-	edges := b.Edges(EdgeFilterType{Type: EdgeTypeDiff})
-	if len(edges) == 0 {
-		return nil, nil
-	}
-	return newBranch(ctx, b.u, edges[0].Reference())
-}
+// Head is the branch's subgraph root — the edge's reference.
+func (b *branch) Head() Id { return b.Reference() }
 
 func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
 		return false, errNilID
 	}
-	return b.u.InClosure(ctx, b.ID(), id)
+	return b.u.InClosure(ctx, b.Reference(), id)
 }
 
 func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
-	return b.u.GetFromClosure(ctx, b.ID(), id)
+	return b.u.GetFromClosure(ctx, b.Reference(), id)
 }
 
 func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
@@ -103,8 +81,28 @@ func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) 
 	return c.Node().GetContent(ctx, b.u)
 }
 
-func (b *branch) VerifyBranch(_ context.Context) (VerificationRun, error) {
-	// TODO: run verification over this branch's closure and return a
-	// progress handle. Pending the verification design (see VerificationRun).
-	return nil, errVerifyTODO
+// Prev returns the previous revision of this branch: a branch, same name,
+// pointing at the current head's contribution/diff predecessor. Returns
+// nil when the head has no predecessor (first revision).
+func (b *branch) Prev(ctx context.Context) (Branch, error) {
+	head, err := GetClaim(ctx, b.u, b.Reference())
+	if err != nil {
+		return nil, err
+	}
+	diff := head.Edges(EdgeFilterType{Type: EdgeTypeDiff})
+	if len(diff) == 0 {
+		return nil, nil
+	}
+	prevEdge, err := NewEdge(EdgeConfig{
+		Reference: diff[0].Reference(),
+		TypeClass: EdgeClassContribution,
+		TypeSub:   string(EdgeSubtypeBranch),
+		Fields:    map[string]string{FieldName: b.Name()},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newBranch(b.u, prevEdge), nil
 }
+
+// Verify lives in verify.go.
