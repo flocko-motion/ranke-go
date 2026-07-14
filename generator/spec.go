@@ -112,6 +112,13 @@ func SpecForSize(seed int64, size int) Spec {
 		LargeBlobBytes:      clampMin(size*64, 4096),
 		OversizedFieldBytes: 100 * 1024,
 		MaxEdgeDegree:       clampMin(ilog2(size)+2, 3),
+
+		KeyExpiries: clampMin(size/20, 1),
+		// Deletes default off: a contribution/delete tombstone documents purged
+		// bytes, but the library is append-only and purges nothing, so at the
+		// ADT level it would point at a still-present claim. Deletion is a
+		// RankeDB (DB-level) concern; the knob stays for that testing later.
+		Deletes: 0,
 	}
 }
 

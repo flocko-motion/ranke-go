@@ -141,8 +141,33 @@ func (m *metered) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, e
 func (m *metered) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	t := time.Now()
 	r, err := m.inner.StreamContent(ctx, hash, size)
-	m.rec("StreamContent", kindRead, 1, time.Since(t))
-	return r, err
+	m.rec("StreamContent", kindRead, 1, time.Since(t)) // times opening the stream, not consuming it
+	if err != nil {
+		return r, err
+	}
+	// Count bytes as the caller consumes them (flushed to the tally on Close),
+	// so streamed content reads are not invisible in the byte totals.
+	return &countingReadCloser{r: r, m: m}, nil
+}
+
+// countingReadCloser tallies bytes read from a stream into the meter on Close.
+type countingReadCloser struct {
+	r io.ReadCloser
+	m *metered
+	n int64
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error {
+	c.m.mu.Lock()
+	c.m.contentBytesRead += c.n
+	c.m.mu.Unlock()
+	return c.r.Close()
 }
 
 func (m *metered) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {

@@ -70,6 +70,60 @@ func TestGenerateCornersPresent(t *testing.T) {
 	require.NotEmpty(t, m.Entities, "entities")
 	require.NotEmpty(t, m.Relations, "relations")
 	require.NotNil(t, m.DiffChainHead, "a long diff chain")
+	require.NotEmpty(t, m.Expiries, "contribution/expiry claims (key expiry)")
+	require.Empty(t, m.Deletes, "deletes are off by default — a DB-level concern")
+}
+
+// TestGenerateExpiryShape: an expiry claim is a contribution/expiry node with a
+// contribution/expiry edge to a contributor and a pubkey_expires_after field —
+// resolvable through the archive and structurally as the paper (§Types) describes.
+func TestGenerateExpiryShape(t *testing.T) {
+	ctx := context.Background()
+	u, m := generateInto(t, SpecForSize(2, 30))
+	require.NotEmpty(t, m.Expiries)
+
+	arc, err := ranke.NewArchive(ctx, u, m.Head)
+	require.NoError(t, err)
+	c, err := arc.GetClaim(ctx, m.Expiries[0])
+	require.NoError(t, err)
+	require.Equal(t, "contribution/expiry", c.Node().Type())
+
+	_, err = c.Node().GetField("pubkey_expires_after")
+	require.NoError(t, err, "expiry carries the pubkey_expires_after field")
+
+	var hasExpiryEdge bool
+	for _, e := range c.Edges() {
+		if e.Type() == "contribution/expiry" {
+			hasExpiryEdge = true
+		}
+	}
+	require.True(t, hasExpiryEdge, "expiry edge points at the contributor")
+}
+
+// TestGenerateDeleteShape: deletes are off by default (a DB-level concern), but
+// the knob still builds a valid tombstone when a DB-level test opts in — a
+// contribution/delete edge naming the removed claim by id (§Types).
+func TestGenerateDeleteShape(t *testing.T) {
+	ctx := context.Background()
+	spec := SpecForSize(2, 30)
+	spec.Deletes = 2 // opt in explicitly
+	u := ranke.NewMemoryUniverse()
+	m, err := Generate(ctx, u, spec)
+	require.NoError(t, err)
+	require.NotEmpty(t, m.Deletes)
+
+	arc, err := ranke.NewArchive(ctx, u, m.Head)
+	require.NoError(t, err)
+	c, err := arc.GetClaim(ctx, m.Deletes[0])
+	require.NoError(t, err)
+
+	var hasDeleteEdge bool
+	for _, e := range c.Edges() {
+		if e.Type() == "contribution/delete" {
+			hasDeleteEdge = true
+		}
+	}
+	require.True(t, hasDeleteEdge, "delete edge names the removed claim")
 }
 
 // TestGenerateDiffChainMaterialises: the head of the generated diff chain,

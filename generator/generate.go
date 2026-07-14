@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/flocko-motion/ranke-go"
 	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
@@ -30,6 +31,8 @@ type Manifest struct {
 	DiffChainHead ranke.Id   // head of the longest contribution/diff chain
 	ExternalBlobs []ranke.Id // source claims whose content is external (hash-addressed)
 	HighDegree    ranke.Id   // the derivation citing the most sources
+	Expiries      []ranke.Id // contribution/expiry claims (key expiry)
+	Deletes       []ranke.Id // contribution/delete tombstones
 
 	ClaimCount int // claims contributed (excludes Sequencer-minted heads/tables)
 }
@@ -61,6 +64,8 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	b.derivations()
 	b.entities()
 	b.relations()
+	b.expiries()
+	b.deletes()
 	if b.err != nil {
 		return nil, b.err
 	}
@@ -297,6 +302,60 @@ func (b *builder) relations() {
 			Sign())
 		if c != nil {
 			b.manifest.Relations = append(b.manifest.Relations, c.ID())
+		}
+	}
+}
+
+// expiries mints spec.KeyExpiries contribution/expiry claims. Each is a claim
+// (attributed to the operator) carrying a contribution/expiry edge to a
+// contributor and a pubkey_expires_after field naming the last time that key
+// is valid (paper §Types). Everything is just a claim — there is no special
+// API, the type is the open-vocabulary string "contribution/expiry".
+func (b *builder) expiries() {
+	if len(b.contribs) < 2 {
+		return // no non-operator contributor to expire
+	}
+	// A fixed future instant, deterministic like everything else.
+	expiresAt := b.spec.Base.Add(365 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	for i := 0; i < b.spec.KeyExpiries && b.err == nil; i++ {
+		// Never expire the operator's key — it signs the branch tables.
+		target := b.contribs[1+(i%(len(b.contribs)-1))]
+		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/expiry"})
+		if err != nil {
+			b.fail(fmt.Errorf("expiry edge %d: %w", i, err))
+			return
+		}
+		c := b.add(ranke.NewClaim("contribution/expiry", b.contribs[0]).
+			WithEdges(e).
+			WithField("pubkey_expires_after", expiresAt).
+			WithCreatedAt(b.clock.Tick()).
+			Sign())
+		if c != nil {
+			b.manifest.Expiries = append(b.manifest.Expiries, c.ID())
+		}
+	}
+}
+
+// deletes mints spec.Deletes contribution/delete tombstones. Each is a claim
+// (attributed to the operator) whose contribution/delete edge names a claim
+// whose bytes were removed, documenting the gap (paper §Types). We emit the
+// tombstone structurally; the bytes are not actually purged (a purge is a
+// separate negative-test corner). The paper defines contribution/delete as an
+// edge subtype; the tombstone's node type is our open-vocabulary choice.
+func (b *builder) deletes() {
+	for i := 0; i < b.spec.Deletes && len(b.srcClaims) > 0 && b.err == nil; i++ {
+		target := b.srcClaims[i%len(b.srcClaims)]
+		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/delete"})
+		if err != nil {
+			b.fail(fmt.Errorf("delete edge %d: %w", i, err))
+			return
+		}
+		c := b.add(ranke.NewClaim("contribution/delete", b.contribs[0]).
+			WithEdges(e).
+			WithCreatedAt(b.clock.Tick()).
+			Sign())
+		if c != nil {
+			b.manifest.Deletes = append(b.manifest.Deletes, c.ID())
 		}
 	}
 }
