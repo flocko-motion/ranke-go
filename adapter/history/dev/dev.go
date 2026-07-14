@@ -1,0 +1,76 @@
+// package: adapter/history/dev / testkit
+// type:    adapter
+// job:     an in-memory History for tests and development — the head-id timeline k₀…kₙ held in a slice, stamped from an injected deterministic Clock
+// limits:  not durable and not concurrent (single-threaded, no locks); stores ids only, like adapter/history/mem but with a controllable clock so a generated archive's history is reproducible
+package dev
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/flocko-motion/ranke-go"
+)
+
+// Clock is the deterministic time source each timeline entry is stamped with.
+// Kept a local interface so this adapter depends only on ranke —
+// generator.Clock satisfies it. Tick returns the current time and advances.
+type Clock interface {
+	Tick() time.Time
+}
+
+// History is a minimal in-memory head-id timeline. It is the deterministic
+// sibling of adapter/history/mem: instead of time.Now it stamps each entry
+// from an injected Clock, so append order and timestamps are reproducible.
+// Single-threaded by design (no locks).
+type History struct {
+	clock Clock
+	items []ranke.HistoryItem
+}
+
+var _ ranke.History = (*History)(nil)
+
+// New returns an empty timeline stamped from clock.
+func New(clock Clock) *History {
+	return &History{clock: clock}
+}
+
+// Append records id as the new head at the next height, stamping it with the
+// clock (which it advances by one tick).
+func (h *History) Append(_ context.Context, id ranke.Id) (ranke.HistoryItem, error) {
+	if id == nil {
+		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: nil id")
+	}
+	item := ranke.NewHistoryItem(id, len(h.items), h.clock.Tick())
+	h.items = append(h.items, item)
+	return item, nil
+}
+
+// Latest returns kₙ, or the zero item when the timeline is empty.
+func (h *History) Latest(_ context.Context) (ranke.HistoryItem, error) {
+	if len(h.items) == 0 {
+		return ranke.HistoryItem{}, nil
+	}
+	return h.items[len(h.items)-1], nil
+}
+
+// Get returns kᵢ; an out-of-range i is an error.
+func (h *History) Get(_ context.Context, i int) (ranke.HistoryItem, error) {
+	if i < 0 || i >= len(h.items) {
+		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: index %d out of range [0,%d)", i, len(h.items))
+	}
+	return h.items[i], nil
+}
+
+// GetBulk returns the half-open range [from, to).
+func (h *History) GetBulk(_ context.Context, from, to int) ([]ranke.HistoryItem, error) {
+	if from < 0 || to > len(h.items) || from > to {
+		return nil, fmt.Errorf("adapter/history/dev: range [%d,%d) out of bounds [0,%d)", from, to, len(h.items))
+	}
+	return append([]ranke.HistoryItem(nil), h.items[from:to]...), nil
+}
+
+// Len returns the number of entries (n+1).
+func (h *History) Len(_ context.Context) (int, error) { return len(h.items), nil }
+
+func (h *History) Close() error { return nil }

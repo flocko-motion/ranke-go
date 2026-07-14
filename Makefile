@@ -4,7 +4,7 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/integration test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/performance test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -89,6 +89,14 @@ test/integration:
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
 	echo "  $(RANKE_FS_DIR)"
+
+# test/performance/N — the backend matrix: generate the same deterministic
+# size-N archive into each storage backend and time build + verify, one row
+# per backend. N is the generator size knob (SpecForSize); ~5*N claims. E.g.
+#   make test/performance/2000   # a 10k+-claim archive per backend
+# Verbose so the per-backend timing rows print; generous timeout for large N.
+test/performance/%:
+	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
 
 # test — both layers, core first so a broken foundation fails before the
 # feature suite spins up.
