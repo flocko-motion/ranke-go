@@ -13,12 +13,15 @@ import (
 
 // ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
 //
-// Required: a Type (either Type or TypeClass+TypeSub). Content and
-// ContentHash are mutually exclusive: set Content to have build
-// hash the bytes for you, or set ContentHash directly when the
-// content lives outside the graph. CreatedAt defaults to
-// time.Now().UTC() when zero. Contributor is required for every
-// claim except the root contribution/contributor claim — see §4.3.
+// Required: a Type (either Type or TypeClass+TypeSub). Content is
+// optional — a claim may carry none (structural claims: heads,
+// branches, contributors). InlineContent holds the bytes directly;
+// ContentHash+ContentSize instead reference external content stored
+// elsewhere. InlineContent and ContentHash are mutually exclusive —
+// set at most one. Encoding applies only when there is content.
+// CreatedAt defaults to time.Now().UTC() when zero. Contributor is
+// required for every claim except the root contribution/contributor
+// claim — see §4.3.
 type ClaimBuilder struct {
 	Type          string
 	TypeClass     NodeClass
@@ -27,8 +30,9 @@ type ClaimBuilder struct {
 	EncodingClass EncodingClass
 	EncodingSub   string
 	Title         string
-	Content       []byte
+	InlineContent []byte
 	ContentHash   Id
+	ContentSize   uint64
 	CreatedAt     time.Time
 	Contributor   Contributor
 	Edges         []Edge
@@ -42,11 +46,13 @@ type ClaimBuilder struct {
 	SigningKey crypto.Signer
 }
 
-// NewClaim seeds a ClaimBuilder with the three most common required
-// fields. Chain With* setters to add optionals, then call .Sign()
-// to finalize:
+// NewClaim seeds a ClaimBuilder with the two required fields: the type
+// and the attributing contributor. Content is optional — add it (or
+// not) via WithInlineContent / WithExternalContent. Chain other With*
+// setters for optionals, then call .Sign() to finalize:
 //
-//	c, err := ranke.NewClaim("source/email", alice, body).
+//	c, err := ranke.NewClaim("source/email", alice).
+//	    WithInlineContent(body).
 //	    WithEncoding(ranke.EncodingMessage("rfc822")).
 //	    WithCreatedAt(at).
 //	    Sign()
@@ -55,11 +61,10 @@ type ClaimBuilder struct {
 // and call .Sign() on it.
 //
 //deadcode:keep
-func NewClaim(typ string, contributor Contributor, content []byte) ClaimBuilder {
+func NewClaim(typ string, contributor Contributor) ClaimBuilder {
 	return ClaimBuilder{
 		Type:        typ,
 		Contributor: contributor,
-		Content:     content,
 	}
 }
 
@@ -95,15 +100,22 @@ func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; retu
 //deadcode:keep
 func (b ClaimBuilder) WithTitle(t string) ClaimBuilder { b.Title = t; return b }
 
-// WithContent sets the inline content bytes.
+// WithInlineContent sets the inline content bytes (the claim carries the
+// content itself). Mutually exclusive with WithExternalContent.
 //
 //deadcode:keep
-func (b ClaimBuilder) WithContent(c []byte) ClaimBuilder { b.Content = c; return b }
+func (b ClaimBuilder) WithInlineContent(c []byte) ClaimBuilder { b.InlineContent = c; return b }
 
-// WithContentHash sets the content hash (for content stored out of band).
+// WithExternalContent references content stored elsewhere by its hash and
+// byte size (the claim carries only the reference). Mutually exclusive
+// with WithInlineContent.
 //
 //deadcode:keep
-func (b ClaimBuilder) WithContentHash(h Id) ClaimBuilder { b.ContentHash = h; return b }
+func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
+	b.ContentHash = hash
+	b.ContentSize = size
+	return b
+}
 
 // WithCreatedAt sets the creation timestamp.
 //
@@ -168,6 +180,19 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if !validNodeClass(cfg.TypeClass) {
 		return nil, withDetail(errUnknownNodeClass, string(cfg.TypeClass))
 	}
+	// Content is optional and manual: none, inline, or external —
+	// never both. Structural claims (heads, branches, contributors)
+	// carry none.
+	hasInline := cfg.InlineContent != nil
+	hasExternal := cfg.ContentHash != nil
+	if hasInline && hasExternal {
+		return nil, errClaimContentXOR
+	}
+	hasContent := hasInline || hasExternal
+
+	// Encoding (the content media type) applies only when there is
+	// content: with content it defaults to text/plain; without content
+	// it must be absent (and is omitted from the canonical bytes/id).
 	if cfg.Encoding != "" {
 		class, sub, err := splitType(cfg.Encoding)
 		if err != nil {
@@ -176,17 +201,16 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		cfg.EncodingClass = EncodingClass(class)
 		cfg.EncodingSub = sub
 	}
-	// Encoding is required per §4.1 — fall back to text/plain so
-	// scenarios don't have to spell it out on every structural claim.
-	if cfg.EncodingClass == "" {
-		cfg.EncodingClass = encText
-		cfg.EncodingSub = "plain"
-	}
-	if !validEncodingClass(cfg.EncodingClass) {
-		return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
-	}
-	if cfg.Content != nil && cfg.ContentHash != nil {
-		return nil, errClaimContentXOR
+	if hasContent {
+		if cfg.EncodingClass == "" {
+			cfg.EncodingClass = encText
+			cfg.EncodingSub = "plain"
+		}
+		if !validEncodingClass(cfg.EncodingClass) {
+			return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
+		}
+	} else if cfg.EncodingClass != "" || cfg.EncodingSub != "" {
+		return nil, errEncodingWithoutContent
 	}
 
 	isRootContributor := cfg.TypeClass == NodeClassContribution &&
@@ -239,22 +263,22 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		title:         cfg.Title,
 		createdAt:     createdAt,
 		fields:        cloneFields(cfg.Fields),
-		content:       cfg.Content,
 		pubkey:        cfg.Pubkey,
 	}
 
-	// Content hash + size. Size always tracks len(content); with only
-	// ContentHash supplied (no Content), size is 0.
-	if cfg.ContentHash != nil {
-		n.contentHash = cfg.ContentHash
-		n.contentSize = uint64(len(cfg.Content))
-	} else if cfg.Content != nil {
-		ch, err := hashContent(cfg.Content)
+	// Content: none / inline / external (mutually exclusive, checked above).
+	switch {
+	case hasInline:
+		ch, err := hashContent(cfg.InlineContent)
 		if err != nil {
 			return nil, wrapDetail(errNewClaim, "content hash", err)
 		}
+		n.content = cfg.InlineContent
 		n.contentHash = ch
-		n.contentSize = uint64(len(cfg.Content))
+		n.contentSize = uint64(len(cfg.InlineContent))
+	case hasExternal:
+		n.contentHash = cfg.ContentHash
+		n.contentSize = cfg.ContentSize
 	}
 
 	n.edges = make([]Id, len(edges))

@@ -48,16 +48,18 @@ type Edge interface {
 // EdgeConfig is the data-only input to NewEdge.
 //
 // Required: Reference plus a type (either Type or TypeClass+TypeSub).
-// Content is optional inline content; ContentHash+ContentSize instead reference
-// external content (a Universe blob). Content and ContentHash are mutually
-// exclusive. RelationDirection must be set (RelationFrom or RelationTo)
-// for relation/* edges and left zero otherwise; NewEdge enforces this.
+// Content is optional; an edge may carry none. InlineContent holds the
+// bytes directly; ContentHash+ContentSize instead reference external
+// content (a blob stored elsewhere). InlineContent and ContentHash are
+// mutually exclusive — set at most one. RelationDirection must be set
+// (RelationFrom or RelationTo) for relation/* edges and left zero
+// otherwise; NewEdge enforces this.
 type EdgeConfig struct {
 	Reference         Id
 	Type              string
 	TypeClass         EdgeClass
 	TypeSub           string
-	Content           []byte
+	InlineContent     []byte
 	ContentHash       Id
 	ContentSize       uint64
 	RelationDirection RelationDirection
@@ -101,7 +103,7 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	if !validEdgeClass(cfg.TypeClass) {
 		return nil, withDetail(errUnknownEdgeClass, string(cfg.TypeClass))
 	}
-	if cfg.Content != nil && cfg.ContentHash != nil {
+	if cfg.InlineContent != nil && cfg.ContentHash != nil {
 		return nil, errEdgeContentXOR
 	}
 
@@ -126,17 +128,17 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		fields:            cloneFields(cfg.Fields),
 	}
 	switch {
-	case cfg.Content != nil:
+	case cfg.InlineContent != nil:
 		// Inline: hold the bytes, address them by their hash.
-		ch, err := hashContent(cfg.Content)
+		ch, err := hashContent(cfg.InlineContent)
 		if err != nil {
 			return nil, wrapDetail(errNewEdge, "content hash", err)
 		}
-		e.content = cfg.Content
+		e.content = cfg.InlineContent
 		e.contentHash = ch
-		e.contentSize = uint64(len(cfg.Content))
+		e.contentSize = uint64(len(cfg.InlineContent))
 	case cfg.ContentHash != nil:
-		// External: reference a Universe blob by hash + size.
+		// External: reference content stored elsewhere by hash + size.
 		e.contentHash = cfg.ContentHash
 		e.contentSize = cfg.ContentSize
 	}

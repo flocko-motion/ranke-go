@@ -39,13 +39,14 @@ var (
 	errForeignEdge      = errors.New("ranke: edge from a foreign implementation")
 	errEdgeRefRequired  = errors.New("ranke.NewEdge: Reference is required")
 	errEdgeTypeRequired = errors.New("ranke.NewEdge: Type (or TypeClass + TypeSub) is required")
-	errEdgeContentXOR   = errors.New("ranke.NewEdge: Content and ContentHash are mutually exclusive")
+	errEdgeContentXOR   = errors.New("ranke.NewEdge: inline and external content are mutually exclusive")
 	errEdgeRelationDir  = errors.New("ranke.NewEdge: relation/* edges must set RelationDirection (RelationFrom or RelationTo)")
 
 	// --- Claim builder ---
 	errClaimTypeRequired        = errors.New("ranke.NewClaim: Type (or TypeClass + TypeSub) is required")
-	errClaimContentXOR          = errors.New("ranke.NewClaim: Content and ContentHash are mutually exclusive")
+	errClaimContentXOR          = errors.New("ranke.NewClaim: inline and external content are mutually exclusive")
 	errClaimContributorRequired = errors.New("ranke.NewClaim: Contributor is required (only the root contribution/contributor may omit it)")
+	errEncodingWithoutContent   = errors.New("ranke.NewClaim: encoding set without content")
 
 	// --- Graph ---
 	errNilClaim            = errors.New("ranke: nil claim")
