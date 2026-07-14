@@ -34,7 +34,7 @@ func TestDecodeClaimRejectsEmpty(t *testing.T) {
 // TestClaimTypeParsing: the Type must be a non-empty "class/sub" with a
 // known class; malformed or unknown-class types are rejected.
 func TestClaimTypeParsing(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	for _, typ := range []string{
 		"",        // missing
 		"noslash", // no separator
@@ -50,7 +50,7 @@ func TestClaimTypeParsing(t *testing.T) {
 // TestEncodingRequiresContent: an encoding (content media type) is only
 // meaningful with content; setting it on a content-less claim is rejected.
 func TestEncodingRequiresContent(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	_, err := NewClaim(TypeSource("note"), alice).
 		WithEncoding("text/plain").
 		// no content
@@ -58,11 +58,21 @@ func TestEncodingRequiresContent(t *testing.T) {
 	require.Error(t, err, "encoding without content must be rejected")
 }
 
-// TestEncodingDefaultsToTextPlain: a content claim with no explicit
-// encoding defaults to text/plain rather than failing.
-func TestEncodingDefaultsToTextPlain(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
-	c, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).Sign()
+// TestEncodingOptional: encoding is optional and has NO default — a content
+// claim with no encoding builds fine and reports an empty encoding, so
+// binary content (e.g. a contributor's multikey pubkey) needn't carry a
+// bogus media type. An explicit encoding is preserved.
+func TestEncodingOptional(t *testing.T) {
+	alice := contributor(t)
+
+	none, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).Sign()
 	require.NoError(t, err)
-	require.Equal(t, "text/plain", c.Node().Encoding(), "content defaults to text/plain")
+	require.Equal(t, "", none.Node().Encoding(), "no encoding by default")
+
+	typed, err := NewClaim(TypeSource("note"), alice).
+		WithInlineContent([]byte("x")).
+		WithEncoding("text/plain").
+		Sign()
+	require.NoError(t, err)
+	require.Equal(t, "text/plain", typed.Node().Encoding(), "an explicit encoding is kept")
 }

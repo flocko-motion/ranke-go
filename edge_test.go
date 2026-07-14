@@ -100,7 +100,7 @@ func TestEdgeIdDeterministic(t *testing.T) {
 // TestEdgeInlineContent: an edge carries content under the same rule as a
 // node — inline bytes held on the edge, reachable without a Universe.
 func TestEdgeInlineContent(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).Sign()
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestEdgeInlineContent(t *testing.T) {
 // on EdgeConfig, streamed back through the Universe (stubUniverse lives in
 // node_test.go, same package).
 func TestEdgeExternalContent(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).Sign()
 	require.NoError(t, err)
 
