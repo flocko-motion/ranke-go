@@ -50,7 +50,7 @@ func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, err
 	if cfg.Contributor == nil {
 		return nil, errMissingContributor
 	}
-	return cfg.Contributor.Node().Pubkey(), nil
+	return cfg.Contributor.Node().GetInlineContent()
 }
 
 // checkSigningConsistency rejects mismatches between the supplied

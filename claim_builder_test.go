@@ -25,7 +25,7 @@ func mustInline(t *testing.T, n Node) []byte {
 // TestBuilderFluentChain: every setter in a chain is reflected in the
 // built claim.
 func TestBuilderFluentChain(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	at := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 
 	c, err := NewClaim(TypeSource("note"), alice).
@@ -47,7 +47,7 @@ func TestBuilderFluentChain(t *testing.T) {
 
 // TestBuilderWithTypeOverride: WithType replaces the seeded type.
 func TestBuilderWithTypeOverride(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithType(TypeSource("email")).
 		WithInlineContent([]byte("x")).
@@ -59,7 +59,7 @@ func TestBuilderWithTypeOverride(t *testing.T) {
 // TestBuilderWithExternalContent: the external-content setter records hash
 // and size without inline bytes.
 func TestBuilderWithExternalContent(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	hash, err := HashContent([]byte("external blob"))
 	require.NoError(t, err)
 
@@ -74,7 +74,7 @@ func TestBuilderWithExternalContent(t *testing.T) {
 
 // TestBuilderWithEdges: WithEdges attaches provided edges.
 func TestBuilderWithEdges(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	src := srcClaim(t, alice, "s")
 	c, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
@@ -88,7 +88,7 @@ func TestBuilderWithEdges(t *testing.T) {
 // derived builder never touches a sibling built from the same base. This
 // is what makes it safe to fan out from a partially-configured builder.
 func TestBuilderWithFieldImmutable(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	base := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x"))
 
 	withField := base.WithField("a", "1")
@@ -102,8 +102,8 @@ func TestBuilderWithFieldImmutable(t *testing.T) {
 	require.True(t, c2.Node().HasField("a"), "the derived builder has the field")
 }
 
-// TestBuilderSignedRootContributor: WithPubkey + WithSigningKey via the
-// chain builds a signed root contributor.
+// TestBuilderSignedRootContributor: a signed root contributor carries its
+// pubkey AS its (inline) content (§5.7) and signs with the matching key.
 func TestBuilderSignedRootContributor(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
 	c, err := NewClaim(NodeContributor, nil).

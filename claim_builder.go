@@ -62,8 +62,6 @@ type ClaimBuilder struct {
 //
 // For full struct-literal control, build a ClaimBuilder directly
 // and call .Sign() on it.
-//
-//deadcode:keep
 func NewClaim(typ string, contributor Contributor) ClaimBuilder {
 	return ClaimBuilder{
 		Type:        typ,
@@ -89,32 +87,22 @@ func (b ClaimBuilder) Sign(signingKey ...crypto.Signer) (Claim, error) {
 // alternative to the struct-literal form. All are public API.
 
 // WithType sets the claim type ("class/sub").
-//
-//deadcode:keep
 func (b ClaimBuilder) WithType(t string) ClaimBuilder { b.Type = t; return b }
 
 // WithEncoding sets the content media type ("class/sub").
-//
-//deadcode:keep
 func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; return b }
 
 // WithDiff makes this claim a diff over the predecessor at id (adds a
 // contribution/diff edge). The claim restates only what differs.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithDiff(id Id) ClaimBuilder { b.DiffOf = id; return b }
 
 // WithInlineContent sets the inline content bytes (the claim carries the
 // content itself). Mutually exclusive with WithExternalContent.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithInlineContent(c []byte) ClaimBuilder { b.InlineContent = c; return b }
 
 // WithExternalContent references content stored elsewhere by its hash and
 // byte size (the claim carries only the reference). Mutually exclusive
 // with WithInlineContent.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 	b.ContentHash = hash
 	b.ContentSize = size
@@ -122,23 +110,15 @@ func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 }
 
 // WithCreatedAt sets the creation timestamp.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
 
 // WithContributor sets the attributing contributor.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithContributor(c Contributor) ClaimBuilder { b.Contributor = c; return b }
 
 // WithSigningKey sets the key used to sign the claim id.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithSigningKey(k crypto.Signer) ClaimBuilder { b.SigningKey = k; return b }
 
 // WithEdges appends the given edges to the builder's Edges slice.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 	b.Edges = append(b.Edges, edges...)
 	return b
@@ -146,8 +126,6 @@ func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 
 // WithField sets one implementation-defined node field (§4.1),
 // copying the existing map so the receiver stays unchanged.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	f := make(map[string]string, len(b.Fields)+1)
 	for k, v := range b.Fields {
@@ -273,10 +251,8 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		typeSub:       cfg.TypeSub,
 		encodingClass: cfg.EncodingClass,
 		encodingSub:   cfg.EncodingSub,
-		title:         cfg.Title,
 		createdAt:     createdAt,
 		fields:        cloneFields(cfg.Fields),
-		pubkey:        cfg.Pubkey,
 	}
 
 	// Content: none / inline / external (mutually exclusive, checked above).
