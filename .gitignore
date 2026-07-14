@@ -33,3 +33,6 @@ docs/papers/
 # sindri hub artifacts (agent worktrees + hub state) — not for the repo
 .worktrees/
 .todos/
+
+
+test
