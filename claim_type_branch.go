@@ -70,7 +70,7 @@ func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
-	return b.u.GetFromClosure(ctx, b.Reference(), id)
+	return b.u.GetFromClosure(ctx, []Id{b.Reference()}, id)
 }
 
 func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {

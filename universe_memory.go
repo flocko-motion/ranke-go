@@ -132,8 +132,8 @@ func (u *memoryUniverse) InClosure(ctx context.Context, heads []Id, id Id) (bool
 	return DefaultInClosure(ctx, u, heads, id)
 }
 
-func (u *memoryUniverse) GetFromClosure(ctx context.Context, head, id Id) (Claim, error) {
-	return DefaultGetFromClosure(ctx, u, head, id)
+func (u *memoryUniverse) GetFromClosure(ctx context.Context, heads []Id, id Id) (Claim, error) {
+	return DefaultGetFromClosure(ctx, u, heads, id)
 }
 
 func (u *memoryUniverse) CopyClaims(ctx context.Context, src Universe, ids []Id, opts ...CopyOption) error {

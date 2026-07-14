@@ -43,7 +43,7 @@ func DefaultMaterialize(ctx context.Context, u Universe, claims []Claim, opts ..
 		return claims, nil // opt-out: return stored delta, no overlay
 	}
 	for _, cl := range claims {
-		if err := materializeOne(ctx, u, unwrapClaim(cl)); err != nil {
+		if err := materializeOne(ctx, u, cl.unwrap()); err != nil {
 			return nil, err
 		}
 	}
@@ -123,11 +123,11 @@ func DefaultInClosure(ctx context.Context, u Universe, heads []Id, id Id) (bool,
 	return false, nil
 }
 
-// DefaultGetFromClosure returns the claim at id when it is in head's closure
-// (materialised, like any read), else ErrNotFound. The fallback a byte-store
-// Universe uses for GetFromClosure.
-func DefaultGetFromClosure(ctx context.Context, u Universe, head, id Id) (Claim, error) {
-	in, err := DefaultInClosure(ctx, u, []Id{head}, id)
+// DefaultGetFromClosure returns the claim at id when it is in the closure of
+// any of heads (materialised, like any read), else ErrNotFound. The fallback
+// a byte-store Universe uses for GetFromClosure.
+func DefaultGetFromClosure(ctx context.Context, u Universe, heads []Id, id Id) (Claim, error) {
+	in, err := DefaultInClosure(ctx, u, heads, id)
 	if err != nil {
 		return nil, err
 	}

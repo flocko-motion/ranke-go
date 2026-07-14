@@ -97,10 +97,11 @@ type Universe interface {
 	// exactly the kind of thing a backend optimises. Byte-store backends
 	// delegate to DefaultInClosure.
 	InClosure(ctx context.Context, heads []Id, id Id) (bool, error)
-	// GetFromClosure returns the claim at id, but only if it is in head's
-	// closure; ErrNotFound otherwise. Engine-dependent, like InClosure —
-	// byte stores delegate to DefaultGetFromClosure.
-	GetFromClosure(ctx context.Context, head, id Id) (Claim, error)
+	// GetFromClosure returns the claim at id, but only if it is in the
+	// closure of any of heads; ErrNotFound otherwise. Multi-headed like
+	// InClosure. Engine-dependent — byte stores delegate to
+	// DefaultGetFromClosure.
+	GetFromClosure(ctx context.Context, heads []Id, id Id) (Claim, error)
 
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:

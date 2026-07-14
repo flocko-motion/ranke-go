@@ -13,6 +13,29 @@ import (
 // adapter integration are a layer up (tests/); here the graph is exercised
 // purely as a datatype.
 
+// newGraph builds an in-memory Graph and, when root is non-nil, seeds it with
+// that initial claim — adding the initial node is optional and done via
+// AddClaims, not NewGraph. A nil Universe makes the Graph fall back to its own
+// in-process memory store, so these white-box tests need nothing external.
+func newGraph(t *testing.T, root Contributor) Graph {
+	t.Helper()
+	g, err := NewGraph(context.Background(), nil)
+	require.NoError(t, err)
+	if root != nil {
+		require.NoError(t, g.AddClaims(context.Background(), root))
+	}
+	return g
+}
+
+// contains is a test convenience over the now closure-querying (ctx, error)
+// ContainsClaim.
+func contains(t *testing.T, g Graph, id Id) bool {
+	t.Helper()
+	ok, err := g.ContainsClaim(context.Background(), id)
+	require.NoError(t, err)
+	return ok
+}
+
 func srcClaim(t *testing.T, ctr Contributor, body string) Claim {
 	t.Helper()
 	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte(body)).Sign()
@@ -36,8 +59,8 @@ func entityClaim(t *testing.T, ctr Contributor, sub, label string, source Claim)
 // sole open head, so it is already consolidated (§4.5).
 func TestNewGraphRootIsHead(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
-	require.True(t, g.ContainsClaim(root.ID()), "root is in the graph")
+	g := newGraph(t, root)
+	require.True(t, contains(t, g, root.ID()), "root is in the graph")
 	require.Equal(t, []Id{root.ID()}, g.Heads(), "root is the sole head")
 	require.True(t, g.IsConsolidated())
 }
@@ -47,55 +70,61 @@ func TestNewGraphRootIsHead(t *testing.T) {
 // and the new claim becomes an open head. AddClaims never consolidates.
 func TestAddClaimTracksHeads(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	em := srcClaim(t, root, "hello")
 
-	require.NoError(t, g.AddClaims(em))
-	require.True(t, g.ContainsClaim(em.ID()))
+	require.NoError(t, g.AddClaims(context.Background(), em))
+	require.True(t, contains(t, g, em.ID()))
 	require.Equal(t, []Id{em.ID()}, g.Heads(),
 		"em references root, so root drops out and em is the open head")
 }
 
 // --- the atomic-creation rule (§4.3) -----------------------------------
 
-// TestAddClaimUnknownReference: a claim whose edge points at something not
-// yet in the graph is rejected — provenance must already be present.
-func TestAddClaimUnknownReference(t *testing.T) {
+// TestAddClaimStoresWithoutValidating: the cleaned Graph is a pure frontier
+// tracker over the Universe — AddClaims stores a claim and updates the open
+// heads, it does NOT enforce the atomic-creation rule at add time. A claim
+// referencing something not present is accepted; a dangling reference is
+// caught lazily when the closure is walked (see universe_closure_test.go).
+func TestAddClaimStoresWithoutValidating(t *testing.T) {
+	ctx := context.Background()
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 
-	orphanSource := srcClaim(t, root, "not added") // built, never added
+	orphanSource := srcClaim(t, root, "never added") // built, deliberately not added
 	ent := entityClaim(t, root, "person", "Alice", orphanSource)
 
-	err := g.AddClaims(ent) // references orphanSource, which isn't in g
-	require.Error(t, err, "a dangling reference violates the atomic-creation rule")
+	require.NoError(t, g.AddClaims(ctx, ent), "AddClaims stores without validating references")
+	require.True(t, contains(t, g, ent.ID()), "the added claim is an open head, reachable")
 }
 
-// TestAddClaimRootOnlyNoEdges: only the root may be edge-less; a second
-// no-edge claim is rejected.
-func TestAddClaimRootOnlyNoEdges(t *testing.T) {
-	root := contributor(t)
-	g := NewGraph(root)
-	// Another bare contributor — a no-edge claim that isn't the root.
-	stray := contributor(t)
-	require.Error(t, g.AddClaims(stray), "a non-root no-edge claim is rejected")
+// TestAddClaimAllowsMultipleInitialNodes: the frontier tracker does not forbid
+// several edge-less initial nodes — a multi-root graph (§Validity, the merged-
+// archive case) is representable, both roots standing as open heads.
+func TestAddClaimAllowsMultipleInitialNodes(t *testing.T) {
+	ctx := context.Background()
+	a := contributor(t)
+	b := contributor(t)
+	g := newGraph(t, a)
+	require.NoError(t, g.AddClaims(ctx, b), "a second initial node is accepted")
+	require.ElementsMatch(t, []Id{a.ID(), b.ID()}, g.Heads(), "both initial nodes are open heads")
 }
 
 // TestAddClaimIdempotent: adding the same claim twice is a no-op (§5.4).
 func TestAddClaimIdempotent(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	em := srcClaim(t, root, "hello")
 
-	require.NoError(t, g.AddClaims(em))
-	require.NoError(t, g.AddClaims(em), "re-adding is a no-op, not an error")
+	require.NoError(t, g.AddClaims(context.Background(), em))
+	require.NoError(t, g.AddClaims(context.Background(), em), "re-adding is a no-op, not an error")
 	require.Equal(t, []Id{em.ID()}, g.Heads(), "still a single head after re-add")
 }
 
 // TestAddClaimNil: a nil claim is a usage error.
 func TestAddClaimNil(t *testing.T) {
-	g := NewGraph(contributor(t))
-	require.Error(t, g.AddClaims(nil))
+	g := newGraph(t, contributor(t))
+	require.Error(t, g.AddClaims(context.Background(), nil))
 }
 
 // --- consolidation lifecycle (§4.6) ------------------------------------
@@ -107,21 +136,21 @@ func TestAddClaimNil(t *testing.T) {
 // claim wrapping both former heads.
 func TestGraphConsolidationLifecycle(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	em := srcClaim(t, root, "seed")
-	require.NoError(t, g.AddClaims(em))
+	require.NoError(t, g.AddClaims(context.Background(), em))
 
 	// Two independent interpretations of the same source → two open heads.
 	e1 := entityClaim(t, root, "person", "Alice", em)
 	e2 := entityClaim(t, root, "object", "apples", em)
-	require.NoError(t, g.AddClaims(e1, e2))
+	require.NoError(t, g.AddClaims(context.Background(), e1, e2))
 
 	// Before: NOT consolidated — AddClaims left both heads open.
 	require.False(t, g.IsConsolidated(), "two independent adds leave the graph multi-headed")
 	require.ElementsMatch(t, []Id{e1.ID(), e2.ID()}, g.Heads(), "both are open heads")
 
 	// Consolidate: one contribution/head claim wraps every open head.
-	head, err := g.Consolidate(root)
+	head, err := g.Consolidate(context.Background(), root)
 	require.NoError(t, err)
 	require.Equal(t, "contribution/head", head.Node().Type())
 
@@ -139,20 +168,23 @@ func TestGraphConsolidationLifecycle(t *testing.T) {
 		"the head wraps both former open heads")
 }
 
-// TestConsolidateAlreadyConsolidated: consolidating a single-headed graph
-// is refused — there is nothing to wrap.
+// TestConsolidateAlreadyConsolidated: consolidating a single-headed graph is a
+// no-op — consolidate(RG) = RG (§Consolidation). It returns the existing head
+// unchanged and mints no new claim.
 func TestConsolidateAlreadyConsolidated(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
-	_, err := g.Consolidate(root)
-	require.Error(t, err, "a single-headed graph is already consolidated")
+	g := newGraph(t, root)
+	head, err := g.Consolidate(context.Background(), root)
+	require.NoError(t, err, "a single-headed graph is already consolidated")
+	require.True(t, head.ID().Equal(root.ID()), "returns the existing head, no new claim")
+	require.Equal(t, []Id{root.ID()}, g.Heads(), "the graph is unchanged")
 }
 
 // TestConsolidateEmptyGraph: consolidating an empty graph is refused.
 func TestConsolidateEmptyGraph(t *testing.T) {
-	g := NewGraph(nil) // no root → empty
+	g := newGraph(t, nil) // no root → empty
 	require.Empty(t, g.Heads())
-	_, err := g.Consolidate(contributor(t))
+	_, err := g.Consolidate(context.Background(), contributor(t))
 	require.Error(t, err)
 }
 
@@ -163,13 +195,13 @@ func TestConsolidateEmptyGraph(t *testing.T) {
 // claim and its contributor.
 func TestNewGraphFromClosure(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "hello")
-	u.put(root, em)
+	putClaims(t, u, root, em)
 
-	g, err := NewGraphFromClosure(ctx, em, u)
+	g, err := NewGraphFromClosure(ctx, em.ID(), u)
 	require.NoError(t, err)
-	require.True(t, g.ContainsClaim(em.ID()), "head claim present")
-	require.True(t, g.ContainsClaim(root.ID()), "contributor pulled in via the closure walk")
+	require.True(t, contains(t, g, em.ID()), "head claim present")
+	require.True(t, contains(t, g, root.ID()), "contributor pulled in via the closure walk")
 }

@@ -23,20 +23,24 @@ func TestDefaultInClosure(t *testing.T) {
 	putClaims(t, u, root, em, ent)
 
 	for _, id := range []Id{ent.ID(), em.ID(), root.ID()} {
-		in, err := DefaultInClosure(ctx, u, ent.ID(), id)
+		in, err := DefaultInClosure(ctx, u, []Id{ent.ID()}, id)
 		require.NoError(t, err)
 		require.True(t, in, "%s is reachable from the head", id)
 	}
 
 	other := srcClaim(t, root, "unrelated")
 	putClaims(t, u, other)
-	in, err := DefaultInClosure(ctx, u, ent.ID(), other.ID())
+	in, err := DefaultInClosure(ctx, u, []Id{ent.ID()}, other.ID())
 	require.NoError(t, err)
 	require.False(t, in, "an unrelated claim is not in the closure")
 
-	_, err = DefaultInClosure(ctx, u, nil, em.ID())
-	require.Error(t, err, "nil head")
-	_, err = DefaultInClosure(ctx, u, ent.ID(), nil)
+	// An empty/nil head set is a valid, trivial query — nothing is reachable
+	// from no heads, but it is not an error.
+	in, err = DefaultInClosure(ctx, u, nil, em.ID())
+	require.NoError(t, err, "an empty head set is a valid, trivial query")
+	require.False(t, in, "nothing is in the closure of no heads")
+	// A nil target id remains a usage error.
+	_, err = DefaultInClosure(ctx, u, []Id{ent.ID()}, nil)
 	require.Error(t, err, "nil id")
 }
 
@@ -51,7 +55,7 @@ func TestDefaultInClosureGapIsError(t *testing.T) {
 	putClaims(t, u, root, ent) // em deliberately NOT stored — a gap under ent
 
 	target, _ := HashContent([]byte("anything"))
-	_, err := DefaultInClosure(ctx, u, ent.ID(), target)
+	_, err := DefaultInClosure(ctx, u, []Id{ent.ID()}, target)
 	require.Error(t, err, "a missing referenced claim aborts the walk")
 }
 
@@ -64,12 +68,12 @@ func TestDefaultGetFromClosure(t *testing.T) {
 	em := srcClaim(t, root, "seed")
 	putClaims(t, u, root, em)
 
-	got, err := DefaultGetFromClosure(ctx, u, em.ID(), root.ID())
+	got, err := DefaultGetFromClosure(ctx, u, []Id{em.ID()}, root.ID())
 	require.NoError(t, err)
 	require.True(t, got.ID().Equal(root.ID()), "contributor fetched from the closure")
 
 	outside := srcClaim(t, root, "outside")
 	putClaims(t, u, outside)
-	_, err = DefaultGetFromClosure(ctx, u, em.ID(), outside.ID())
+	_, err = DefaultGetFromClosure(ctx, u, []Id{em.ID()}, outside.ID())
 	require.ErrorIs(t, err, ErrNotFound, "a claim outside the closure is not found")
 }

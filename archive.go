@@ -92,7 +92,7 @@ func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	}
 	// The Universe returns materialised claims (see GetClaims); the archive
 	// does not materialise itself.
-	return a.u.GetFromClosure(ctx, a.bth.ID(), id)
+	return a.u.GetFromClosure(ctx, []Id{a.bth.ID()}, id)
 }
 
 func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
