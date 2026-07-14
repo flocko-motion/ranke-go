@@ -29,10 +29,12 @@ func splitType(s string) (class, sub string, err error) {
 	return s[:slash], s[slash+1:], nil
 }
 
-// matchAll reports whether e satisfies every filter (AND).
+// matchAll reports whether e satisfies every edge filter (AND). Node-only
+// filters are skipped — checking IsEdgeFilter once avoids a MatchEdge call
+// per edge for filters that don't apply to edges at all.
 func matchAll(e Edge, filters []Filter) bool {
 	for _, f := range filters {
-		if !f.MatchEdge(e) {
+		if f.IsEdgeFilter() && !f.MatchEdge(e) {
 			return false
 		}
 	}
