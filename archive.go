@@ -20,7 +20,7 @@ type Archive interface {
 
 	HasBranch(ctx context.Context, name string) bool
 	GetBranch(ctx context.Context, name string) (Branch, error)
-	Branches(ctx context.Context) []Branch
+	GetBranches(ctx context.Context) []Branch
 
 	Verify(ctx context.Context) (VerificationRun, error)
 }
@@ -103,7 +103,7 @@ func (a *archive) GetBranch(ctx context.Context, name string) (Branch, error) {
 	return newBranch(ctx, edges[0].Target().Id()), nil
 }
 
-func (a *archive) Branches(ctx context.Context) ([]Branch, error) {
+func (a *archive) GetBranches(ctx context.Context) ([]Branch, error) {
 	edges, err := a.bth.GetEdgesMatchAll(ctx, []EdgeFilter{
 		FilterFieldIs{Field:"name", Value:name},
 		FilterTypeIs{Class:"contribution", Subtype:"branch" }

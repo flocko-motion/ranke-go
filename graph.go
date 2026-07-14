@@ -5,6 +5,7 @@
 package ranke
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -17,9 +18,9 @@ type Graph interface {
 	// Add inserts claims atomically. Every edge reference must
 	// already be reachable in the graph (atomic creation rule, §4.3).
 	// Non-root claims must have at least one edge. Idempotent.
-	Add(claims ...Claim) error
-	Contains(id Id) bool
-	Get(id Id) (Claim, bool)
+	AddClaims(claims ...Claim) error
+	ContainsClaim(id Id) bool
+	GetClaim(id Id) (Claim, bool)
 	// Heads returns the open heads — claims no other claim in the
 	// graph references (§4.5). A single-headed graph is a closure
 	// (RG_h); multi-headed means concurrent open heads.
@@ -63,6 +64,46 @@ func NewGraph(root Contributor) Graph {
 	return g
 }
 
+func NewGraphFromClosure(ctx context.Context, claim Claim, universe Universe) (Graph, error) {
+	g := &graph{
+		claims:     make(map[string]*claim),
+		referenced: make(map[string]struct{}),
+	}
+	queue := []*claim{c}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		k := cur.node.id.String()
+		if _, seen := g.claims[k]; seen {
+			continue
+		}
+		g.claims[k] = cur
+		for _, e := range cur.edges {
+			g.referenced[e.reference.String()] = struct{}{}
+			if cur.universe == nil {
+				// In-memory best effort: include the resolved contributor
+				// if it's this edge's target.
+				if cur.contributor != nil && cur.contributor.ID() != nil &&
+					cur.contributor.ID().Equal(e.reference) {
+					if cc, ok := cur.contributor.(*claim); ok {
+						queue = append(queue, cc)
+					}
+				}
+				continue
+			}
+			next, err := loadClaimAs(ctx, cur.universe, e.reference)
+			if err != nil {
+				return nil, fmt.Errorf("Claim.Graph: load %s: %w", e.reference.String(), err)
+			}
+			queue = append(queue, next)
+		}
+	}
+	return g, nil
+}
+
 // unwrapClaim peels any wrapper (e.g. *signedContributor) off a
 // Contributor to reach the underlying persisted *claim. Returns nil
 // if the chain doesn't end at our concrete type — i.e. the caller
@@ -81,7 +122,7 @@ func unwrapClaim(c Contributor) *claim {
 	return nil
 }
 
-func (g *graph) Add(claims ...Claim) error {
+func (g *graph) AddClaims(claims ...Claim) error {
 	for i, cl := range claims {
 		if err := g.addOne(cl); err != nil {
 			return fmt.Errorf("Graph.Add: claim %d: %w", i, err)
@@ -123,7 +164,7 @@ func (g *graph) addOne(cl Claim) error {
 	return nil
 }
 
-func (g *graph) Contains(id Id) bool {
+func (g *graph) ContainsClaim(id Id) bool {
 	if id == nil {
 		return false
 	}
@@ -131,7 +172,7 @@ func (g *graph) Contains(id Id) bool {
 	return ok
 }
 
-func (g *graph) Get(id Id) (Claim, bool) {
+func (g *graph) GetClaim(id Id) (Claim, bool) {
 	if id == nil {
 		return nil, false
 	}

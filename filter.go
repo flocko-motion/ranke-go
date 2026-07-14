@@ -8,7 +8,6 @@ type Filter interface {
 	MatchEdge(e Edge) bool
 	MatchNode(n Node) bool
 	IsEdgeFilter() bool
-	IsNodeFilter() bool
 }
 
 // EdgeFilterFieldValue matches an edge carrying a field named Field whose
@@ -23,9 +22,8 @@ func (f EdgeFilterFieldValue) MatchEdge(e Edge) bool {
 	return err == nil && v == f.Value
 }
 
-func (f EdgeFilterFieldValue) MatchNode(Node) bool { return false }
+func (f EdgeFilterFieldValue) MatchNode(Node) bool { return true }
 func (f EdgeFilterFieldValue) IsEdgeFilter() bool  { return true }
-func (f EdgeFilterFieldValue) IsNodeFilter() bool  { return false }
 
 // EdgeFilterType matches an edge whose type ("class/sub") equals Type
 // exactly.
@@ -37,6 +35,5 @@ func (f EdgeFilterType) MatchEdge(e Edge) bool {
 	return e.Type() == f.Type
 }
 
-func (f EdgeFilterType) MatchNode(Node) bool { return false }
+func (f EdgeFilterType) MatchNode(Node) bool { return true }
 func (f EdgeFilterType) IsEdgeFilter() bool  { return true }
-func (f EdgeFilterType) IsNodeFilter() bool  { return false }

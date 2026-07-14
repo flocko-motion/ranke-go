@@ -32,7 +32,7 @@ func splitType(s string) (class, sub string, err error) {
 // matchAll reports whether e satisfies every filter (AND).
 func matchAll(e Edge, filters []Filter) bool {
 	for _, f := range filters {
-		if !f.Match(e) {
+		if !f.MatchEdge(e) {
 			return false
 		}
 	}
