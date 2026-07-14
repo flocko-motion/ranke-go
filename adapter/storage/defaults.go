@@ -140,7 +140,7 @@ func DefaultCopyContents(ctx context.Context, dst, src ranke.Universe, refs []ra
 			return fmt.Errorf("dst.HasContent %s: %w", ref.Hash.String(), err)
 		}
 		if !has {
-			b, err := ranke.GetContent(ctx, src, ref.Hash, ref.Size)
+			b, err := ranke.GetContent(ctx, src, ref.Hash, ref.ContentSize)
 			if err != nil {
 				return fmt.Errorf("src.GetContent %s: %w", ref.Hash.String(), err)
 			}

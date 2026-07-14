@@ -27,8 +27,8 @@ type Edge interface {
 	IsContentExternal() bool
 	// GetContentHash is H(content); nil when the edge carries no content.
 	GetContentHash() Id
-	// GetContentLen is the content's byte length (0 when no content).
-	GetContentLen() uint64
+	// GetContentSize is the content's byte length (0 when no content).
+	GetContentSize() uint64
 	// GetInlineContent returns the inline content bytes (nil when none);
 	// it errors when the content is external.
 	GetInlineContent() ([]byte, error)
@@ -120,6 +120,12 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		}
 	}
 
+	for k := range cfg.Fields {
+		if err := checkUserFieldName(k); err != nil {
+			return nil, err
+		}
+	}
+
 	e := &edge{
 		reference:         cfg.Reference,
 		typeClass:         cfg.TypeClass,
@@ -163,7 +169,7 @@ func (e *edge) TypeSub() string      { return e.typeSub }
 
 func (e *edge) IsContentExternal() bool { return e.content == nil && e.contentHash != nil }
 func (e *edge) GetContentHash() Id      { return e.contentHash }
-func (e *edge) GetContentLen() uint64   { return e.contentSize }
+func (e *edge) GetContentSize() uint64  { return e.contentSize }
 
 func (e *edge) GetInlineContent() ([]byte, error) {
 	if e.IsContentExternal() {

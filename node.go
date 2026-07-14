@@ -25,10 +25,10 @@ type Node interface {
 	// GetContentHash is H(content) — the content's address; nil when the
 	// node carries no content.
 	GetContentHash() Id
-	// GetContentLen is the content's byte length (0 when no content).
+	// GetContentSize is the content's byte length (0 when no content).
 	// Paired with the hash to defend against truncation/extension and to
 	// let storage layers know the size without loading the bytes.
-	GetContentLen() uint64
+	GetContentSize() uint64
 	// GetInlineContent returns the inline content bytes (nil when the node
 	// carries no content); it errors when the content is external — check
 	// IsContentExternal first, or use GetContent with a Universe.
@@ -95,7 +95,7 @@ func (n *node) EncodingSub() string          { return n.encodingSub }
 
 func (n *node) IsContentExternal() bool { return n.content == nil && n.contentHash != nil }
 func (n *node) GetContentHash() Id      { return n.contentHash }
-func (n *node) GetContentLen() uint64   { return n.contentSize }
+func (n *node) GetContentSize() uint64  { return n.contentSize }
 func (n *node) CreatedAt() time.Time    { return n.createdAt }
 func (n *node) ID() Id                  { return n.id }
 

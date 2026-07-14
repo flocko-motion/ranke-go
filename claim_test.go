@@ -1,6 +1,9 @@
 package ranke
 
-// some notes on what to unit test regarding claims..
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"testing"
 
 // we'll build different claims in these tests and always apply the same
 // verification run: claim -> cbor -> claim -> json -> claim -> cbor -> claim, to then compre

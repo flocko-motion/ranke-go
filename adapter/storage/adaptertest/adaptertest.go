@@ -145,7 +145,7 @@ func testContentRoundTrip(t *testing.T, newU Factory) {
 		t.Fatalf("HasContents = false, want true")
 	}
 
-	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: h, Size: size}})
+	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: h, ContentSize: size}})
 	if err != nil {
 		t.Fatalf("GetContents: %v", err)
 	}

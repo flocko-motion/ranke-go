@@ -12,8 +12,8 @@ import (
 // ContentRef addresses one content blob for a read: its hash plus the
 // expected size (backends use size to allocate / range-fetch / verify).
 type ContentRef struct {
-	Hash Id
-	Size uint64
+	Hash        Id
+	ContentSize uint64
 }
 
 // ContentBlob is one content blob for a write: its hash and the bytes.
@@ -220,7 +220,7 @@ func HasClaim(ctx context.Context, u Universe, id Id) (bool, error) {
 
 // GetContent is the single-item form of Universe.GetContents.
 func GetContent(ctx context.Context, u Universe, hash Id, size uint64) ([]byte, error) {
-	bs, err := u.GetContents(ctx, []ContentRef{{Hash: hash, Size: size}})
+	bs, err := u.GetContents(ctx, []ContentRef{{Hash: hash, ContentSize: size}})
 	if err != nil {
 		return nil, err
 	}

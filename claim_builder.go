@@ -30,6 +30,10 @@ type ClaimBuilder struct {
 	EncodingClass EncodingClass
 	EncodingSub   string
 	Title         string
+	// Name sets the reserved "name" field — the sanctioned path for the
+	// system to name a claim (e.g. a branch), since users may not set
+	// reserved field names through Fields. Empty leaves it unset.
+	Name          string
 	InlineContent []byte
 	ContentHash   Id
 	ContentSize   uint64
@@ -99,6 +103,12 @@ func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; retu
 //
 //deadcode:keep
 func (b ClaimBuilder) WithTitle(t string) ClaimBuilder { b.Title = t; return b }
+
+// WithName sets the reserved "name" field (e.g. a branch name) — the
+// sanctioned path, since users may not set reserved names via Fields.
+//
+//deadcode:keep
+func (b ClaimBuilder) WithName(n string) ClaimBuilder { b.Name = n; return b }
 
 // WithInlineContent sets the inline content bytes (the claim carries the
 // content itself). Mutually exclusive with WithExternalContent.
@@ -255,6 +265,21 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		createdAt = createdAt.UTC()
 	}
 
+	// Validate user field names, then inject the sanctioned reserved
+	// fields (Name → the reserved "name" field).
+	for k := range cfg.Fields {
+		if err := checkUserFieldName(k); err != nil {
+			return nil, err
+		}
+	}
+	fields := cloneFields(cfg.Fields)
+	if cfg.Name != "" {
+		if fields == nil {
+			fields = make(map[string]string, 1)
+		}
+		fields[FieldName] = cfg.Name
+	}
+
 	n := &node{
 		typeClass:     cfg.TypeClass,
 		typeSub:       cfg.TypeSub,
@@ -262,7 +287,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		encodingSub:   cfg.EncodingSub,
 		title:         cfg.Title,
 		createdAt:     createdAt,
-		fields:        cloneFields(cfg.Fields),
+		fields:        fields,
 		pubkey:        cfg.Pubkey,
 	}
 

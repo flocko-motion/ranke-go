@@ -126,7 +126,7 @@ func (u *blobUniverse) GetContents(ctx context.Context, refs []ranke.ContentRef)
 		if err != nil {
 			return nil, err
 		}
-		if err := ranke.VerifyContent(ref.Hash, ref.Size, data); err != nil {
+		if err := ranke.VerifyContent(ref.Hash, ref.ContentSize, data); err != nil {
 			return nil, err
 		}
 		out[i] = data

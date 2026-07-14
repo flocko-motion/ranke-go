@@ -69,6 +69,8 @@ var (
 	errUnknownEncodingClass = errors.New("ranke.NewClaim: unknown encoding class")
 	errUnknownEdgeClass     = errors.New("ranke.NewEdge: unknown edge class")
 	errFieldNotSet          = errors.New("ranke: field not set")
+	errInvalidFieldName     = errors.New("ranke: invalid field name (use lowercase letters, digits, and '_'; no leading '_')")
+	errReservedFieldName    = errors.New("ranke: reserved field name — set via the dedicated builder input, not Fields")
 
 	// --- Operation-prefix sentinels (fmt.Errorf replacements) ---
 	// Used with wrap/wrapDetail: the sentinel is the operation prefix, the

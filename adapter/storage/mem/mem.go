@@ -102,7 +102,7 @@ func (u *memUniverse) GetContents(_ context.Context, refs []ranke.ContentRef) ([
 }
 
 func (u *memUniverse) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
-	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: hash, Size: size}})
+	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: hash, ContentSize: size}})
 	if err != nil {
 		return nil, err
 	}
