@@ -127,12 +127,21 @@ func TestContributorExternalPubkey(t *testing.T) {
 	hash, err := HashContent(pubkey)
 	require.NoError(t, err)
 
-	// A contributor whose pubkey lives externally: only hash+size on the
-	// claim, the bytes in the Universe.
-	claim, err := NewClaim(NodeContributor, nil).
+	// Declaring an (external) pubkey with NO signing key is rejected — the
+	// builder recognises the pubkey (content_hash) and demands its key, it is
+	// not silently identity-Signed.
+	_, err = NewClaim(NodeContributor, nil).
 		WithExternalContent(hash, uint64(len(pubkey))).
 		Sign()
-	require.NoError(t, err)
+	require.Error(t, err, "an external pubkey with no signing key is rejected")
+
+	// With the matching key it signs: the builder checks the key's pubkey
+	// hashes to the declared content_hash, so no Universe is needed at build.
+	claim, err := NewClaim(NodeContributor, nil).
+		WithExternalContent(hash, uint64(len(pubkey))).
+		Sign(priv)
+	require.NoError(t, err, "external pubkey + matching key signs")
+	require.Equal(t, "ed25519-pub", claim.ID().Algorithm(), "the contributor is signed")
 
 	u := newStubUniverse()
 	require.NoError(t, u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: pubkey}}))

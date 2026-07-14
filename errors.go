@@ -12,6 +12,8 @@ var (
 	ErrIntegrity = errors.New("ranke: integrity check failed")
 	ErrClosed    = errors.New("ranke: closed")
 
+	errReadOnlyUniverse = errors.New("ranke: read-only Universe view (writes unsupported)")
+
 	// --- Id ---
 	errInvalidId     = errors.New("ranke: invalid id")
 	errInvalidVarint = errors.New("ranke: invalid varint prefix")
@@ -23,7 +25,6 @@ var (
 	errSigningKeyNoPubkey       = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
 	errSigningKeyMismatch       = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
 	errResolveContributorPubkey = errors.New("ranke.Claim.AsContributor: cannot resolve contributor pubkey from content")
-	errMissingContributor       = errors.New("ranke: missing contributor")
 	errNilContributor           = errors.New("ranke: nil contributor")
 	errResolvedNoPubkey         = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
 	errResolvedNoKey            = errors.New("ranke: resolved contributor has a pubkey but no SigningKey was supplied")

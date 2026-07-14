@@ -388,21 +388,16 @@ func normalizeCreatedAt(t time.Time) time.Time {
 	return t.UTC()
 }
 
-// signNode computes id = Sign(H(S(node))) and stores it on n. It resolves the
-// pubkey the signature must match (§5.7), falls back to the Contributor's
-// session key when no explicit SigningKey was given (a bare contributor
-// returns nil → identity Sign), and rejects a key/pubkey mismatch before
-// signing. Identity-Sign (no key, empty pubkey) leaves the hash unchanged, so
-// the id is just the multihash.
+// signNode computes id = Sign(H(S(node))) and stores it on n. It falls back
+// to the Contributor's session key when no explicit SigningKey was given (a
+// bare contributor returns nil → identity Sign), rejects a key/pubkey
+// mismatch before signing (§5.7), then signs. Identity-Sign (no key, no
+// pubkey) leaves the hash unchanged, so the id is just the multihash.
 func signNode(n *node, cfg *ClaimBuilder, isRootContributor bool) error {
-	resolvedPubkey, err := resolveSigningPubkey(isRootContributor, *cfg)
-	if err != nil {
-		return wrap(errNewClaim, err)
-	}
 	if cfg.SigningKey == nil && cfg.Contributor != nil {
 		cfg.SigningKey = cfg.Contributor.SigningKey()
 	}
-	if err := checkSigningConsistency(cfg.SigningKey, resolvedPubkey); err != nil {
+	if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
 		return wrap(errNewClaim, err)
 	}
 	encoded, err := encodeNode(n)

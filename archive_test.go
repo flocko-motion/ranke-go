@@ -35,15 +35,31 @@ func newMapUniverse() *mapUniverse {
 	return &mapUniverse{claims: map[string][]byte{}, content: map[string][]byte{}}
 }
 
-// put serializes and stores claims, exactly as a backend's PutClaims would.
-func (u *mapUniverse) put(claims ...Claim) {
-	for _, c := range claims {
+// PutClaims serializes and stores claims (Claim.Encode), as a byte-store
+// backend does. put is a variadic test convenience over it.
+func (u *mapUniverse) PutClaims(_ context.Context, cs []Claim) error {
+	for _, c := range cs {
 		b, err := c.Encode()
 		if err != nil {
-			panic("mapUniverse.put: encode " + c.ID().String() + ": " + err.Error())
+			return err
 		}
 		u.claims[c.ID().String()] = b
 	}
+	return nil
+}
+
+func (u *mapUniverse) put(claims ...Claim) {
+	if err := u.PutClaims(context.Background(), claims); err != nil {
+		panic("mapUniverse.put: " + err.Error())
+	}
+}
+
+func (u *mapUniverse) HasClaims(_ context.Context, ids []Id) ([]bool, error) {
+	out := make([]bool, len(ids))
+	for i, id := range ids {
+		_, out[i] = u.claims[id.String()]
+	}
+	return out, nil
 }
 
 // get decodes the stored claim at id.
@@ -95,6 +111,26 @@ func (u *mapUniverse) PutContents(_ context.Context, blobs []ContentBlob) error 
 		u.content[b.Hash.String()] = b.Content
 	}
 	return nil
+}
+
+func (u *mapUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {
+	out := make([][]byte, len(refs))
+	for i, r := range refs {
+		b, ok := u.content[r.Hash.String()]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		out[i] = b
+	}
+	return out, nil
+}
+
+func (u *mapUniverse) HasContents(_ context.Context, hashes []Id) ([]bool, error) {
+	out := make([]bool, len(hashes))
+	for i, h := range hashes {
+		_, out[i] = u.content[h.String()]
+	}
+	return out, nil
 }
 
 func (u *mapUniverse) StreamContent(_ context.Context, hash Id, _ uint64) (io.ReadCloser, error) {

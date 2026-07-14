@@ -159,8 +159,6 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 
 // --- the walk ---
 
-type fetchFunc func(context.Context, Id) (*claim, error)
-
 // runVerification walks the closure from roots in the background, verifying
 // each claim (§5.10), and returns a live handle. fetch obtains a claim by
 // id (an in-memory map lookup for a Graph, a Universe load for an
@@ -203,7 +201,7 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				continue // pruned: already trusted/committed
 			}
 
-			c, err := fetch(ctx, cur.id)
+			c, err := getClaimNode(ctx, u, cur.id)
 			if err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
@@ -225,7 +223,7 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				}
 			}
 
-			if err := verifyClaim(ctx, c, fetch, cfg, u); err != nil {
+			if err := verifyClaim(ctx, c, cfg, u); err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
 					return
@@ -256,7 +254,7 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 // verify the signature against id(v) (integrity + authenticity, §5.2 +
 // §5.7), then verify content integrity (inline always; external only when
 // configured).
-func verifyClaim(ctx context.Context, c *claim, fetch fetchFunc, cfg *verifyConfig, u Universe) error {
+func verifyClaim(ctx context.Context, c *claim, cfg *verifyConfig, u Universe) error {
 	encoded, err := encodeNode(c.node)
 	if err != nil {
 		return wrapDetail(errVerify, "encode", err)
@@ -265,7 +263,7 @@ func verifyClaim(ctx context.Context, c *claim, fetch fetchFunc, cfg *verifyConf
 	if err != nil {
 		return wrapDetail(errVerify, "hash", err)
 	}
-	pubkey, err := resolveClaimPubkey(ctx, c, fetch, u)
+	pubkey, err := resolveClaimPubkey(ctx, c, u)
 	if err != nil {
 		return wrapDetail(errVerify, "resolve pubkey", err)
 	}
@@ -290,24 +288,30 @@ func verifyClaim(ctx context.Context, c *claim, fetch fetchFunc, cfg *verifyConf
 }
 
 // resolveClaimPubkey returns the pubkey whose private key signed this
-// claim's id (§5.7). A contributor carries its pubkey as its content, so
-// this is the claim's own content for an initial node (no edges), else the
-// content of the contributor referenced by its contribution/contributor
-// edge (fetched via fetch).
-func resolveClaimPubkey(ctx context.Context, c *claim, fetch fetchFunc) ([]byte, error) {
-	if len(c.edges) == 0 {
-		return c.node.content, nil // initial node: pubkey is its content
-	}
-	for _, e := range c.edges {
-		if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
-			contributor, err := fetch(ctx, e.reference)
-			if err != nil {
-				return nil, wrapDetail(errContributorUnresolved, e.reference.String(), err)
+func resolveClaimPubkey(ctx context.Context, c *claim, u Universe) ([]byte, error) {
+	src := c // initial node (no edges): the pubkey is its own content
+	if len(c.edges) > 0 {
+		src = nil
+		for _, e := range c.edges {
+			if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
+				contributor, err := getClaimNode(ctx, u, e.reference)
+				if err != nil {
+					return nil, wrapDetail(errContributorUnresolved, e.reference.String(), err)
+				}
+				src = contributor
+				break
 			}
-			return contributor.node.content, nil // contributor's pubkey is its content
+		}
+		if src == nil {
+			return nil, errNoContributorEdge
 		}
 	}
-	return nil, errNoContributorEdge
+	// node, external streamed from u. GetContent handles both (§5.7).
+	rdr, err := src.node.GetContent(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(rdr)
 }
 
 // verifyContentRef checks content integrity for one content reference.
@@ -343,28 +347,19 @@ func verifyContentRef(ctx context.Context, hash Id, size uint64, inline []byte, 
 // in-memory graph.
 func (g *graph) Verify(opts ...VerifyOption) VerificationRun {
 	cfg := newVerifyConfig(opts...)
-	fetch := func(_ context.Context, id Id) (*claim, error) {
-		c, ok := g.claims[id.String()]
-		if !ok {
-			return nil, withDetail(errRefMissingClaim, id.String())
-		}
-		return c, nil
-	}
-	return runVerification(context.Background(), g.Heads(), fetch, nil, cfg, nil)
+	return runVerification(context.Background(), g.Heads(), graphUniverse{g}, cfg, nil)
 }
 
-// universeFetch loads and unwraps a claim from u (materialising diffs).
-func universeFetch(u Universe) fetchFunc {
-	return func(ctx context.Context, id Id) (*claim, error) {
-		cl, err := GetClaim(ctx, u, id)
-		if err != nil {
-			return nil, err
-		}
-		c, ok := cl.(*claim)
-		if !ok {
-			return nil, errForeignClaim
-		}
-		return c, nil
+// getClaimNode loads a claim from u and unwraps it to the concrete *claim the
+// walk needs (materialising diffs, per GetClaim).
+func getClaimNode(ctx context.Context, u Universe, id Id) (*claim, error) {
+	cl, err := GetClaim(ctx, u, id)
+	if err != nil {
+		return nil, err
+	}
+	c, ok := cl.(*claim)
+	if !ok {
+		return nil, errForeignClaim
 	}
 }
 
@@ -378,7 +373,7 @@ func (a *archive) Verify(ctx context.Context, opts ...VerifyOption) (Verificatio
 		}
 		return errNotBranchTable
 	}
-	return runVerification(ctx, []Id{a.bth.ID()}, universeFetch(a.u), a.u, cfg, rootCheck), nil
+	return runVerification(ctx, []Id{a.bth.ID()}, a.u, cfg, rootCheck), nil
 }
 
 // Verify walks the branch's subgraph from its referenced root and verifies

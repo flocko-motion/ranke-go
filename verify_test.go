@@ -149,7 +149,7 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 								WithCreatedAt(old).
 								Sign()
 	require.NoError(t, err)
-	root, err := rootClaim.AsContributor()
+	root, err := rootClaim.AsContributor(context.Background(), nil)
 	require.NoError(t, err)
 
 	g := NewGraph(root)

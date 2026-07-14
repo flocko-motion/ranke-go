@@ -5,6 +5,10 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/multiformats/go-multicodec"
@@ -145,4 +149,57 @@ func appendUvarint(b []byte, v uint64) []byte {
 		v >>= 7
 	}
 	return append(b, byte(v))
+}
+
+// --- PEM key loading ----------------------------------------------------
+
+// TestLoadEd25519PEM: the PEM loaders round-trip a key from disk —
+// LoadEd25519PrivateKeyPEM (PKCS#8), LoadPrivateKey (also precomputes the
+// multikey pubkey), and LoadEd25519PublicKeyPEM (SPKI).
+func TestLoadEd25519PEM(t *testing.T) {
+	dir := t.TempDir()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	require.NoError(t, err)
+	privPath := filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(privPath,
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+
+	loaded, err := LoadEd25519PrivateKeyPEM(privPath)
+	require.NoError(t, err)
+	require.Equal(t, priv, loaded, "private key round-trips through PEM")
+
+	kp, err := LoadPrivateKey(privPath)
+	require.NoError(t, err)
+	wantPub, err := EncodePublicKey(priv.Public())
+	require.NoError(t, err)
+	require.Equal(t, wantPub, kp.Pubkey, "LoadPrivateKey precomputes the multikey pubkey")
+
+	pubDer, err := x509.MarshalPKIXPublicKey(pub)
+	require.NoError(t, err)
+	pubPath := filepath.Join(dir, "pub.pem")
+	require.NoError(t, os.WriteFile(pubPath,
+		pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDer}), 0o600))
+	loadedPub, err := LoadEd25519PublicKeyPEM(pubPath)
+	require.NoError(t, err)
+	require.Equal(t, pub, loadedPub, "public key round-trips through PEM")
+}
+
+// TestLoadEd25519PEMErrors: a missing file and a non-PEM file are rejected.
+func TestLoadEd25519PEMErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := LoadEd25519PrivateKeyPEM(filepath.Join(dir, "nope.pem"))
+	require.Error(t, err, "missing file")
+
+	bad := filepath.Join(dir, "bad.pem")
+	require.NoError(t, os.WriteFile(bad, []byte("not a pem block"), 0o600))
+	_, err = LoadEd25519PrivateKeyPEM(bad)
+	require.Error(t, err, "not a PEM block (private)")
+	_, err = LoadEd25519PublicKeyPEM(bad)
+	require.Error(t, err, "not a PEM block (public)")
+	_, err = LoadPrivateKey(bad)
+	require.Error(t, err, "LoadPrivateKey propagates the load error")
 }

@@ -39,27 +39,57 @@ func matchAll(e Edge, filters []Filter) bool {
 	return true
 }
 
-// resolveSigningPubkey returns the pubkey whose private key must produce
-// this claim's signature (§5.7). A contributor carries its pubkey as its
-// content, so this is the root contributor's own InlineContent, else the
-// referenced contributor claim's content.
-func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, error) {
-	if isRootContributor {
-		return cfg.InlineContent, nil
+// checkSigningConsistency verifies the SigningKey matches the pubkey this
+// claim declares (§5.7) and classifies the identity-Sign case (no key, no
+// pubkey). It never needs a Universe:
+//
+//   - Non-root: the contributor's pubkey was resolved to bytes — inline or
+//     external — when it was obtained via AsContributor; match on bytes.
+//   - Root: this claim declares its own pubkey as its content. Inline bytes
+//     are matched directly; an external declaration (ContentHash only) is
+//     matched by hashing the key's own pubkey — H(key.Public()) ==
+//     ContentHash — so external storage works here too, no fetch required.
+func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
+	hasSigner := cfg.SigningKey != nil && !isTypedNil(cfg.SigningKey)
+	if !isRoot {
+		return checkKeyAgainstPubkey(hasSigner, cfg.SigningKey, cfg.Contributor.Pubkey())
 	}
-	if cfg.Contributor == nil {
-		return nil, errMissingContributor
+	switch {
+	case cfg.InlineContent != nil:
+		return checkKeyAgainstPubkey(hasSigner, cfg.SigningKey, cfg.InlineContent)
+	case cfg.ContentHash != nil:
+		// External pubkey declaration — match by hash, no fetch.
+		if !hasSigner {
+			return errResolvedNoKey
+		}
+		encoded, err := EncodePublicKey(cfg.SigningKey.Public())
+		if err != nil {
+			return wrap(errEncodeSigningKey, err)
+		}
+		h, err := HashContent(encoded)
+		if err != nil {
+			return err
+		}
+		if !h.Equal(cfg.ContentHash) {
+			return errResolvedMismatch
+		}
+		return nil
+	default:
+		// No declared pubkey: identity-Sign (no key), or a key with nothing
+		// to attest to (error).
+		if hasSigner {
+			return errResolvedNoPubkey
+		}
+		return nil
 	}
-	return cfg.Contributor.Node().GetInlineContent()
 }
 
-// checkSigningConsistency rejects mismatches between the supplied
-// SigningKey and the resolved contributor pubkey — key-without-pubkey,
-// pubkey-without-key, or a key whose public part names a different
-// contributor. Both absent is the identity-Sign case.
-func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, resolvedPubkey []byte) error {
-	hasSigner := signingKey != nil && !isTypedNil(signingKey)
-	hasPubkey := len(resolvedPubkey) > 0
+// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes
+// and classifies the missing-half cases: neither → identity Sign; key without
+// pubkey or pubkey without key → error; both → the key's public part must
+// equal pubkey.
+func checkKeyAgainstPubkey(hasSigner bool, key crypto.Signer, pubkey []byte) error {
+	hasPubkey := len(pubkey) > 0
 	switch {
 	case !hasSigner && !hasPubkey:
 		return nil // identity-Sign case
@@ -68,11 +98,11 @@ func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, 
 	case !hasSigner && hasPubkey:
 		return errResolvedNoKey
 	}
-	encoded, err := EncodePublicKey(signingKey.Public())
+	encoded, err := EncodePublicKey(key.Public())
 	if err != nil {
 		return wrap(errEncodeSigningKey, err)
 	}
-	if !bytes.Equal(encoded, resolvedPubkey) {
+	if !bytes.Equal(encoded, pubkey) {
 		return errResolvedMismatch
 	}
 	return nil
