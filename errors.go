@@ -22,7 +22,6 @@ var (
 	// --- Claim / Contributor ---
 	errSigningKeyNoPubkey = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
 	errSigningKeyMismatch = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
-	errNotBranch          = errors.New("ranke.Claim.AsBranch: claim is not contribution/branch")
 	errMissingContributor = errors.New("ranke: missing contributor")
 	errNilContributor     = errors.New("ranke: nil contributor")
 	errResolvedNoPubkey   = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
@@ -47,6 +46,10 @@ var (
 	errClaimContentXOR          = errors.New("ranke.NewClaim: inline and external content are mutually exclusive")
 	errClaimContributorRequired = errors.New("ranke.NewClaim: Contributor is required (only the root contribution/contributor may omit it)")
 	errEncodingWithoutContent   = errors.New("ranke.NewClaim: encoding set without content")
+	errDiffEdgeUnnamed          = errors.New("ranke.NewClaim: a diff claim's edges must be named (except the contributor)")
+	errDiffEdgeDupName          = errors.New("ranke.NewClaim: duplicate edge name in a diff claim")
+	errTwoContributors          = errors.New("ranke.NewClaim: a claim may carry only one contribution/contributor edge")
+	errTwoDiffEdges             = errors.New("ranke.NewClaim: a claim may carry only one contribution/diff edge")
 
 	// --- Graph ---
 	errNilClaim            = errors.New("ranke: nil claim")
@@ -107,7 +110,6 @@ var (
 	// --- Archive ---
 	errNilUniverse    = errors.New("ranke.NewArchive: nil Universe")
 	errNilHeadID      = errors.New("ranke.NewArchive: nil head id")
-	errHeadNotFound   = errors.New("ranke.NewArchive: head claim not found")
 	errNilID          = errors.New("ranke.Archive: nil id")
 	errBranchNotFound = errors.New("ranke.Archive.GetBranch: branch not found")
 	errVerifyTODO     = errors.New("ranke: verification not implemented")
