@@ -4,7 +4,7 @@
 # produces no binary. The bin/ directory is reserved for future
 # tools (e.g. a conformance-suite runner) and currently empty.
 
-.PHONY: all build install uninstall test test-unit test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/integration test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -58,23 +58,26 @@ install: build
 uninstall:
 	rm -f $(BINDIR)/ranke
 
-# Unit layer: the root package's atom-level tests (claims, codec,
-# content, signing) — no infrastructure, no fs. Fast; runs first so a
-# broken foundation fails before the feature suite spins up.
-test-unit:
+# test/core — the datatype unit layer (root package): claims, codec,
+# content, id, signing, graph, guarantees. No infrastructure, no fs, no
+# adapters. Fast; the correctness of the datatype itself lives here.
+test/core:
 	go test .
 
-# Run user-perspective tests in /tests, preceded by the unit layer so
-# `make test` covers both. The fs integration test uses a fixed directory
+# test/integration — the blackbox suite in /tests: the Archive/Sequencer
+# layer driven across adapters. The fs test uses a fixed directory
 # (RANKE_FS_DIR, default /tmp/ranke-go-test) that TestMain wipes and
-# recreates each run. Path echoed at end so it's visible on plain
-# `make test` without `-v`.
+# recreates each run; the path is echoed so it's visible without `-v`.
 RANKE_FS_DIR ?= /tmp/ranke-go-test
-test: test-unit
+test/integration:
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./tests/... && \
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
 	echo "  $(RANKE_FS_DIR)"
+
+# test — both layers, core first so a broken foundation fails before the
+# feature suite spins up.
+test: test/core test/integration
 
 test-verbose:
 	go test -v ./tests/...

@@ -88,8 +88,9 @@ var (
 	errUnknownRefClaim       = errors.New("ranke.Graph: edge references unknown claim (atomic creation rule §4.3)")
 	errRefMissingClaim       = errors.New("ranke.Graph: edge references missing claim")
 	errConsolidate           = errors.New("ranke.Graph.Consolidate")
-	errGraphVerifyStage      = errors.New("ranke.Graph.Verify")
-	errContributorNotInGraph = errors.New("ranke.Graph: contributor claim not in graph")
+	errVerify                = errors.New("ranke.verify")
+	errContributorUnresolved = errors.New("ranke.verify: contributor claim unresolved")
+	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errEncodeClaim           = errors.New("ranke: encode claim")
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")
 	errID                    = errors.New("ranke.Id")
@@ -112,7 +113,6 @@ var (
 	errNilHeadID      = errors.New("ranke.NewArchive: nil head id")
 	errNilID          = errors.New("ranke.Archive: nil id")
 	errBranchNotFound = errors.New("ranke.Archive.GetBranch: branch not found")
-	errVerifyTODO     = errors.New("ranke: verification not implemented")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a
