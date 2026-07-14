@@ -7,6 +7,7 @@ package ranke
 import (
 	"bytes"
 	"crypto"
+	"sort"
 )
 
 // Claim is a node together with the edges in its edges set.
@@ -39,26 +40,80 @@ type claim struct {
 	node        *node
 	edges       []*edge // same order as node.edges
 	contributor Contributor
+
+	// Diff materialisation (set by the loader when this claim carries a
+	// contribution/diff edge): diffClaim is the materialised predecessor;
+	// diffEdges is the merged edge view (predecessor's named edges, minus
+	// edges_diff_omit by name, overlaid with self's named edges, plus
+	// self's own unnamed singletons). The delta (edges) is untouched so
+	// ID()/Encode() stay the claim's own bytes.
+	diffClaim *claim
+	diffEdges []*edge
 }
 
 func (c *claim) Node() Node { return c.node }
 func (c *claim) ID() Id     { return c.node.id }
 
+// effectiveEdges is the edge set reads see: the delta for a plain claim,
+// the materialised overlay for a diff claim.
+func (c *claim) effectiveEdges() []*edge {
+	if c.diffClaim == nil {
+		return c.edges
+	}
+	return c.diffEdges
+}
+
 func (c *claim) Edges(filters ...Filter) []Edge {
+	src := c.effectiveEdges()
 	if len(filters) == 0 {
-		out := make([]Edge, len(c.edges))
-		for i, e := range c.edges {
+		out := make([]Edge, len(src))
+		for i, e := range src {
 			out[i] = e
 		}
 		return out
 	}
-	out := make([]Edge, 0, len(c.edges))
-	for _, e := range c.edges {
+	out := make([]Edge, 0, len(src))
+	for _, e := range src {
 		if matchAll(e, filters) {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// Diff materialisation (setting diffClaim / diffEdges / node.diffFields)
+// lives in universe_materialize.go — DefaultMaterialize, applied by the read path.
+
+// computeDiffEdges builds diffEdges: inherit the predecessor's named
+// edges, drop those named in edges_diff_omit, overlay self's named edges
+// (by name), and append self's own unnamed edges (the per-claim singletons
+// — contributor and the diff marker — never inherited). Diff is keyed by
+// name; edge ids play no part.
+func (c *claim) computeDiffEdges() {
+	named := map[string]*edge{}
+	for _, e := range c.diffClaim.effectiveEdges() {
+		if n, ok := e.fields[FieldName]; ok {
+			named[n] = e // only named edges inherit
+		}
+	}
+	for name := range splitLines(c.node.fields[FieldEdgesDiffOmit]) {
+		delete(named, name)
+	}
+	out := make([]*edge, 0, len(named)+len(c.edges))
+	for _, e := range c.edges {
+		if n, ok := e.fields[FieldName]; ok {
+			named[n] = e // overwrite / add by name
+		} else {
+			out = append(out, e) // self's own singleton (contributor, diff)
+		}
+	}
+	for _, e := range named {
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return bytes.Compare(idBytes(out[i].id), idBytes(out[j].id)) < 0
+	})
+	c.diffEdges = out
 }
 
 func (c *claim) Contributor() Contributor {
@@ -79,29 +134,15 @@ func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) 
 	if len(signingKey) == 0 || signingKey[0] == nil {
 		return c, nil // unwrapped — caller didn't ask to bind a key
 	}
-	if len(c.node.pubkey) == 0 {
+	if len(c.node.content) == 0 {
 		return nil, errSigningKeyNoPubkey
 	}
 	keyPubkey, err := EncodePublicKey(signingKey[0].Public())
 	if err != nil {
 		return nil, wrap(errEncodeSigningKey, err)
 	}
-	if !bytes.Equal(keyPubkey, c.node.pubkey) {
+	if !bytes.Equal(keyPubkey, c.node.content) {
 		return nil, errSigningKeyMismatch
 	}
 	return WithSigningKey(c, signingKey[0]), nil
-}
-
-func (c *claim) IsBranch() bool {
-	return c.node.typeClass == NodeClassContribution && NodeSubtype(c.node.typeSub) == NodeSubtypeBranch
-}
-
-// AsBranch views this claim as a Branch scoped to u — the Universe its
-// closure is read from (handed over explicitly; the claim itself holds no
-// storage reference).
-func (c *claim) AsBranch(u Universe) (Branch, error) {
-	if !c.IsBranch() {
-		return nil, errNotBranch
-	}
-	return &branch{claim: c, u: u}, nil
 }

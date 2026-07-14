@@ -59,7 +59,7 @@ func (u *mapUniverse) get(id Id) (Claim, bool) {
 	return c, true
 }
 
-func (u *mapUniverse) GetClaims(_ context.Context, ids []Id) ([]Claim, error) {
+func (u *mapUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
 	out := make([]Claim, len(ids))
 	for i, id := range ids {
 		c, ok := u.get(id)
@@ -68,43 +68,26 @@ func (u *mapUniverse) GetClaims(_ context.Context, ids []Id) ([]Claim, error) {
 		}
 		out[i] = c
 	}
+	// Faithful byte-store behaviour: materialise diff overlays on read
+	// (via the ADT's default) unless the caller wants the raw delta.
+	if !newGetConfig(opts...).rawDelta {
+		if _, err := DefaultMaterialize(ctx, u, out); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 
-// reachable returns the closure of head: head plus every claim reachable by
-// following edge references (decoding each stored claim to read its edges).
-func (u *mapUniverse) reachable(head Id) map[string]bool {
-	seen := map[string]bool{}
-	queue := []Id{head}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		k := cur.String()
-		if seen[k] {
-			continue
-		}
-		c, ok := u.get(cur)
-		if !ok {
-			continue
-		}
-		seen[k] = true
-		for _, e := range c.Edges() {
-			queue = append(queue, e.Reference())
-		}
-	}
-	return seen
+// InClosure / GetFromClosure delegate to the ADT's default edge-walk — the
+// fallback a byte-store Universe uses — instead of a hand-rolled traversal.
+// So every archive/branch read in these tests exercises DefaultInClosure /
+// DefaultGetFromClosure (and, through them, DefaultMaterialize).
+func (u *mapUniverse) InClosure(ctx context.Context, head, id Id) (bool, error) {
+	return DefaultInClosure(ctx, u, head, id)
 }
 
-func (u *mapUniverse) InClosure(_ context.Context, head, id Id) (bool, error) {
-	return u.reachable(head)[id.String()], nil
-}
-
-func (u *mapUniverse) GetFromClosure(_ context.Context, head, id Id) (Claim, error) {
-	if !u.reachable(head)[id.String()] {
-		return nil, ErrNotFound
-	}
-	c, _ := u.get(id)
-	return c, nil
+func (u *mapUniverse) GetFromClosure(ctx context.Context, head, id Id) (Claim, error) {
+	return DefaultGetFromClosure(ctx, u, head, id)
 }
 
 func (u *mapUniverse) PutContents(_ context.Context, blobs []ContentBlob) error {
@@ -149,7 +132,7 @@ func branchTable(t *testing.T, root Contributor, edges ...Edge) Claim {
 func TestNewArchiveValidation(t *testing.T) {
 	ctx := context.Background()
 	u := newMapUniverse()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 	u.put(root)
 
 	_, err := NewArchive(ctx, nil, root.ID())
@@ -167,7 +150,7 @@ func TestNewArchiveValidation(t *testing.T) {
 func TestArchiveClaimAndContentReads(t *testing.T) {
 	ctx := context.Background()
 	u := newMapUniverse()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 	em := srcClaim(t, root, "the body")
 	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
 	u.put(root, em, bth)
@@ -203,7 +186,7 @@ func TestArchiveClaimAndContentReads(t *testing.T) {
 func TestArchiveExternalContentRead(t *testing.T) {
 	ctx := context.Background()
 	u := newMapUniverse()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 
 	blob := []byte("external archive payload")
 	hash, err := HashContent(blob)
@@ -225,12 +208,62 @@ func TestArchiveExternalContentRead(t *testing.T) {
 	require.Equal(t, blob, b, "external content streams from the Universe through the Archive")
 }
 
+// --- diff materialisation on read --------------------------------------
+
+// TestArchiveMaterializesDiff: reading a diff claim through the archive
+// materialises the overlay (the universe applies DefaultMaterialize), so a
+// delta that restates only one field inherits the predecessor's other
+// fields AND its content. WithNotDiffMaterialized returns the bare delta.
+func TestArchiveMaterializesDiff(t *testing.T) {
+	ctx := context.Background()
+	u := newMapUniverse()
+	root := contributor(t)
+
+	base, err := NewClaim(TypeSource("note"), root).
+		WithInlineContent([]byte("the full base content")).
+		WithField("author", "alice").
+		Sign()
+	require.NoError(t, err)
+	// A revision restating only "rev" — content and "author" are inherited.
+	delta, err := NewClaim(TypeSource("note"), root).
+		WithDiff(base.ID()).
+		WithField("rev", "2").
+		Sign()
+	require.NoError(t, err)
+
+	bth := branchTable(t, root, branchEdge(t, "main", delta.ID()))
+	u.put(root, base, delta, bth)
+	arc, err := NewArchive(ctx, u, bth.ID())
+	require.NoError(t, err)
+
+	got, err := arc.GetClaim(ctx, delta.ID())
+	require.NoError(t, err)
+	rev, err := got.Node().GetField("rev")
+	require.NoError(t, err)
+	require.Equal(t, "2", rev, "the delta's own field")
+	author, err := got.Node().GetField("author")
+	require.NoError(t, err)
+	require.Equal(t, "alice", author, "field inherited from the predecessor")
+
+	r, err := arc.GetClaimContent(ctx, delta.ID())
+	require.NoError(t, err)
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, []byte("the full base content"), b, "content inherited from the predecessor")
+
+	// The stored delta itself carries neither — that's the space saving.
+	raw, err := u.GetClaims(ctx, []Id{delta.ID()}, WithNotDiffMaterialized())
+	require.NoError(t, err)
+	_, err = raw[0].Node().GetField("author")
+	require.Error(t, err, "the raw delta does not carry the inherited field")
+}
+
 // --- branch reads -------------------------------------------------------
 
 func TestArchiveBranchReads(t *testing.T) {
 	ctx := context.Background()
 	u := newMapUniverse()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 	em := srcClaim(t, root, "seed")
 	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
 	u.put(root, em, bth)
@@ -265,7 +298,7 @@ func TestArchiveBranchReads(t *testing.T) {
 func TestArchiveBranchDiffChain(t *testing.T) {
 	ctx := context.Background()
 	u := newMapUniverse()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 	emMain := srcClaim(t, root, "main head")
 	emDev := srcClaim(t, root, "dev head")
 

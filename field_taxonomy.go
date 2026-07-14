@@ -12,17 +12,20 @@ import "strings"
 // never collide with a user field of the same name.
 type Field string
 
+// Aliases are bare (no dot) — the codec adds the reserved "." prefix on the
+// wire to signify "this is an alias" (a literal field name can never start
+// with ".", so the two never collide).
 const (
 	FieldName             = "name"
-	FieldNameAlias        = ".n"
+	FieldNameAlias        = "n"
 	FieldEdges            = "edges"
-	FieldEdgesAlias       = ".e"
+	FieldEdgesAlias       = "e"
 	FieldContent          = "content"
-	FieldContentAlias     = ".c"
+	FieldContentAlias     = "c"
 	FieldContentSize      = "content_size"
-	FieldContentSizeAlias = ".s"
+	FieldContentSizeAlias = "s"
 	FieldContentHash      = "content_hash"
-	FieldContentHashAlias = ".h"
+	FieldContentHashAlias = "h"
 	// FieldEdgesDiffOmit, on a diff claim, lists the ids of inherited edges
 	// to drop when materialising the diff, one id per line (newline-
 	// separated — ids never contain a newline). This is the "omit" half of
@@ -117,15 +120,40 @@ func validEncodingSubtypeChars(sub string) bool {
 	return true
 }
 
-// fieldNameToAlias / fieldNameFromAlias convert between a canonical field
-// name and its "." alias for wire compression (wired up by the codec).
+// fieldNameToAlias maps a well-known field name to its bare alias; open
+// user field names pass through unchanged. The codec adds the "." prefix.
 func fieldNameToAlias(n Field) Field {
 	switch n {
+	case FieldName:
+		return FieldNameAlias
+	case FieldEdges:
+		return FieldEdgesAlias
+	case FieldContent:
+		return FieldContentAlias
+	case FieldContentSize:
+		return FieldContentSizeAlias
+	case FieldContentHash:
+		return FieldContentHashAlias
 	default:
 		return n
 	}
 }
 
+// fieldNameFromAlias maps a bare alias back to its canonical field name;
+// unknown values pass through unchanged.
 func fieldNameFromAlias(c Field) Field {
-	return c
+	switch c {
+	case FieldNameAlias:
+		return FieldName
+	case FieldEdgesAlias:
+		return FieldEdges
+	case FieldContentAlias:
+		return FieldContent
+	case FieldContentSizeAlias:
+		return FieldContentSize
+	case FieldContentHashAlias:
+		return FieldContentHash
+	default:
+		return c
+	}
 }

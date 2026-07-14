@@ -29,7 +29,6 @@ type ClaimBuilder struct {
 	Encoding      string
 	EncodingClass EncodingClass
 	EncodingSub   string
-	Title         string
 	InlineContent []byte
 	ContentHash   Id
 	ContentSize   uint64
@@ -42,12 +41,11 @@ type ClaimBuilder struct {
 	DiffOf Id
 	Edges  []Edge
 	Fields map[string]string
-	// Pubkey is the multikey-encoded public key for a contributor
-	// claim (§4.1, §5.7). Empty for non-contributor claims and for
-	// unsigned contributors (identity-Sign case).
-	Pubkey []byte
 	// SigningKey is the private key used to sign this claim's id.
 	// Optional; nil + empty resolved pubkey = identity Sign per §5.7.
+	// A contributor claim carries its pubkey as its content (§5.7), so
+	// there is no separate pubkey input — set InlineContent to the
+	// multikey-encoded public key.
 	SigningKey crypto.Signer
 }
 
@@ -100,11 +98,6 @@ func (b ClaimBuilder) WithType(t string) ClaimBuilder { b.Type = t; return b }
 //deadcode:keep
 func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; return b }
 
-// WithTitle sets the node's optional title.
-//
-//deadcode:keep
-func (b ClaimBuilder) WithTitle(t string) ClaimBuilder { b.Title = t; return b }
-
 // WithDiff makes this claim a diff over the predecessor at id (adds a
 // contribution/diff edge). The claim restates only what differs.
 //
@@ -137,11 +130,6 @@ func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t;
 //
 //deadcode:keep
 func (b ClaimBuilder) WithContributor(c Contributor) ClaimBuilder { b.Contributor = c; return b }
-
-// WithPubkey sets the contributor pubkey (§5.7).
-//
-//deadcode:keep
-func (b ClaimBuilder) WithPubkey(p []byte) ClaimBuilder { b.Pubkey = p; return b }
 
 // WithSigningKey sets the key used to sign the claim id.
 //
@@ -216,15 +204,16 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		cfg.EncodingSub = sub
 	}
 	if hasContent {
-		if cfg.EncodingClass == "" {
-			cfg.EncodingClass = encText
-			cfg.EncodingSub = "plain"
-		}
-		if !validEncodingClass(cfg.EncodingClass) {
-			return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
-		}
-		if err := checkEncodingSubtype(cfg.EncodingSub); err != nil {
-			return nil, err
+		// Encoding is optional (no default): validate it only when set, so
+		// binary content — e.g. a contributor's multikey pubkey — needn't
+		// carry a bogus media type.
+		if cfg.EncodingClass != "" {
+			if !validEncodingClass(cfg.EncodingClass) {
+				return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
+			}
+			if err := checkEncodingSubtype(cfg.EncodingSub); err != nil {
+				return nil, err
+			}
 		}
 	} else if cfg.EncodingClass != "" || cfg.EncodingSub != "" {
 		return nil, errEncodingWithoutContent

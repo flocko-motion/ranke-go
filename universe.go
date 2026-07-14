@@ -63,7 +63,14 @@ type Universe interface {
 	// GetClaims returns the claims for ids, positionally. A missing
 	// claim fails the whole call with ErrNotFound; callers that
 	// tolerate gaps should HasClaims first.
-	GetClaims(ctx context.Context, ids []Id) ([]Claim, error)
+	//
+	// Claims are diff-materialised by default (the contribution/diff
+	// overlay is resolved, so GetField/Edges/content reflect the chain);
+	// pass WithNotDiffMaterialized for the stored delta. A byte-store
+	// backend may return raw claims and let the read path apply
+	// DefaultMaterialize; a graph-native backend may materialise (and
+	// cache) itself.
+	GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error)
 	// PutClaims stores cs. Idempotent (content-addressed): re-putting
 	// an existing claim is a no-op.
 	PutClaims(ctx context.Context, cs []Claim) error

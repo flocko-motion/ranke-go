@@ -92,6 +92,56 @@ func encodeEdge(e *edge) ([]byte, error) {
 	return encodingMode.Marshal(ee)
 }
 
+// --- alias pass (§180): the canonical encoding stores well-known types
+// and field names in their compact alias form, so the id is over the
+// aliased bytes. Aliases are bare in the taxonomy; on the wire they carry a
+// leading "." — the reserved prefix a literal can never have (charset), so
+// alias and literal never collide. The alias table is fixed, so ids are
+// stable under it.
+
+// aliasToWire returns v's wire form: the "."-prefixed bare alias when v has
+// one (toAlias changed it), else v literally.
+func aliasToWire[T ~string](v T, toAlias func(T) T) string {
+	if a := toAlias(v); a != v {
+		return "." + string(a)
+	}
+	return string(v)
+}
+
+// aliasFromWire reverses aliasToWire: a "."-prefixed value is de-aliased,
+// anything else is a literal.
+func aliasFromWire[T ~string](w string, fromAlias func(T) T) T {
+	if len(w) > 0 && w[0] == '.' {
+		return fromAlias(T(w[1:]))
+	}
+	return T(w)
+}
+
+// aliasFieldKeys / unaliasFieldKeys map a field map's keys through the
+// field-name alias (values are unchanged). nil in → nil out; the input map
+// is not mutated.
+func aliasFieldKeys(fields map[string]string) map[string]string {
+	if fields == nil {
+		return nil
+	}
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		out[aliasToWire(Field(k), fieldNameToAlias)] = v
+	}
+	return out
+}
+
+func unaliasFieldKeys(fields map[string]string) map[string]string {
+	if fields == nil {
+		return nil
+	}
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		out[string(aliasFromWire(k, fieldNameFromAlias))] = v
+	}
+	return out
+}
+
 // buildEncNode constructs the encNode payload for a *node — used both
 // in id computation (encodeNode wraps this) and in the claim codec
 // (Claim.Encode), independent of where the bytes are later stored.

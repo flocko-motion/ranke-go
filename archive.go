@@ -31,7 +31,7 @@ type Archive interface {
 	GetBranch(ctx context.Context, name string) (Branch, error)
 	GetBranches(ctx context.Context) ([]Branch, error)
 
-	Verify(ctx context.Context) (VerificationRun, error)
+	Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error)
 }
 
 type archive struct {
@@ -70,14 +70,13 @@ func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	if k == nil {
 		return nil, errNilHeadID
 	}
-	claims, err := u.GetClaims(ctx, []Id{k})
+	// GetClaim materialises the head's diff chain, so a.bth's
+	// contribution/branch edges are already the merged branch set.
+	c, err := GetClaim(ctx, u, k)
 	if err != nil {
 		return nil, wrapDetail(errArchiveLoadHead, k.String(), err)
 	}
-	if len(claims) == 0 {
-		return nil, errHeadNotFound
-	}
-	return &archive{u: u, bth: claims[0]}, nil
+	return &archive{u: u, bth: c}, nil
 }
 
 func (a *archive) HasClaim(ctx context.Context, id Id) (bool, error) {
@@ -91,6 +90,8 @@ func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
+	// The Universe returns materialised claims (see GetClaims); the archive
+	// does not materialise itself.
 	return a.u.GetFromClosure(ctx, a.bth.ID(), id)
 }
 

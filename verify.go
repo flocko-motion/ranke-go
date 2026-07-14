@@ -109,6 +109,8 @@ func (r *verificationRun) finish() {
 
 type verifyConfig struct {
 	maxDepth        int           // 0 = unbounded
+	maxClaims       int           // stop after n claims processed; 0 = unlimited
+	createdAfter    time.Time     // prune claims created before this; zero = no bound
 	trusted         func(Id) bool // prune predicate; nil = trust nothing
 	externalContent bool          // fetch + verify external content (default: inline only)
 	stopAfter       int           // stop after n failures; 0 = verify everything
@@ -120,6 +122,15 @@ type VerifyOption func(*verifyConfig)
 
 // WithMaxDepth bounds the closure walk to depth n (0 = full closure).
 func WithMaxDepth(n int) VerifyOption { return func(c *verifyConfig) { c.maxDepth = n } }
+
+// WithMaxClaims stops the walk after n claims have been processed (0 =
+// unlimited) — a hard work cap independent of depth.
+func WithMaxClaims(n int) VerifyOption { return func(c *verifyConfig) { c.maxClaims = n } }
+
+// WithCreatedAfter prunes any claim whose created_at is before t (skips it
+// and its older references). Since the closure walks toward older
+// references (monotonicity), this bounds verification to a recent window.
+func WithCreatedAfter(t time.Time) VerifyOption { return func(c *verifyConfig) { c.createdAfter = t } }
 
 // WithTrusted prunes the walk at any claim for which fn returns true —
 // already-verified / committed claims. Backed by whatever the caller has
@@ -172,6 +183,7 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 		}
 
 		stop := func() bool { return cfg.stopAfter > 0 && len(run.failures) >= cfg.stopAfter }
+		processed := 0
 
 		for len(queue) > 0 {
 			if err := ctx.Err(); err != nil {
@@ -200,6 +212,10 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				continue
 			}
 
+			if !cfg.createdAfter.IsZero() && c.node.createdAt.Before(cfg.createdAfter) {
+				continue // pruned: older than the created_at bound
+			}
+
 			if cur.depth == 0 && rootCheck != nil {
 				if err := rootCheck(c); err != nil {
 					run.fail(Failure{ID: cur.id, Depth: 0, Err: err}, cfg.onError)
@@ -216,6 +232,11 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				}
 			} else {
 				run.pass()
+			}
+
+			processed++
+			if cfg.maxClaims > 0 && processed >= cfg.maxClaims {
+				return // hit the work cap
 			}
 
 			// Descend into the claim's own (delta) edge references — this
@@ -269,12 +290,13 @@ func verifyClaim(ctx context.Context, c *claim, fetch fetchFunc, cfg *verifyConf
 }
 
 // resolveClaimPubkey returns the pubkey whose private key signed this
-// claim's id (§5.7): the claim's own node for an initial node (no edges),
-// else the node of the contributor referenced by its
-// contribution/contributor edge (fetched via fetch).
+// claim's id (§5.7). A contributor carries its pubkey as its content, so
+// this is the claim's own content for an initial node (no edges), else the
+// content of the contributor referenced by its contribution/contributor
+// edge (fetched via fetch).
 func resolveClaimPubkey(ctx context.Context, c *claim, fetch fetchFunc) ([]byte, error) {
 	if len(c.edges) == 0 {
-		return c.node.pubkey, nil // initial node
+		return c.node.content, nil // initial node: pubkey is its content
 	}
 	for _, e := range c.edges {
 		if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
@@ -282,7 +304,7 @@ func resolveClaimPubkey(ctx context.Context, c *claim, fetch fetchFunc) ([]byte,
 			if err != nil {
 				return nil, wrapDetail(errContributorUnresolved, e.reference.String(), err)
 			}
-			return contributor.node.pubkey, nil
+			return contributor.node.content, nil // contributor's pubkey is its content
 		}
 	}
 	return nil, errNoContributorEdge
