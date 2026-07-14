@@ -64,13 +64,14 @@ var (
 	errNilHash = errors.New("ranke: nil content hash")
 
 	// --- Detail-carrying (used with withDetail; the detail is the value) ---
-	errNotContributorClaim  = errors.New("ranke.Claim.AsContributor: claim is not contribution/contributor")
-	errUnknownNodeClass     = errors.New("ranke.NewClaim: unknown node class")
-	errUnknownEncodingClass = errors.New("ranke.NewClaim: unknown encoding class")
-	errUnknownEdgeClass     = errors.New("ranke.NewEdge: unknown edge class")
-	errFieldNotSet          = errors.New("ranke: field not set")
-	errInvalidFieldName     = errors.New("ranke: invalid field name (use lowercase letters, digits, and '_'; no leading '_')")
-	errReservedFieldName    = errors.New("ranke: reserved field name — set via the dedicated builder input, not Fields")
+	errNotContributorClaim    = errors.New("ranke.Claim.AsContributor: claim is not contribution/contributor")
+	errUnknownNodeClass       = errors.New("ranke.NewClaim: unknown node class")
+	errUnknownEncodingClass   = errors.New("ranke.NewClaim: unknown encoding class")
+	errUnknownEdgeClass       = errors.New("ranke.NewEdge: unknown edge class")
+	errFieldNotSet            = errors.New("ranke: field not set")
+	errInvalidFieldName       = errors.New("ranke: invalid field name (use lowercase letters, digits, and '_'; no leading '_')")
+	errInvalidSubtype         = errors.New("ranke: invalid subtype (use lowercase letters, digits, and '_'; no leading '_')")
+	errInvalidEncodingSubtype = errors.New("ranke: invalid encoding subtype")
 
 	// --- Operation-prefix sentinels (fmt.Errorf replacements) ---
 	// Used with wrap/wrapDetail: the sentinel is the operation prefix, the

@@ -30,17 +30,18 @@ type ClaimBuilder struct {
 	EncodingClass EncodingClass
 	EncodingSub   string
 	Title         string
-	// Name sets the reserved "name" field — the sanctioned path for the
-	// system to name a claim (e.g. a branch), since users may not set
-	// reserved field names through Fields. Empty leaves it unset.
-	Name          string
 	InlineContent []byte
 	ContentHash   Id
 	ContentSize   uint64
 	CreatedAt     time.Time
 	Contributor   Contributor
-	Edges         []Edge
-	Fields        map[string]string
+	// DiffOf, when set, makes this claim a diff over the referenced
+	// predecessor: NewClaim adds a contribution/diff edge to it. The claim
+	// restates only what differs; the full claim is materialised by
+	// applying the diff chain (done transparently by the loader).
+	DiffOf Id
+	Edges  []Edge
+	Fields map[string]string
 	// Pubkey is the multikey-encoded public key for a contributor
 	// claim (§4.1, §5.7). Empty for non-contributor claims and for
 	// unsigned contributors (identity-Sign case).
@@ -104,11 +105,11 @@ func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; retu
 //deadcode:keep
 func (b ClaimBuilder) WithTitle(t string) ClaimBuilder { b.Title = t; return b }
 
-// WithName sets the reserved "name" field (e.g. a branch name) — the
-// sanctioned path, since users may not set reserved names via Fields.
+// WithDiff makes this claim a diff over the predecessor at id (adds a
+// contribution/diff edge). The claim restates only what differs.
 //
 //deadcode:keep
-func (b ClaimBuilder) WithName(n string) ClaimBuilder { b.Name = n; return b }
+func (b ClaimBuilder) WithDiff(id Id) ClaimBuilder { b.DiffOf = id; return b }
 
 // WithInlineContent sets the inline content bytes (the claim carries the
 // content itself). Mutually exclusive with WithExternalContent.
@@ -190,6 +191,9 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if !validNodeClass(cfg.TypeClass) {
 		return nil, withDetail(errUnknownNodeClass, string(cfg.TypeClass))
 	}
+	if err := checkSubtype(cfg.TypeSub); err != nil {
+		return nil, err
+	}
 	// Content is optional and manual: none, inline, or external —
 	// never both. Structural claims (heads, branches, contributors)
 	// carry none.
@@ -218,6 +222,9 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		}
 		if !validEncodingClass(cfg.EncodingClass) {
 			return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
+		}
+		if err := checkEncodingSubtype(cfg.EncodingSub); err != nil {
+			return nil, err
 		}
 	} else if cfg.EncodingClass != "" || cfg.EncodingSub != "" {
 		return nil, errEncodingWithoutContent
@@ -265,19 +272,11 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		createdAt = createdAt.UTC()
 	}
 
-	// Validate user field names, then inject the sanctioned reserved
-	// fields (Name → the reserved "name" field).
+	// Validate user field names.
 	for k := range cfg.Fields {
 		if err := checkUserFieldName(k); err != nil {
 			return nil, err
 		}
-	}
-	fields := cloneFields(cfg.Fields)
-	if cfg.Name != "" {
-		if fields == nil {
-			fields = make(map[string]string, 1)
-		}
-		fields[FieldName] = cfg.Name
 	}
 
 	n := &node{
@@ -287,7 +286,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		encodingSub:   cfg.EncodingSub,
 		title:         cfg.Title,
 		createdAt:     createdAt,
-		fields:        fields,
+		fields:        cloneFields(cfg.Fields),
 		pubkey:        cfg.Pubkey,
 	}
 

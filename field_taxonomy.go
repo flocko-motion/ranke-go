@@ -5,8 +5,9 @@ package ranke
 // letters, digits, and "_", never starting with "_". Everything outside
 // that charset is a reserved namespace the system owns — the "." prefix
 // (used for the wire aliases below) today, with room for more prefixes
-// later. A handful of plain names are reserved too (reservedFieldNames):
-// they name structural properties the system sets itself.
+// later. Names like "name" are ordinary fields; the structural properties
+// (content, edges, …) live in their own slots, not the field map, so they
+// never collide with a user field of the same name.
 type Field string
 
 const (
