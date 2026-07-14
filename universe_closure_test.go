@@ -16,11 +16,11 @@ import (
 // edges is in the closure; an unrelated claim is not; nil head/id error.
 func TestDefaultInClosure(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
 	ent := entityClaim(t, root, "person", "Alice", em) // → em (derivation), root (contributor)
-	u.put(root, em, ent)
+	putClaims(t, u, root, em, ent)
 
 	for _, id := range []Id{ent.ID(), em.ID(), root.ID()} {
 		in, err := DefaultInClosure(ctx, u, ent.ID(), id)
@@ -29,7 +29,7 @@ func TestDefaultInClosure(t *testing.T) {
 	}
 
 	other := srcClaim(t, root, "unrelated")
-	u.put(other)
+	putClaims(t, u, other)
 	in, err := DefaultInClosure(ctx, u, ent.ID(), other.ID())
 	require.NoError(t, err)
 	require.False(t, in, "an unrelated claim is not in the closure")
@@ -44,11 +44,11 @@ func TestDefaultInClosure(t *testing.T) {
 // needs but the store lacks) is a real error, not a silent "not found".
 func TestDefaultInClosureGapIsError(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
 	ent := entityClaim(t, root, "person", "Alice", em)
-	u.put(root, ent) // em deliberately NOT stored — a gap under ent
+	putClaims(t, u, root, ent) // em deliberately NOT stored — a gap under ent
 
 	target, _ := HashContent([]byte("anything"))
 	_, err := DefaultInClosure(ctx, u, ent.ID(), target)
@@ -59,17 +59,17 @@ func TestDefaultInClosureGapIsError(t *testing.T) {
 // ErrNotFound when not.
 func TestDefaultGetFromClosure(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
-	u.put(root, em)
+	putClaims(t, u, root, em)
 
 	got, err := DefaultGetFromClosure(ctx, u, em.ID(), root.ID())
 	require.NoError(t, err)
 	require.True(t, got.ID().Equal(root.ID()), "contributor fetched from the closure")
 
 	outside := srcClaim(t, root, "outside")
-	u.put(outside)
+	putClaims(t, u, outside)
 	_, err = DefaultGetFromClosure(ctx, u, em.ID(), outside.ID())
 	require.ErrorIs(t, err, ErrNotFound, "a claim outside the closure is not found")
 }

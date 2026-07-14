@@ -30,8 +30,8 @@ func corruptNode(t *testing.T, c Claim) {
 // the walk finishes with no failures and no terminal error.
 func TestVerifyIdentityGraph(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
-	require.NoError(t, g.AddClaims(srcClaim(t, root, "hello")))
+	g := newGraph(t, root)
+	require.NoError(t, g.AddClaims(context.Background(), srcClaim(t, root, "hello")))
 
 	run := g.Verify()
 	run.Wait()
@@ -43,12 +43,12 @@ func TestVerifyIdentityGraph(t *testing.T) {
 // per-claim signature check passes across the closure.
 func TestVerifySignedGraph(t *testing.T) {
 	alice, alicePriv := newSignedContributor(t)
-	g := NewGraph(alice)
+	g := newGraph(t, alice)
 	src, err := NewClaim(TypeSource("email"), alice).
 		WithInlineContent([]byte("From: alice\r\n\r\nhi")).
 		Sign(alicePriv)
 	require.NoError(t, err)
-	require.NoError(t, g.AddClaims(src))
+	require.NoError(t, g.AddClaims(context.Background(), src))
 
 	run := g.Verify()
 	run.Wait()
@@ -60,8 +60,8 @@ func TestVerifySignedGraph(t *testing.T) {
 // verified — here the root contributor plus the source.
 func TestVerifyCountsEveryClaim(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
-	require.NoError(t, g.AddClaims(srcClaim(t, root, "hello")))
+	g := newGraph(t, root)
+	require.NoError(t, g.AddClaims(context.Background(), srcClaim(t, root, "hello")))
 
 	run := g.Verify()
 	run.Wait()
@@ -74,13 +74,13 @@ func TestVerifyCountsEveryClaim(t *testing.T) {
 func chainGraph(t *testing.T) (Graph, Contributor, Claim, Claim, Claim) {
 	t.Helper()
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	a := srcClaim(t, root, "a")
-	require.NoError(t, g.AddClaims(a))
+	require.NoError(t, g.AddClaims(context.Background(), a))
 	b := entityClaim(t, root, "person", "b", a)
-	require.NoError(t, g.AddClaims(b))
+	require.NoError(t, g.AddClaims(context.Background(), b))
 	c := entityClaim(t, root, "object", "c", b)
-	require.NoError(t, g.AddClaims(c))
+	require.NoError(t, g.AddClaims(context.Background(), c))
 	return g, root, a, b, c
 }
 
@@ -152,13 +152,13 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 	root, err := rootClaim.AsContributor(context.Background(), nil)
 	require.NoError(t, err)
 
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	em, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("recent")).
 		WithCreatedAt(recent).
 		Sign()
 	require.NoError(t, err)
-	require.NoError(t, g.AddClaims(em))
+	require.NoError(t, g.AddClaims(context.Background(), em))
 
 	full := g.Verify()
 	full.Wait()
@@ -177,9 +177,9 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 // the offending id.
 func TestVerifyWithOnError(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	bad := srcClaim(t, root, "will be corrupted")
-	require.NoError(t, g.AddClaims(bad))
+	require.NoError(t, g.AddClaims(context.Background(), bad))
 	corruptNode(t, bad)
 
 	var seen []Failure
@@ -203,12 +203,12 @@ func TestVerifyWithOnError(t *testing.T) {
 // so no more than that many failures are recorded.
 func TestVerifyWithStopAfter(t *testing.T) {
 	root := contributor(t)
-	g := NewGraph(root)
+	g := newGraph(t, root)
 	em := srcClaim(t, root, "seed")
-	require.NoError(t, g.AddClaims(em))
+	require.NoError(t, g.AddClaims(context.Background(), em))
 	e1 := entityClaim(t, root, "person", "a", em)
 	e2 := entityClaim(t, root, "object", "b", em)
-	require.NoError(t, g.AddClaims(e1, e2))
+	require.NoError(t, g.AddClaims(context.Background(), e1, e2))
 	corruptNode(t, e1) // both open heads fail
 	corruptNode(t, e2)
 
@@ -225,7 +225,7 @@ func TestVerifyWithStopAfter(t *testing.T) {
 // external blob passes the default walk but fails when external content is on.
 func TestVerifyExternalContentToggle(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 
 	realBlob := []byte("the real external payload bytes")
@@ -236,7 +236,7 @@ func TestVerifyExternalContentToggle(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 	bth := branchTable(t, root, branchEdge(t, "main", ext.ID()))
-	u.put(root, ext, bth)
+	putClaims(t, u, root, ext, bth)
 
 	// Store a CORRUPT blob under the hash — same length, one byte flipped.
 	corruptBlob := make([]byte, len(realBlob))
@@ -265,11 +265,11 @@ func TestVerifyExternalContentToggle(t *testing.T) {
 // TestVerifyBranch: a branch verifies its subgraph from its head claim.
 func TestVerifyBranch(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
 	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
-	u.put(root, em, bth)
+	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)

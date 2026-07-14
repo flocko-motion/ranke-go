@@ -1,7 +1,6 @@
 package ranke
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"testing"
@@ -16,129 +15,12 @@ import (
 // scope. These pin claim reads, content reads (inline + external), and
 // branch-table materialisation including the contribution/diff chain.
 
-// mapUniverse is a minimal, in-memory Universe for archive read-tests that
-// behaves like a real backend at the seam that matters: it stores
-// SERIALIZED claim bytes (Claim.Encode) under the claim id and content
-// bytes under the content hash — 𝒰's two non-colliding key spaces (§4.5) —
-// and decodes (DecodeClaim) on read. So reads exercise the real codec, not
-// live objects the way a shortcut double would. It implements only what
-// Archive reads need (claim + content get, a closure walk over edges); the
-// embedded Universe is nil, so anything else panics. A real adapter can't
-// be imported here (cycle); adapter integration proper is matrixed in tests/.
-type mapUniverse struct {
-	Universe
-	claims  map[string][]byte // id → serialized claim (Claim.Encode)
-	content map[string][]byte // content hash → bytes
-}
-
-func newMapUniverse() *mapUniverse {
-	return &mapUniverse{claims: map[string][]byte{}, content: map[string][]byte{}}
-}
-
-// PutClaims serializes and stores claims (Claim.Encode), as a byte-store
-// backend does. put is a variadic test convenience over it.
-func (u *mapUniverse) PutClaims(_ context.Context, cs []Claim) error {
-	for _, c := range cs {
-		b, err := c.Encode()
-		if err != nil {
-			return err
-		}
-		u.claims[c.ID().String()] = b
-	}
-	return nil
-}
-
-func (u *mapUniverse) put(claims ...Claim) {
-	if err := u.PutClaims(context.Background(), claims); err != nil {
-		panic("mapUniverse.put: " + err.Error())
-	}
-}
-
-func (u *mapUniverse) HasClaims(_ context.Context, ids []Id) ([]bool, error) {
-	out := make([]bool, len(ids))
-	for i, id := range ids {
-		_, out[i] = u.claims[id.String()]
-	}
-	return out, nil
-}
-
-// get decodes the stored claim at id.
-func (u *mapUniverse) get(id Id) (Claim, bool) {
-	b, ok := u.claims[id.String()]
-	if !ok {
-		return nil, false
-	}
-	c, err := DecodeClaim(id, b)
-	if err != nil {
-		return nil, false
-	}
-	return c, true
-}
-
-func (u *mapUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
-	out := make([]Claim, len(ids))
-	for i, id := range ids {
-		c, ok := u.get(id)
-		if !ok {
-			return nil, ErrNotFound
-		}
-		out[i] = c
-	}
-	// Faithful byte-store behaviour: materialise diff overlays on read
-	// (via the ADT's default) unless the caller wants the raw delta.
-	if !newGetConfig(opts...).rawDelta {
-		if _, err := DefaultMaterialize(ctx, u, out); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-// InClosure / GetFromClosure delegate to the ADT's default edge-walk — the
-// fallback a byte-store Universe uses — instead of a hand-rolled traversal.
-// So every archive/branch read in these tests exercises DefaultInClosure /
-// DefaultGetFromClosure (and, through them, DefaultMaterialize).
-func (u *mapUniverse) InClosure(ctx context.Context, head, id Id) (bool, error) {
-	return DefaultInClosure(ctx, u, head, id)
-}
-
-func (u *mapUniverse) GetFromClosure(ctx context.Context, head, id Id) (Claim, error) {
-	return DefaultGetFromClosure(ctx, u, head, id)
-}
-
-func (u *mapUniverse) PutContents(_ context.Context, blobs []ContentBlob) error {
-	for _, b := range blobs {
-		u.content[b.Hash.String()] = b.Content
-	}
-	return nil
-}
-
-func (u *mapUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {
-	out := make([][]byte, len(refs))
-	for i, r := range refs {
-		b, ok := u.content[r.Hash.String()]
-		if !ok {
-			return nil, ErrNotFound
-		}
-		out[i] = b
-	}
-	return out, nil
-}
-
-func (u *mapUniverse) HasContents(_ context.Context, hashes []Id) ([]bool, error) {
-	out := make([]bool, len(hashes))
-	for i, h := range hashes {
-		_, out[i] = u.content[h.String()]
-	}
-	return out, nil
-}
-
-func (u *mapUniverse) StreamContent(_ context.Context, hash Id, _ uint64) (io.ReadCloser, error) {
-	b, ok := u.content[hash.String()]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	return io.NopCloser(bytes.NewReader(b)), nil
+// putClaims stores cs in u, failing the test on error — the variadic test
+// convenience the reference Universe (ranke.NewMemoryUniverse) lacks. Archive
+// and closure read-tests build a claim set, put it, then read RA_k back.
+func putClaims(t *testing.T, u Universe, cs ...Claim) {
+	t.Helper()
+	require.NoError(t, u.PutClaims(context.Background(), cs))
 }
 
 // branchEdge builds a contribution/branch edge naming a branch and pointing
@@ -167,9 +49,9 @@ func branchTable(t *testing.T, root Contributor, edges ...Edge) Claim {
 
 func TestNewArchiveValidation(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
-	u.put(root)
+	putClaims(t, u, root)
 
 	_, err := NewArchive(ctx, nil, root.ID())
 	require.Error(t, err, "nil Universe rejected")
@@ -185,11 +67,11 @@ func TestNewArchiveValidation(t *testing.T) {
 
 func TestArchiveClaimAndContentReads(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "the body")
 	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
-	u.put(root, em, bth)
+	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
@@ -221,7 +103,7 @@ func TestArchiveClaimAndContentReads(t *testing.T) {
 
 func TestArchiveExternalContentRead(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 
 	blob := []byte("external archive payload")
@@ -231,7 +113,7 @@ func TestArchiveExternalContentRead(t *testing.T) {
 	require.NoError(t, err)
 
 	bth := branchTable(t, root, branchEdge(t, "main", ext.ID()))
-	u.put(root, ext, bth)
+	putClaims(t, u, root, ext, bth)
 	require.NoError(t, u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: blob}}))
 
 	arc, err := NewArchive(ctx, u, bth.ID())
@@ -252,7 +134,7 @@ func TestArchiveExternalContentRead(t *testing.T) {
 // fields AND its content. WithNotDiffMaterialized returns the bare delta.
 func TestArchiveMaterializesDiff(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 
 	base, err := NewClaim(TypeSource("note"), root).
@@ -268,7 +150,17 @@ func TestArchiveMaterializesDiff(t *testing.T) {
 	require.NoError(t, err)
 
 	bth := branchTable(t, root, branchEdge(t, "main", delta.ID()))
-	u.put(root, base, delta, bth)
+	putClaims(t, u, root, base, delta, bth)
+
+	// The stored delta itself carries neither the inherited field nor the base
+	// content — that's the space saving. Assert this BEFORE any materialised
+	// read: the reference Universe holds live claims and materialises in place,
+	// so a materialised read would stickily mutate this very object.
+	raw, err := u.GetClaims(ctx, []Id{delta.ID()}, WithNotDiffMaterialized())
+	require.NoError(t, err)
+	_, err = raw[0].Node().GetField("author")
+	require.Error(t, err, "the raw delta does not carry the inherited field")
+
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
 
@@ -286,23 +178,17 @@ func TestArchiveMaterializesDiff(t *testing.T) {
 	b, err := io.ReadAll(r)
 	require.NoError(t, err)
 	require.Equal(t, []byte("the full base content"), b, "content inherited from the predecessor")
-
-	// The stored delta itself carries neither — that's the space saving.
-	raw, err := u.GetClaims(ctx, []Id{delta.ID()}, WithNotDiffMaterialized())
-	require.NoError(t, err)
-	_, err = raw[0].Node().GetField("author")
-	require.Error(t, err, "the raw delta does not carry the inherited field")
 }
 
 // --- branch reads -------------------------------------------------------
 
 func TestArchiveBranchReads(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
 	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
-	u.put(root, em, bth)
+	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
@@ -333,7 +219,7 @@ func TestArchiveBranchReads(t *testing.T) {
 // the materialisation the Archive performs newest-over-oldest.
 func TestArchiveBranchDiffChain(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	emMain := srcClaim(t, root, "main head")
 	emDev := srcClaim(t, root, "dev head")
@@ -347,7 +233,7 @@ func TestArchiveBranchDiffChain(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	u.put(root, emMain, emDev, table1, table2)
+	putClaims(t, u, root, emMain, emDev, table1, table2)
 
 	arc, err := NewArchive(ctx, u, table2.ID())
 	require.NoError(t, err)

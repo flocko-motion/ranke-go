@@ -83,7 +83,7 @@ func (a *archive) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
 		return false, errNilID
 	}
-	return a.u.InClosure(ctx, a.bth.ID(), id)
+	return a.u.InClosure(ctx, []Id{a.bth.ID()}, id)
 }
 
 func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {

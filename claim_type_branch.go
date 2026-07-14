@@ -63,7 +63,7 @@ func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
 		return false, errNilID
 	}
-	return b.u.InClosure(ctx, b.Reference(), id)
+	return b.u.InClosure(ctx, []Id{b.Reference()}, id)
 }
 
 func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {

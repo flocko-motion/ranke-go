@@ -50,11 +50,9 @@ var (
 	errTwoDiffEdges             = errors.New("ranke.NewClaim: a claim may carry only one contribution/diff edge")
 
 	// --- Graph ---
-	errNilClaim            = errors.New("ranke: nil claim")
-	errRootOnlyNoEdges     = errors.New("ranke: only the root contribution/contributor (set at NewGraph) may have no edges")
-	errEmptyGraph          = errors.New("ranke.Graph.Consolidate: empty graph")
-	errAlreadyConsolidated = errors.New("ranke.Graph.Consolidate: graph is already consolidated")
-	errNoContributorEdge   = errors.New("ranke: non-initial claim missing contribution/contributor edge")
+	errNilClaim          = errors.New("ranke: nil claim")
+	errEmptyGraph        = errors.New("ranke.Graph.Consolidate: empty graph")
+	errNoContributorEdge = errors.New("ranke: non-initial claim missing contribution/contributor edge")
 
 	// --- Sign ---
 	errIdentitySignMismatch = errors.New("ranke.verifySignature: identity Sign mismatch (hash ≠ id)")
@@ -82,8 +80,6 @@ var (
 	errRelationDirNonRel     = errors.New("ranke.NewEdge: RelationDirection must be 0 for non-relation edges")
 	errBuildGraph            = errors.New("ranke.NewGraphFromClosure")
 	errGraphAddClaim         = errors.New("ranke.Graph.AddClaims")
-	errUnknownRefClaim       = errors.New("ranke.Graph: edge references unknown claim (atomic creation rule §4.3)")
-	errRefMissingClaim       = errors.New("ranke.Graph: edge references missing claim")
 	errConsolidate           = errors.New("ranke.Graph.Consolidate")
 	errCopyClaims            = errors.New("ranke.CopyClaims")
 	errCopyContents          = errors.New("ranke.CopyContents")

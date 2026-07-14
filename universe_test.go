@@ -37,7 +37,7 @@ func TestNewCopyConfigOptions(t *testing.T) {
 // reads back, an absent id is absent and errors ErrNotFound.
 func TestUniverseClaimWrappers(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "hello")
 
@@ -65,7 +65,7 @@ func TestUniverseClaimWrappers(t *testing.T) {
 // GetContent helpers delegate to the bulk interface.
 func TestUniverseContentWrappers(t *testing.T) {
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	blob := []byte("some content bytes")
 	hash, err := HashContent(blob)
 	require.NoError(t, err)

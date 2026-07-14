@@ -128,8 +128,8 @@ func (u *memoryUniverse) StreamContent(ctx context.Context, hash Id, size uint64
 	return io.NopCloser(bytes.NewReader(bs[0])), nil
 }
 
-func (u *memoryUniverse) InClosure(ctx context.Context, head, id Id) (bool, error) {
-	return DefaultInClosure(ctx, u, head, id)
+func (u *memoryUniverse) InClosure(ctx context.Context, heads []Id, id Id) (bool, error) {
+	return DefaultInClosure(ctx, u, heads, id)
 }
 
 func (u *memoryUniverse) GetFromClosure(ctx context.Context, head, id Id) (Claim, error) {

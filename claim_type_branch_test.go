@@ -37,7 +37,7 @@ func revision(t *testing.T, root Contributor, name string) (v1, v2 Claim) {
 func newBranchFixture(t *testing.T) branchFixture {
 	t.Helper()
 	ctx := context.Background()
-	u := newMapUniverse()
+	u := NewMemoryUniverse()
 	root := contributor(t)
 	mainV1, mainV2 := revision(t, root, "main")
 	devV1, devV2 := revision(t, root, "dev")
@@ -45,7 +45,7 @@ func newBranchFixture(t *testing.T) branchFixture {
 		branchEdge(t, "main", mainV2.ID()),
 		branchEdge(t, "dev", devV2.ID()),
 	)
-	u.put(root, mainV1, mainV2, devV1, devV2, bth)
+	putClaims(t, u, root, mainV1, mainV2, devV1, devV2, bth)
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
 	return branchFixture{ctx, arc, mainV1, mainV2, devV1, devV2}

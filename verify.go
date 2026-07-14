@@ -162,9 +162,8 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 // runVerification walks the closure from roots in the background, verifying
 // each claim (§5.10), and returns a live handle. Everything comes from the
 // one Universe u: claims via GetClaim, content via the node (inline) or
-// GetContents/StreamContent (external). An in-memory Graph verifies against a
-// read-only Universe view of itself (graphUniverse). rootCheck, if set,
-// validates each depth-0 root (e.g. an Archive requires a branch-table head).
+// GetContents/StreamContent (external). rootCheck, if set, validates each
+// depth-0 root (e.g. an Archive requires a branch-table head).
 func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyConfig, rootCheck func(Claim) error) *verificationRun {
 	run := newRun()
 	go func() {
@@ -369,20 +368,20 @@ func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig,
 
 // --- entry points ---
 
-// Verify walks this in-memory graph from every open head and verifies each
-// claim (§5.10, inline content). External content is not available to an
-// in-memory graph.
+// Verify walks this graph's closure from every open head and verifies each
+// claim (§5.10) against the graph's Universe.
 func (g *graph) Verify(opts ...VerifyOption) VerificationRun {
 	cfg := newVerifyConfig(opts...)
-	return runVerification(context.Background(), g.Heads(), graphUniverse{g}, cfg, nil)
+	return runVerification(context.Background(), g.Heads(), g.u, cfg, nil)
 }
 
 // Verify walks the archive's closure from its head and verifies each claim.
 // It requires the head to be a contribution/branches claim (a branch table).
 func (a *archive) Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error) {
 	cfg := newVerifyConfig(opts...)
-	rootCheck := func(c *claim) error {
-		if c.node.typeClass == NodeClassContribution && c.node.typeSub == string(NodeSubtypeBranches) {
+	rootCheck := func(c Claim) error {
+		n := c.Node()
+		if n.TypeClass() == NodeClassContribution && n.TypeSub() == string(NodeSubtypeBranches) {
 			return nil
 		}
 		return errNotBranchTable
@@ -394,5 +393,5 @@ func (a *archive) Verify(ctx context.Context, opts ...VerifyOption) (Verificatio
 // each claim.
 func (b *branch) Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error) {
 	cfg := newVerifyConfig(opts...)
-	return runVerification(ctx, []Id{b.Reference()}, universeFetch(b.u), b.u, cfg, nil), nil
+	return runVerification(ctx, []Id{b.Reference()}, b.u, cfg, nil), nil
 }

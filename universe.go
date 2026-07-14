@@ -88,13 +88,15 @@ type Universe interface {
 	// of GetContents for large content. Inherently singular.
 	StreamContent(ctx context.Context, hash Id, size uint64) (io.ReadCloser, error)
 
-	// InClosure reports whether id is in the closure of head — head and
-	// every claim reachable from it by following edges. Closure traversal
-	// is engine-dependent (a graph-native backend answers with one query;
-	// a plain byte store walks the edges), so it lives on the Universe
-	// port. Byte-store backends delegate to DefaultInClosure (a simple
-	// reference edge walk); graph-native backends push the query down.
-	InClosure(ctx context.Context, head, id Id) (bool, error)
+	// InClosure reports whether id is in the closure of any of heads — the
+	// heads and every claim reachable from them by following edges. Multiple
+	// heads answer a multi-headed graph's membership in one call. Closure
+	// traversal is engine-dependent (a graph-native backend answers with one
+	// query over all heads; a plain byte store walks the edges from every
+	// head, sharing one visited set), so it lives on the Universe port —
+	// exactly the kind of thing a backend optimises. Byte-store backends
+	// delegate to DefaultInClosure.
+	InClosure(ctx context.Context, heads []Id, id Id) (bool, error)
 	// GetFromClosure returns the claim at id, but only if it is in head's
 	// closure; ErrNotFound otherwise. Engine-dependent, like InClosure —
 	// byte stores delegate to DefaultGetFromClosure.
