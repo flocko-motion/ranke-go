@@ -197,9 +197,11 @@ type CopyProgress struct {
 	DiscoveryComplete bool
 }
 
-// GetClaim is the single-item form of Universe.GetClaims.
-func GetClaim(ctx context.Context, u Universe, id Id) (Claim, error) {
-	cs, err := u.GetClaims(ctx, []Id{id})
+// GetClaim is the single-item form of Universe.GetClaims. Materialisation
+// is the Universe's job (diff-materialised by default; pass
+// WithNotDiffMaterialized for the stored delta), so this just delegates.
+func GetClaim(ctx context.Context, u Universe, id Id, opts ...GetOption) (Claim, error) {
+	cs, err := u.GetClaims(ctx, []Id{id}, opts...)
 	if err != nil {
 		return nil, err
 	}

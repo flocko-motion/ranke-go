@@ -67,7 +67,7 @@ func readContent(t *testing.T, n Node, u Universe) []byte {
 // TestNodeInlineContent: inline content is held on the node, addressed by
 // its own hash, with the byte length recorded — reachable without a Universe.
 func TestNodeInlineContent(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	body := []byte("From: alice\r\n\r\nI like apples.")
 	c, err := NewClaim(TypeSource("email"), alice).WithInlineContent(body).Sign()
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestNodeInlineContent(t *testing.T) {
 // live in the Universe. GetInlineContent errors, GetContent with a nil
 // Universe errors, and GetContent with the Universe streams the bytes.
 func TestNodeExternalContent(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	blob := []byte("a large external payload kept out of the node")
 	hash, err := hashContent(blob)
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestNodeExternalContent(t *testing.T) {
 // TestNodeContentXOR: a node's inline content and external hash are mutually
 // exclusive (§4.4) — supplying both is rejected at build time.
 func TestNodeContentXOR(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	hash, err := hashContent([]byte("bytes"))
 	require.NoError(t, err)
 

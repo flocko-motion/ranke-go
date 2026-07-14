@@ -46,12 +46,6 @@ type Node interface {
 	HasField(name string) bool
 	GetField(name string) (string, error)
 	Fields() []string
-	// Pubkey returns the multikey-encoded public key on this node
-	// (§5.7). Non-empty only on signed contributor claims.
-	Pubkey() []byte
-	// Title is the node's optional short text label, or "" if unset.
-	// Omitted from the canonical encoding when empty.
-	Title() string
 	ID() Id
 }
 
@@ -63,15 +57,57 @@ type node struct {
 	typeSub       string
 	encodingClass EncodingClass
 	encodingSub   string
-	title         string
 	contentHash   Id     // nil when no content
 	content       []byte // raw content bytes, kept with the node
 	contentSize   uint64 // = len(content); paired with contentHash to defend against truncation/extension
 	createdAt     time.Time
 	edges         []Id // edge ids, sorted canonically
 	fields        map[string]string
-	pubkey        []byte // multikey-encoded pubkey on contributor nodes (§5.7); empty otherwise
-	id            Id     // = Sign(H(S(node))); also the claim id
+	id            Id // = Sign(H(S(node))); also the claim id
+
+	// Diff materialisation (set by the loader when the owning claim is a
+	// contribution/diff overlay): diffNode is the materialised predecessor
+	// node; diffFields is the merged field map (diffNode's fields, minus
+	// fields_diff_omit, overlaid with self's), computed once at load. The
+	// delta (fields, contentHash, edges) is left untouched so id/Encode
+	// stay the claim's own bytes.
+	diffNode   *node
+	diffFields map[string]string
+}
+
+// fieldMap is the effective field set: the delta for a plain node, the
+// merged map for a diff node.
+func (n *node) fieldMap() map[string]string {
+	if n.diffNode == nil {
+		return n.fields
+	}
+	return n.diffFields
+}
+
+// computeDiffFields builds diffFields (inherit diffNode → drop
+// fields_diff_omit → overlay self). Called once at materialisation.
+func (n *node) computeDiffFields() {
+	m := make(map[string]string, len(n.diffNode.fieldMap())+len(n.fields))
+	for k, v := range n.diffNode.fieldMap() {
+		m[k] = v
+	}
+	for name := range splitLines(n.fields[FieldFieldsDiffOmit]) {
+		delete(m, name)
+	}
+	for k, v := range n.fields {
+		m[k] = v
+	}
+	n.diffFields = m
+}
+
+// contentSource is the node that supplies this node's content: self if it
+// sets its own content, else the diff predecessor's source (content is
+// inherited unless a diff restates it).
+func (n *node) contentSource() *node {
+	if n.contentHash != nil || n.diffNode == nil {
+		return n
+	}
+	return n.diffNode.contentSource()
 }
 
 // node accessor methods. Construction lives in claim.go (the node is
@@ -85,19 +121,23 @@ func (n *node) TypeClass() NodeClass { return n.typeClass }
 func (n *node) TypeSub() string      { return n.typeSub }
 
 func (n *node) Encoding() string {
-	if n.encodingClass == "" && n.encodingSub == "" {
+	cs := n.contentSource()
+	if cs.encodingClass == "" && cs.encodingSub == "" {
 		return ""
 	}
-	return string(n.encodingClass) + "/" + n.encodingSub
+	return string(cs.encodingClass) + "/" + cs.encodingSub
 }
-func (n *node) EncodingClass() EncodingClass { return n.encodingClass }
-func (n *node) EncodingSub() string          { return n.encodingSub }
+func (n *node) EncodingClass() EncodingClass { return n.contentSource().encodingClass }
+func (n *node) EncodingSub() string          { return n.contentSource().encodingSub }
 
-func (n *node) IsContentExternal() bool { return n.content == nil && n.contentHash != nil }
-func (n *node) GetContentHash() Id      { return n.contentHash }
-func (n *node) GetContentSize() uint64  { return n.contentSize }
-func (n *node) CreatedAt() time.Time    { return n.createdAt }
-func (n *node) ID() Id                  { return n.id }
+func (n *node) IsContentExternal() bool {
+	cs := n.contentSource()
+	return cs.content == nil && cs.contentHash != nil
+}
+func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
+func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
+func (n *node) CreatedAt() time.Time   { return n.createdAt }
+func (n *node) ID() Id                 { return n.id }
 
 func (n *node) Edges() []Id {
 	out := make([]Id, len(n.edges))
@@ -106,32 +146,34 @@ func (n *node) Edges() []Id {
 }
 
 func (n *node) GetInlineContent() ([]byte, error) {
-	if n.IsContentExternal() {
+	cs := n.contentSource()
+	if cs.content == nil && cs.contentHash != nil {
 		return nil, errContentExternal
 	}
-	return n.content, nil
+	return cs.content, nil
 }
 
 func (n *node) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
-	if n.contentHash == nil {
+	cs := n.contentSource()
+	if cs.contentHash == nil {
 		return bytes.NewReader(nil), nil // no content — empty reader
 	}
-	if n.content != nil {
-		return bytes.NewReader(n.content), nil // inline
+	if cs.content != nil {
+		return bytes.NewReader(cs.content), nil // inline
 	}
 	if u == nil {
 		return nil, errNoUniverseForContent
 	}
-	return u.StreamContent(ctx, n.contentHash, n.contentSize)
+	return u.StreamContent(ctx, cs.contentHash, cs.contentSize)
 }
 
 func (n *node) HasField(name string) bool {
-	_, ok := n.fields[name]
+	_, ok := n.fieldMap()[name]
 	return ok
 }
 
 func (n *node) GetField(name string) (string, error) {
-	v, ok := n.fields[name]
+	v, ok := n.fieldMap()[name]
 	if !ok {
 		return "", withDetail(errFieldNotSet, name)
 	}
@@ -139,71 +181,43 @@ func (n *node) GetField(name string) (string, error) {
 }
 
 func (n *node) Fields() []string {
-	names := make([]string, 0, len(n.fields))
-	for k := range n.fields {
+	m := n.fieldMap()
+	names := make([]string, 0, len(m))
+	for k := range m {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	return names
 }
 
-func (n *node) Pubkey() []byte {
-	if len(n.pubkey) == 0 {
-		return nil
-	}
-	out := make([]byte, len(n.pubkey))
-	copy(out, n.pubkey)
-	return out
-}
-
-func (n *node) Title() string { return n.title }
-
 // EncodingApplication returns the "application/<sub>" media type.
-//
-//deadcode:keep
 func EncodingApplication(sub string) string { return encType(encApplication, sub) }
 
 // EncodingAudio returns the "audio/<sub>" media type.
-//
-//deadcode:keep
 func EncodingAudio(sub string) string { return encType(encAudio, sub) }
 
 // EncodingExample returns the "example/<sub>" media type.
-//
-//deadcode:keep
 func EncodingExample(sub string) string { return encType(encExample, sub) }
 
 // EncodingFont returns the "font/<sub>" media type.
-//
-//deadcode:keep
 func EncodingFont(sub string) string { return encType(encFont, sub) }
 
 // EncodingImage returns the "image/<sub>" media type.
-//
-//deadcode:keep
 func EncodingImage(sub string) string { return encType(encImage, sub) }
 
 // EncodingMessage returns the "message/<sub>" media type.
 func EncodingMessage(sub string) string { return encType(encMessage, sub) }
 
 // EncodingModel returns the "model/<sub>" media type.
-//
-//deadcode:keep
 func EncodingModel(sub string) string { return encType(encModel, sub) }
 
 // EncodingMultipart returns the "multipart/<sub>" media type.
-//
-//deadcode:keep
 func EncodingMultipart(sub string) string { return encType(encMultipart, sub) }
 
 // EncodingText returns the "text/<sub>" media type.
-//
-//deadcode:keep
 func EncodingText(sub string) string { return encType(encText, sub) }
 
 // EncodingVideo returns the "video/<sub>" media type.
-//
-//deadcode:keep
 func EncodingVideo(sub string) string { return encType(encVideo, sub) }
 
 func encType(class EncodingClass, sub string) string { return string(class) + "/" + sub }

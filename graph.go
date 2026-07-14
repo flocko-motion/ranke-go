@@ -1,7 +1,7 @@
 // package: ranke / graph
 // type:    logic
-// job:     in-memory Ranke-Graph (RG ⊆ 𝒰) — adds claims under the atomic-creation rule, tracks heads, consolidates, and validates closures
-// limits:  does not persist claims (-> universe); does not bind graphs to branches (-> archive)
+// job:     in-memory Ranke-Graph (RG ⊆ 𝒰) — adds claims under the atomic-creation rule, tracks heads, consolidates
+// limits:  does not persist claims (-> universe); does not bind graphs to branches (-> archive); verification lives in verify.go
 package ranke
 
 import (
