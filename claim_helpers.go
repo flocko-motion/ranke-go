@@ -144,16 +144,13 @@ func hasDerivationEdge(edges []*edge) bool {
 	return false
 }
 
-// asConcreteEdge unwraps an Edge into the concrete *edge type.
+// asConcreteEdge unwraps an Edge into the concrete *edge. Edge is sealed, so
+// this cannot fail on a foreign type — only nil is rejected.
 func asConcreteEdge(e Edge) (*edge, error) {
 	if e == nil {
 		return nil, errNilEdge
 	}
-	ce, ok := e.(*edge)
-	if !ok {
-		return nil, errForeignEdge
-	}
-	return ce, nil
+	return e.unwrap(), nil
 }
 
 // buildContributorEdge constructs the contribution/contributor edge that
@@ -162,13 +159,9 @@ func buildContributorEdge(c Contributor) (*edge, error) {
 	if c == nil {
 		return nil, errNilContributor
 	}
-	e, err := NewEdge(EdgeConfig{
+	return newEdge(EdgeConfig{
 		Reference: c.ID(),
 		TypeClass: EdgeClassContribution,
 		TypeSub:   "contributor",
 	})
-	if err != nil {
-		return nil, err
-	}
-	return e.(*edge), nil
 }

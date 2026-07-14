@@ -22,6 +22,10 @@ type Id interface {
 	// Algorithm names the scheme that built this id, e.g. "sha2-256"
 	// or "ed25519-pub".
 	Algorithm() string
+	// rawBytes returns the self-describing payload. Being unexported, it
+	// seals Id: only this package's *id can satisfy the interface (no
+	// foreign Id), and the canonical encoder reads the bytes without a cast.
+	rawBytes() []byte
 }
 
 // id is the concrete Id: a self-describing payload (multihash for
@@ -79,15 +83,19 @@ func ParseId(s string) (Id, error) {
 
 func (h *id) String() string { return h.str }
 
-// Equal compares by raw payload when both sides are *id, else by string.
+func (h *id) rawBytes() []byte {
+	if h == nil {
+		return nil
+	}
+	return h.raw
+}
+
+// Equal compares by raw payload.
 func (h *id) Equal(other Id) bool {
 	if h == nil || other == nil {
 		return h == nil && other == nil
 	}
-	if o, ok := other.(*id); ok {
-		return bytes.Equal(h.raw, o.raw)
-	}
-	return h.str == other.String()
+	return bytes.Equal(h.raw, other.rawBytes())
 }
 
 // Algorithm reads the leading multicodec varint to name the scheme

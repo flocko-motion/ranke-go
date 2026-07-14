@@ -115,14 +115,6 @@ func assertEdgeEqual(t *testing.T, want, got Edge) {
 	require.True(t, want.ID().Equal(got.ID()), "edge id")
 }
 
-// contentCarrier is the content surface common to Node and Edge (§4.4).
-type contentCarrier interface {
-	IsContentExternal() bool
-	GetContentHash() Id
-	GetContentSize() uint64
-	GetInlineContent() ([]byte, error)
-}
-
 // assertContentEqual checks the inline/external content rule survives: the
 // external flag, the content hash, the byte length, and — when inline —
 // the bytes themselves.

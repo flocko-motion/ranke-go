@@ -43,6 +43,12 @@ type Edge interface {
 	GetField(name string) (string, error)
 	Fields() []string
 	ID() Id
+
+	// unwrap returns the concrete *edge. Being unexported, it seals Edge:
+	// only this package's *edge can satisfy the interface, so a "foreign
+	// edge" is unrepresentable and internal code reaches the concrete type
+	// without a type assertion.
+	unwrap() *edge
 }
 
 // EdgeConfig is the data-only input to NewEdge.
@@ -81,10 +87,18 @@ type edge struct {
 	id                Id // = H(S(edge))
 }
 
-// NewEdge constructs an Edge from the given config (paper §4.2). Validates
-// type and relation_direction consistency, resolves inline vs external
-// content, and computes the edge's id as H(canonical(edge)).
+// NewEdge constructs an Edge from cfg (§4.2) — the public wrapper over the
+// internal newEdge, which yields the concrete type.
 func NewEdge(cfg EdgeConfig) (Edge, error) {
+	return newEdge(cfg)
+}
+
+// newEdge is the concrete constructor. It validates type and
+// relation_direction consistency, resolves inline vs external content, and
+// computes the edge's id as H(canonical(edge)). NewEdge wraps it for callers
+// that want the Edge interface; in-package callers use it directly to get the
+// plain *edge without a cast.
+func newEdge(cfg EdgeConfig) (*edge, error) {
 	if cfg.Reference == nil {
 		return nil, errEdgeRefRequired
 	}
@@ -196,6 +210,7 @@ func (e *edge) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
 
 func (e *edge) RelationDirection() RelationDirection { return e.relationDirection }
 func (e *edge) ID() Id                               { return e.id }
+func (e *edge) unwrap() *edge                        { return e }
 
 func (e *edge) HasField(name string) bool {
 	_, ok := e.fields[name]

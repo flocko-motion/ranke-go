@@ -33,11 +33,26 @@ type Claim interface {
 	// signs subsequent claims attributed to it automatically.
 	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
-	// Encode returns the claim's canonical CBOR serialization — the
-	// same bytes its id is derived from, storage-agnostic. Inverse of
-	// the package-level DecodeClaim. Persistence adapters use it to
-	// store a claim as opaque bytes.
+	// Encode returns the claim's canonical CBOR serialization — the whole
+	// storage record (node + edge bodies + any inline content), storage-
+	// agnostic. Inverse of the package-level DecodeClaim; persistence
+	// adapters use it to store a claim as opaque bytes. Note this is a
+	// superset of the id preimage S(node) (which is node fields + edge ids
+	// only), so it is not itself what the id is signed over.
 	Encode() ([]byte, error)
+	// verifyID recomputes H(S(node)) and checks that the claim's id is a
+	// valid signature over it by pubkey (§5.2 integrity + §5.7
+	// authenticity). It is unexported on purpose: recomputing the id needs
+	// the node's canonical id-preimage encoding, a core-type crypto step no
+	// caller should hand-roll — and its presence seals Claim, so only this
+	// package's claims can be Claims.
+	verifyID(pubkey []byte) error
+	// unwrap returns the underlying concrete *claim, peeling any wrapper
+	// (e.g. *signedContributor). Unexported — it seals Claim alongside
+	// verifyID, and lets in-package machinery that builds or materialises
+	// claims reach the concrete type without a cast. The verifier does not
+	// use it; it works through the interface + verifyID.
+	unwrap() *claim
 }
 
 type claim struct {
@@ -55,8 +70,9 @@ type claim struct {
 	diffEdges []*edge
 }
 
-func (c *claim) Node() Node { return c.node }
-func (c *claim) ID() Id     { return c.node.id }
+func (c *claim) Node() Node     { return c.node }
+func (c *claim) ID() Id         { return c.node.id }
+func (c *claim) unwrap() *claim { return c }
 
 // effectiveEdges is the edge set reads see: the delta for a plain claim,
 // the materialised overlay for a diff claim.

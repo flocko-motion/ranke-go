@@ -108,18 +108,22 @@ func TestIdEqualNil(t *testing.T) {
 	require.False(t, id.Equal(nil), "a real id does not equal nil")
 }
 
-// TestIdEqualForeignImplementation: Equal falls back to string comparison
-// for a non-*id Id, so ids compare correctly across implementations.
-func TestIdEqualForeignImplementation(t *testing.T) {
-	real, err := HashContent([]byte("cross-impl"))
+// TestIdEqualCrossConstruction: an id built by hashing content equals the
+// same id reconstructed from its string form (ParseId) — the equality that
+// matters across implementations, since ids exchanged as strings must compare
+// equal to locally-computed ones. Id is sealed (unexported rawBytes), so both
+// sides are the package's *id, matched by raw payload not string form.
+func TestIdEqualCrossConstruction(t *testing.T) {
+	original, err := HashContent([]byte("cross-impl"))
 	require.NoError(t, err)
 
-	foreign := foreignId(real.String())
-	require.True(t, real.Equal(foreign), "same string form must compare equal")
+	reparsed, err := ParseId(original.String())
+	require.NoError(t, err)
+	require.True(t, original.Equal(reparsed), "hash and reparsed-from-string must compare equal")
 
 	other, err := HashContent([]byte("different"))
 	require.NoError(t, err)
-	require.False(t, other.Equal(foreign), "different content must not")
+	require.False(t, other.Equal(reparsed), "different content must not")
 }
 
 // --- Algorithm on non-hash payloads ------------------------------------
@@ -135,11 +139,3 @@ func TestAlgorithmNonMultihashPayload(t *testing.T) {
 	require.NotEqual(t, "unknown", id.Algorithm(),
 		"a known multicodec varint should be named, got %q", id.Algorithm())
 }
-
-// foreignId is a minimal Id implementation that is NOT the package's
-// concrete *id, used to exercise Equal's cross-implementation path.
-type foreignId string
-
-func (f foreignId) String() string    { return string(f) }
-func (f foreignId) Equal(o Id) bool   { return o != nil && o.String() == string(f) }
-func (f foreignId) Algorithm() string { return "foreign" }

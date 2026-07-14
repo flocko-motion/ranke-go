@@ -196,17 +196,7 @@ func idBytes(v Id) []byte {
 	if v == nil {
 		return nil
 	}
-	if h, ok := v.(*id); ok {
-		return h.raw
-	}
-	// Fallback: round-trip through ParseId on the string form. Only
-	// hit if a non-package Id implementation flows in, which we
-	// don't expect.
-	parsed, err := ParseId(v.String())
-	if err != nil {
-		return nil
-	}
-	return parsed.(*id).raw
+	return v.rawBytes()
 }
 
 // ─── Claim: the storage codec, built on the record shapes above ───────

@@ -136,11 +136,6 @@ func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	return b
 }
 
-// buildClaim constructs a Claim atomically per §4.3 from a fully
-// populated ClaimBuilder: validates type/encoding/content, enforces
-// the §3.5 provenance invariant, auto-builds the contribution/contributor
-// edge, sorts edges canonically, and computes the node id as
-// Sign(H(canonical(node))). The returned Claim is immutable.
 // buildClaim constructs a Claim atomically per §4.3. It reads as the
 // pipeline it is: resolve the type, content mode, and encoding; assemble and
 // validate the edge set (contributor, diff, invariants); build the node; then
@@ -288,7 +283,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	// A diff claim overlays a predecessor: add the naming contribution/diff
 	// edge. Materialisation of the delta happens at load time.
 	if cfg.DiffOf != nil {
-		de, err := NewEdge(EdgeConfig{
+		de, err := newEdge(EdgeConfig{
 			Reference: cfg.DiffOf,
 			TypeClass: EdgeClassContribution,
 			TypeSub:   string(EdgeSubtypeDiff),
@@ -296,7 +291,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 		if err != nil {
 			return nil, wrapDetail(errNewClaim, "diff edge", err)
 		}
-		edges = append(edges, de.(*edge))
+		edges = append(edges, de)
 		if err := checkDiffEdgeNames(edges); err != nil {
 			return nil, err
 		}

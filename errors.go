@@ -29,7 +29,6 @@ var (
 	errResolvedNoPubkey         = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
 	errResolvedNoKey            = errors.New("ranke: resolved contributor has a pubkey but no SigningKey was supplied")
 	errResolvedMismatch         = errors.New("ranke: SigningKey's public key does not match the resolved contributor pubkey")
-	errForeignClaim             = errors.New("ranke: claim from a foreign implementation")
 
 	// --- Node / content ---
 	errContentExternal      = errors.New("ranke: content is external — use GetContent with a Universe")
@@ -37,7 +36,6 @@ var (
 
 	// --- Edge ---
 	errNilEdge          = errors.New("ranke: nil edge")
-	errForeignEdge      = errors.New("ranke: edge from a foreign implementation")
 	errEdgeRefRequired  = errors.New("ranke.NewEdge: Reference is required")
 	errEdgeTypeRequired = errors.New("ranke.NewEdge: Type (or TypeClass + TypeSub) is required")
 	errEdgeContentXOR   = errors.New("ranke.NewEdge: inline and external content are mutually exclusive")
@@ -58,7 +56,6 @@ var (
 	errRootOnlyNoEdges     = errors.New("ranke: only the root contribution/contributor (set at NewGraph) may have no edges")
 	errEmptyGraph          = errors.New("ranke.Graph.Consolidate: empty graph")
 	errAlreadyConsolidated = errors.New("ranke.Graph.Consolidate: graph is already consolidated")
-	errForeignIdType       = errors.New("ranke: id not a concrete *id (foreign id type)")
 	errNoContributorEdge   = errors.New("ranke: non-initial claim missing contribution/contributor edge")
 
 	// --- Sign ---
