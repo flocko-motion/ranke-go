@@ -301,14 +301,14 @@ func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ran
 //
 // TODO: implement — delegate to the most capable layer (a graph engine
 // answers natively); otherwise fall through the layers like a read.
-func (s *stack) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+func (s *stack) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
 	panic("TODO: stack.InClosure not implemented")
 }
 
 // GetFromClosure returns the claim at id if it is in head's closure.
 //
 // TODO: implement — delegate to the layer that answers InClosure.
-func (s *stack) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+func (s *stack) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
 	panic("TODO: stack.GetFromClosure not implemented")
 }
 

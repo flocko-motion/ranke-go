@@ -203,7 +203,7 @@ func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs [
 // TODO: implement — a closure can span shards, so this cannot route by a
 // single id; it needs a traversal that resolves each referenced claim
 // through the partition. Likely delegates per-claim as the walk proceeds.
-func (p *partition) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+func (p *partition) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
 	panic("TODO: partition.InClosure not implemented")
 }
 
@@ -211,7 +211,7 @@ func (p *partition) InClosure(ctx context.Context, head, id ranke.Id) (bool, err
 //
 // TODO: implement — closure-membership check, then route the id to its
 // shard via the normal partition read.
-func (p *partition) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+func (p *partition) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
 	panic("TODO: partition.GetFromClosure not implemented")
 }
 

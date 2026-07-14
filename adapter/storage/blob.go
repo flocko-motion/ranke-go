@@ -218,7 +218,7 @@ func (u *blobUniverse) Capabilities() ranke.Capabilities {
 // TODO: implement — walk the edge closure from head over the blob store
 // (no graph engine here, so a manual traversal; a graph-native backend
 // would override with a query).
-func (u *blobUniverse) InClosure(ctx context.Context, head, id ranke.Id) (bool, error) {
+func (u *blobUniverse) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
 	panic("TODO: blobUniverse.InClosure not implemented")
 }
 
@@ -226,6 +226,6 @@ func (u *blobUniverse) InClosure(ctx context.Context, head, id ranke.Id) (bool, 
 //
 // TODO: implement — resolve id via GetClaims after confirming membership
 // with the closure walk.
-func (u *blobUniverse) GetFromClosure(ctx context.Context, head, id ranke.Id) (ranke.Claim, error) {
+func (u *blobUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
 	panic("TODO: blobUniverse.GetFromClosure not implemented")
 }
