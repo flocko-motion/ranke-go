@@ -103,6 +103,9 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	if !validEdgeClass(cfg.TypeClass) {
 		return nil, withDetail(errUnknownEdgeClass, string(cfg.TypeClass))
 	}
+	if err := checkSubtype(cfg.TypeSub); err != nil {
+		return nil, err
+	}
 	if cfg.InlineContent != nil && cfg.ContentHash != nil {
 		return nil, errEdgeContentXOR
 	}

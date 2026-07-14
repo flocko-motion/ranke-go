@@ -105,13 +105,12 @@ var (
 	errArchiveLoadHead       = errors.New("ranke.NewArchive: load head")
 
 	// --- Archive ---
-	errNilUniverse     = errors.New("ranke.NewArchive: nil Universe")
-	errNilHeadID       = errors.New("ranke.NewArchive: nil head id")
-	errHeadNotFound    = errors.New("ranke.NewArchive: head claim not found")
-	errNilID           = errors.New("ranke.Archive: nil id")
-	errBranchNotFound  = errors.New("ranke.Archive.GetBranch: branch not found")
-	errBranchCollision = errors.New("ranke.Archive.GetBranch: name collision — multiple branches match")
-	errVerifyTODO      = errors.New("ranke: verification not implemented")
+	errNilUniverse    = errors.New("ranke.NewArchive: nil Universe")
+	errNilHeadID      = errors.New("ranke.NewArchive: nil head id")
+	errHeadNotFound   = errors.New("ranke.NewArchive: head claim not found")
+	errNilID          = errors.New("ranke.Archive: nil id")
+	errBranchNotFound = errors.New("ranke.Archive.GetBranch: branch not found")
+	errVerifyTODO     = errors.New("ranke: verification not implemented")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

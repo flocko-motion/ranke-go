@@ -1,5 +1,7 @@
 package ranke
 
+import "strings"
+
 // Field is a node/edge field name. Field names are open user vocabulary,
 // constrained to a safe charset (enforced by NewClaim/NewEdge): lowercase
 // letters, digits, and "_", never starting with "_". Everything outside
@@ -21,36 +23,41 @@ const (
 	FieldContentSizeAlias = ".s"
 	FieldContentHash      = "content_hash"
 	FieldContentHashAlias = ".h"
+	// FieldEdgesDiffOmit, on a diff claim, lists the ids of inherited edges
+	// to drop when materialising the diff, one id per line (newline-
+	// separated — ids never contain a newline). This is the "omit" half of
+	// the edge overlay; overwrite/add is done by re-stating edges.
+	FieldEdgesDiffOmit = "edges_diff_omit"
+	// FieldFieldsDiffOmit is the node-field analogue: newline-separated
+	// field names to drop from the inherited set when materialising.
+	FieldFieldsDiffOmit = "fields_diff_omit"
 )
 
-// reservedFieldNames are plain (charset-valid) field names the system
-// owns — they name structural node/edge properties, so users may not set
-// them in Fields. The system sets them through dedicated builder inputs
-// (e.g. ClaimBuilder.Name), never through the Fields map.
-var reservedFieldNames = map[string]struct{}{
-	FieldName:        {},
-	FieldEdges:       {},
-	FieldContent:     {},
-	FieldContentSize: {},
-	FieldContentHash: {},
+// splitLines parses a newline-separated list into a set; blank lines and
+// surrounding whitespace are ignored. Used for the *_diff_omit fields.
+func splitLines(s string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out[line] = struct{}{}
+		}
+	}
+	return out
 }
 
-// checkUserFieldName validates a user-supplied field name. Valid names are
-// non-empty, use only lowercase letters, digits, and "_", never start with
-// "_" (that prefix — like "." — is a reserved system namespace), and are
-// not one of the reserved structural names.
+// checkUserFieldName validates a user-supplied field name: non-empty, only
+// lowercase letters, digits, and "_", never starting with "_" (that prefix
+// — like "." — is a reserved system namespace).
 func checkUserFieldName(name string) error {
 	if !validFieldChars(name) {
 		return withDetail(errInvalidFieldName, name)
-	}
-	if _, reserved := reservedFieldNames[name]; reserved {
-		return withDetail(errReservedFieldName, name)
 	}
 	return nil
 }
 
 // validFieldChars reports whether name is non-empty, contains only
-// [a-z0-9_], and does not start with "_".
+// [a-z0-9_], and does not start with "_". Node/edge subtypes use the same
+// charset (see checkSubtype).
 func validFieldChars(name string) bool {
 	if name == "" {
 		return false
@@ -65,6 +72,45 @@ func validFieldChars(name string) bool {
 				return false // no leading underscore
 			}
 		default:
+			return false
+		}
+	}
+	return true
+}
+
+// checkSubtype validates a node/edge subtype — the open half of a type.
+// Same charset as field names: [a-z0-9] then [a-z0-9_].
+func checkSubtype(sub string) error {
+	if !validFieldChars(sub) {
+		return withDetail(errInvalidSubtype, sub)
+	}
+	return nil
+}
+
+// checkEncodingSubtype validates an encoding (MIME) subtype — more liberal
+// than a plain subtype: a leading [A-Za-z0-9], then letters (either case),
+// digits, and the real-MIME specials "_", ".", "+", "-".
+func checkEncodingSubtype(sub string) error {
+	if !validEncodingSubtypeChars(sub) {
+		return withDetail(errInvalidEncodingSubtype, sub)
+	}
+	return nil
+}
+
+func validEncodingSubtypeChars(sub string) bool {
+	if sub == "" {
+		return false
+	}
+	for i := 0; i < len(sub); i++ {
+		c := sub[i]
+		alnum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if i == 0 {
+			if !alnum {
+				return false // leading char must be alphanumeric
+			}
+			continue
+		}
+		if !(alnum || c == '_' || c == '.' || c == '+' || c == '-') {
 			return false
 		}
 	}
