@@ -33,7 +33,7 @@ func mustEdge(t *testing.T, cfg EdgeConfig) Edge {
 // filter kinds arrive.
 func richClaim(t *testing.T) Claim {
 	t.Helper()
-	root := identityContributor(t, "op@example.com")
+	root := contributor(t)
 	src := srcClaim(t, root, "the source document")
 	alice := entityClaim(t, root, "person", "Alice", src)
 	apples := entityClaim(t, root, "object", "apples", src)

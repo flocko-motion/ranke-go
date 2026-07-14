@@ -51,14 +51,6 @@ type encNode struct {
 	// Fields appear under tag 8 as a map sorted by key (CBOR
 	// Deterministic ensures sort order).
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
-	// Pubkey is the contributor's multikey-encoded public key (§5.7).
-	// Empty (omitted) on non-contributor claims and unsigned
-	// contributors. Participates in id computation like any field.
-	Pubkey []byte `cbor:"9,keyasint,omitempty"`
-	// Title is an optional short text label. Omitted from the
-	// encoding (and thus from the id) when empty, so adding the
-	// field doesn't change existing claims' bytes.
-	Title string `cbor:"10,keyasint,omitempty"`
 	// ContentSize is the byte-length of the content addressed by
 	// ContentHash. Paired with ContentHash so a verifier can detect
 	// truncation/extension without rehashing — and so storage layers
@@ -111,8 +103,6 @@ func buildEncNode(n *node) (encNode, error) {
 		EncodingSub:   n.encodingSub,
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 		Fields:        n.fields,
-		Pubkey:        n.pubkey,
-		Title:         n.title,
 	}
 	if n.contentHash != nil {
 		en.ContentHash = idBytes(n.contentHash)
@@ -267,10 +257,8 @@ func decodeNode(en encNode) (*node, error) {
 		typeSub:       en.TypeSub,
 		encodingClass: EncodingClass(en.EncodingClass),
 		encodingSub:   en.EncodingSub,
-		title:         en.Title,
 		createdAt:     createdAt,
 		fields:        en.Fields,
-		pubkey:        en.Pubkey,
 	}
 	if len(en.ContentHash) > 0 {
 		ch, err := hashFromMultihashBytes(en.ContentHash)

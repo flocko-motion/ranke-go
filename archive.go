@@ -7,6 +7,8 @@ package ranke
 import (
 	"context"
 	"io"
+	"sort"
+	"sync"
 )
 
 // Archive is an immutable read snapshot of a Ranke-Archive: the tuple
@@ -14,6 +16,12 @@ import (
 // resolve against the head's closure — membership and lookup are
 // delegated to the Universe (engine-dependent). It advances nothing; a
 // contribution is the Sequencer's job.
+//
+// The head claim 𝒰(k) plays the paper's *branch table* role (spec
+// §Branches): its named contribution/branch edges are the archive's
+// branches, and it may be a contribution/diff over previous tables. The
+// Archive implements that branch-table concept — materialising the diff
+// chain and exposing each named edge as a Branch. No other type needs it.
 type Archive interface {
 	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
@@ -29,6 +37,28 @@ type Archive interface {
 type archive struct {
 	u   Universe
 	bth Claim // the head claim 𝒰(k) — a contribution/branches claim
+
+	// The archive is an immutable snapshot, so the branch set is stable —
+	// read it off the (already-materialised) head claim once and memoise it
+	// (safe for concurrent readers). Each entry is the naming
+	// contribution/branch edge, keyed by branch name.
+	branchOnce sync.Once
+	branches   map[string]Edge
+}
+
+// loadBranches reads the branch set off the head claim once and caches it.
+// The head is materialised at open (NewArchive), so its contribution/branch
+// edges are already the merged set — no diff walk here.
+func (a *archive) loadBranches() map[string]Edge {
+	a.branchOnce.Do(func() {
+		entries := map[string]Edge{}
+		for _, e := range a.bth.Edges(EdgeFilterType{Type: EdgeTypeBranch}) {
+			name, _ := e.GetField(FieldName)
+			entries[name] = e
+		}
+		a.branches = entries
+	})
+	return a.branches
 }
 
 // NewArchive opens the immutable snapshot RA_k = (𝒰, k) by loading the
@@ -75,47 +105,41 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 }
 
 // --- Branches ---
-
-// branchEdges returns the head claim's contribution/branch edges, filtered
-// by name when one is given (empty name = all branches).
-func (a *archive) branchEdges(name string) []Edge {
-	filters := []Filter{EdgeFilterType{Type: EdgeTypeBranch}}
-	if name != "" {
-		filters = append(filters, EdgeFilterFieldValue{Field: "name", Value: name})
-	}
-	return a.bth.Edges(filters...)
-}
+//
+// A branch table is a claim whose contribution/branch edges each carry a
+// branch name (the `name` field) and reference that branch's subgraph root.
+// A table may be a contribution/diff over previous tables, restating only
+// changed entries. The diff overlay is done by the generic claim
+// materialisation (name-keyed: inherit / overwrite-by-name / omit via
+// edges_diff_omit) at load time, so the head claim's contribution/branch
+// edges are already the full merged set — the Archive just reads them and
+// wraps each as a Branch.
 
 func (a *archive) HasBranch(_ context.Context, name string) (bool, error) {
-	return len(a.branchEdges(name)) > 0, nil
+	_, ok := a.loadBranches()[name]
+	return ok, nil
 }
 
-func (a *archive) GetBranch(ctx context.Context, name string) (Branch, error) {
-	edges := a.branchEdges(name)
-	switch {
-	case len(edges) == 0:
+func (a *archive) GetBranch(_ context.Context, name string) (Branch, error) {
+	e, ok := a.loadBranches()[name]
+	if !ok {
 		return nil, errBranchNotFound
-	case len(edges) > 1:
-		return nil, errBranchCollision
 	}
-	return newBranch(ctx, a.u, edges[0].Reference())
+	return newBranch(a.u, e), nil
 }
 
-func (a *archive) GetBranches(ctx context.Context) ([]Branch, error) {
-	edges := a.branchEdges("")
-	out := make([]Branch, 0, len(edges))
-	for _, e := range edges {
-		b, err := newBranch(ctx, a.u, e.Reference())
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, b)
+func (a *archive) GetBranches(_ context.Context) ([]Branch, error) {
+	entries := a.loadBranches()
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]Branch, 0, len(names))
+	for _, n := range names {
+		out = append(out, newBranch(a.u, entries[n]))
 	}
 	return out, nil
 }
 
-func (a *archive) Verify(_ context.Context) (VerificationRun, error) {
-	// TODO: run verification over the head's closure and return a progress
-	// handle. Pending the verification design (see VerificationRun).
-	return nil, errVerifyTODO
-}
+// Verify lives in verify.go.

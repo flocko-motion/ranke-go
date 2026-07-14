@@ -1,15 +1,15 @@
 package ranke
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// Foundation unit tests for NewEdge validation (§4.2, §4.7) and edge id
-// determinism. The happy inline/external paths are covered in
-// content_test.go; this file pins the rejection matrix and the content-
-// addressed id.
+// Foundation unit tests for the Edge (§4.2, §4.7): NewEdge validation, the
+// content-addressed id, and the §4.4 content surface (inline / external).
 
 func anyRef(t *testing.T) Id {
 	t.Helper()
@@ -93,4 +93,64 @@ func TestEdgeIdDeterministic(t *testing.T) {
 
 	c := mk("summary")
 	require.False(t, a.ID().Equal(c.ID()), "a different type yields a different id")
+}
+
+// --- content surface (§4.4) --------------------------------------------
+
+// TestEdgeInlineContent: an edge carries content under the same rule as a
+// node — inline bytes held on the edge, reachable without a Universe.
+func TestEdgeInlineContent(t *testing.T) {
+	alice := identityContributor(t, "alice@example.com")
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).Sign()
+	require.NoError(t, err)
+
+	payload := []byte("edge-borne annotation")
+	e, err := NewEdge(EdgeConfig{Reference: source.ID(), Type: TypeDerivation("source"), InlineContent: payload})
+	require.NoError(t, err)
+
+	require.False(t, e.IsContentExternal())
+	require.Equal(t, uint64(len(payload)), e.GetContentSize())
+	got, err := e.GetInlineContent()
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+
+	r, err := e.GetContent(context.Background(), nil)
+	require.NoError(t, err)
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, payload, b, "inline edge content streams without a Universe")
+}
+
+// TestEdgeExternalContent: the edge external path — ContentHash+ContentSize
+// on EdgeConfig, streamed back through the Universe (stubUniverse lives in
+// node_test.go, same package).
+func TestEdgeExternalContent(t *testing.T) {
+	alice := identityContributor(t, "alice@example.com")
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).Sign()
+	require.NoError(t, err)
+
+	blob := []byte("external edge blob")
+	hash, err := hashContent(blob)
+	require.NoError(t, err)
+
+	e, err := NewEdge(EdgeConfig{
+		Reference:   source.ID(),
+		Type:        TypeDerivation("source"),
+		ContentHash: hash,
+		ContentSize: uint64(len(blob)),
+	})
+	require.NoError(t, err)
+
+	require.True(t, e.IsContentExternal())
+	require.Equal(t, uint64(len(blob)), e.GetContentSize(), "edge records external size")
+	_, err = e.GetInlineContent()
+	require.ErrorIs(t, err, errContentExternal)
+
+	u := newStubUniverse()
+	require.NoError(t, u.PutContents(context.Background(), []ContentBlob{{Hash: hash, Content: blob}}))
+	r, err := e.GetContent(context.Background(), u)
+	require.NoError(t, err)
+	b, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, blob, b, "external edge bytes stream from the Universe")
 }

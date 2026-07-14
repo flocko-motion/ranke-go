@@ -22,7 +22,7 @@ import (
 // Field names, subtypes, and encoding subtypes are all validated at
 // construction; encoding is the liberal one.
 
-func nsContributor(t *testing.T) Contributor { return identityContributor(t, "ns@example.com") }
+func nsContributor(t *testing.T) Contributor { return contributor(t) }
 
 // buildWithType attempts to build a claim of the given "class/sub" type
 // and returns the build error (nil on success).
