@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/flocko-motion/ranke-go"
 )
@@ -62,12 +63,92 @@ type Streamer interface {
 // backends. A complete adapter is then just a BlobStore implementation.
 //
 //deadcode:keep
-func NewBlobUniverse(store BlobStore) ranke.Universe {
-	return &blobUniverse{store: store}
+func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
+	u := &blobUniverse{store: store, concurrency: 1}
+	for _, o := range opts {
+		o(u)
+	}
+	if u.concurrency > 1 {
+		// One semaphore for the whole Universe — the concurrency cap is a
+		// TOTAL across every (possibly concurrent) call, not per call.
+		u.sem = make(chan struct{}, u.concurrency)
+	}
+	return u
+}
+
+// BlobUniverseOption configures the Universe wrapper.
+type BlobUniverseOption func(*blobUniverse)
+
+// WithConcurrency caps how many per-key store operations run at once — a
+// TOTAL over the whole Universe, shared across all concurrent calls, so N
+// simultaneous bulk calls never exceed n in-flight requests. n<=1 keeps ops
+// sequential (the default). Network backends (s3, rest) set it to fan out
+// over request latency without overwhelming the endpoint; local backends
+// leave it sequential.
+func WithConcurrency(n int) BlobUniverseOption {
+	return func(u *blobUniverse) {
+		if n > 0 {
+			u.concurrency = n
+		}
+	}
 }
 
 type blobUniverse struct {
-	store BlobStore
+	store       BlobStore
+	concurrency int
+	// sem bounds concurrent store operations across the whole Universe (nil
+	// when concurrency<=1 → sequential). Shared by every forEach call, so the
+	// cap is a total, not per-call.
+	sem chan struct{}
+}
+
+// forEach runs fn for each index in [0,n). When the Universe has a shared
+// concurrency semaphore, up to that many run at once — the cap is a TOTAL
+// across all concurrent forEach calls on this Universe, not per call — else
+// it runs sequentially. fn must write its result to a distinct per-index slot
+// (no shared state); the first error is returned and cancels the rest.
+func (u *blobUniverse) forEach(ctx context.Context, n int, fn func(context.Context, int) error) error {
+	if u.sem == nil {
+		for i := 0; i < n; i++ {
+			if err := fn(ctx, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		ferr error
+	)
+launch:
+	for i := 0; i < n; i++ {
+		select {
+		case <-ctx.Done(): // cancelled (or a sibling failed) while waiting for a slot
+			break launch
+		case u.sem <- struct{}{}: // acquire a shared slot
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-u.sem }()
+			if err := fn(ctx, i); err != nil {
+				mu.Lock()
+				if ferr == nil {
+					ferr = err
+					cancel()
+				}
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if ferr != nil {
+		return ferr
+	}
+	return ctx.Err()
 }
 
 //deadcode:keep
@@ -76,28 +157,35 @@ func (u *blobUniverse) Close() error { return u.store.Close() }
 //deadcode:keep
 func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
-	for i, id := range ids {
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
 		if id == nil {
-			return nil, errors.New("adapter.GetClaims: nil id")
+			return errors.New("adapter.GetClaims: nil id")
 		}
 		data, err := u.store.Get(ctx, id.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		c, err := ranke.DecodeClaim(id, data)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		out[i] = c
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	// A byte store returns raw claims; the read path materialises diff overlays
 	// via the ADT default, honouring WithNotDiffMaterialized (passed through).
+	// Materialisation runs after the parallel fetch, so it sees complete claims.
 	return ranke.DefaultMaterialize(ctx, u, out, opts...)
 }
 
 //deadcode:keep
 func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
-	for _, c := range cs {
+	return u.forEach(ctx, len(cs), func(ctx context.Context, i int) error {
+		c := cs[i]
 		if c == nil || c.ID() == nil {
 			return errors.New("adapter.PutClaims: nil claim or id")
 		}
@@ -105,11 +193,8 @@ func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 		if err != nil {
 			return err
 		}
-		if err := u.store.Put(ctx, c.ID().String(), data); err != nil {
-			return err
-		}
-	}
-	return nil
+		return u.store.Put(ctx, c.ID().String(), data)
+	})
 }
 
 //deadcode:keep
@@ -120,18 +205,23 @@ func (u *blobUniverse) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, e
 //deadcode:keep
 func (u *blobUniverse) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
 	out := make([][]byte, len(refs))
-	for i, ref := range refs {
+	err := u.forEach(ctx, len(refs), func(ctx context.Context, i int) error {
+		ref := refs[i]
 		if ref.Hash == nil {
-			return nil, errors.New("adapter.GetContents: nil hash")
+			return errors.New("adapter.GetContents: nil hash")
 		}
 		data, err := u.store.Get(ctx, ref.Hash.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := ranke.VerifyContent(ref.Hash, ref.ContentSize, data); err != nil {
-			return nil, err
+			return err
 		}
 		out[i] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -184,15 +274,20 @@ func (u *blobUniverse) HasContents(ctx context.Context, hashes []ranke.Id) ([]bo
 // key namespace whether each id is present, tolerating nil entries.
 func (u *blobUniverse) hasAll(ctx context.Context, ids []ranke.Id) ([]bool, error) {
 	out := make([]bool, len(ids))
-	for i, id := range ids {
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
 		if id == nil {
-			continue
+			return nil
 		}
 		has, err := u.store.Has(ctx, id.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		out[i] = has
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -215,19 +310,17 @@ func (u *blobUniverse) Capabilities() ranke.Capabilities {
 	return u.store.Capabilities()
 }
 
-// InClosure reports whether id is in head's closure.
-//
-// TODO: implement — walk the edge closure from head over the blob store
-// (no graph engine here, so a manual traversal; a graph-native backend
-// would override with a query).
+// InClosure reports whether id is reachable from any of heads. A byte store
+// has no graph engine, so it delegates to the ADT's reference-edge walk
+// (which reads claims back through this Universe); a graph-native backend
+// would override with a query.
 func (u *blobUniverse) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	panic("TODO: blobUniverse.InClosure not implemented")
+	return ranke.DefaultInClosure(ctx, u, heads, id)
 }
 
-// GetFromClosure returns the claim at id if it is in head's closure.
-//
-// TODO: implement — resolve id via GetClaims after confirming membership
-// with the closure walk.
+// GetFromClosure returns the claim at id if it is reachable from any of
+// heads, else ErrNotFound. Delegates to the ADT default (membership walk +
+// load).
 func (u *blobUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	panic("TODO: blobUniverse.GetFromClosure not implemented")
+	return ranke.DefaultGetFromClosure(ctx, u, heads, id)
 }

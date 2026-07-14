@@ -73,7 +73,32 @@ func minioPod(t *testing.T) (*awss3.Client, string) {
 		Bucket: aws.String(bucket),
 	})
 	require.NoError(t, err, "create bucket")
+
+	// Serve-readiness gate: hammer HeadBucket until it succeeds, so the pod is
+	// genuinely answering S3 before the caller starts timing. /minio/health/ready
+	// can flip to 200 a beat before the first request truly serves; this closes
+	// that gap, so pod warm-up never bleeds into the measured window.
+	waitServing(t, client, bucket)
 	return client, bucket
+}
+
+// waitServing blocks until HeadBucket succeeds (or the deadline passes), a real
+// S3 round-trip confirming the pod serves requests, not merely that it is up.
+func waitServing(t *testing.T, client *awss3.Client, bucket string) {
+	t.Helper()
+	deadline := time.Now().Add(minioReady)
+	for {
+		_, err := client.HeadBucket(context.Background(), &awss3.HeadBucketInput{
+			Bucket: aws.String(bucket),
+		})
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("minio bucket %s not serving within %s: %v", bucket, minioReady, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // freePort grabs an ephemeral port by binding :0 and releasing it — the pod
@@ -92,7 +117,7 @@ func waitReady(t *testing.T, endpoint string) {
 	t.Helper()
 	deadline := time.Now().Add(minioReady)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(endpoint + "/minio/health/live")
+		resp, err := http.Get(endpoint + "/minio/health/ready")
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

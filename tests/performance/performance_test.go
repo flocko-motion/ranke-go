@@ -6,6 +6,7 @@ package performance
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,28 +84,104 @@ func TestPerformanceMatrix(t *testing.T) {
 		be := be
 		t.Run(be.name, func(t *testing.T) {
 			ctx := context.Background()
-			u := be.open(t)
+			u := newMetered(be.open(t)) // count round-trips + time each, for every backend
 			defer func() { require.NoError(t, u.Close()) }()
 
-			genStart := time.Now()
+			// Chapter 1 — write the graph. Generation drives the dev Sequencer,
+			// which also verifies internally (paper step 3–4); that cost lives
+			// in this chapter because it is inherent to writing via a Sequencer.
+			u.setPhase("1-write")
+			c1 := time.Now()
 			m, err := generator.Generate(ctx, u, spec)
 			require.NoError(t, err)
-			genDur := time.Since(genStart)
+			writeDur := time.Since(c1)
 
 			arc, err := ranke.NewArchive(ctx, u, m.Head)
 			require.NoError(t, err)
 
-			verStart := time.Now()
+			// Chapter 2 — full verification of the persisted archive.
+			u.setPhase("2-verify")
+			c2 := time.Now()
 			run, err := arc.Verify(ctx, ranke.WithExternalContent())
 			require.NoError(t, err)
 			run.Wait()
-			verDur := time.Since(verStart)
+			verifyDur := time.Since(c2)
 			require.NoError(t, run.Err())
 			require.Empty(t, run.Failures(), "the generated archive verifies on %s", be.name)
 
-			t.Logf("backend=%-8s size=%d claims=%d verified=%d generate=%s verify=%s",
-				be.name, size, m.ClaimCount, run.Verified(),
-				genDur.Round(time.Millisecond), verDur.Round(time.Millisecond))
+			// Chapter 3 — random access, two paths over the SAME ids:
+			//   branch   — Branch.GetClaim → GetFromClosure, an in-closure check
+			//              (walks the closure from the branch head per access)
+			//   universe — GetClaim(ctx, u, id), a direct addressed read, no check
+			// The gap is the price of the membership guarantee.
+			ids := accessOrder(m, accessCount(t))
+			branch, err := arc.GetBranch(ctx, "main")
+			require.NoError(t, err)
+
+			u.setPhase("3a-branch")
+			c3a := time.Now()
+			for _, id := range ids {
+				_, err := branch.GetClaim(ctx, id)
+				require.NoError(t, err)
+			}
+			branchDur := time.Since(c3a)
+
+			u.setPhase("3b-universe")
+			c3b := time.Now()
+			for _, id := range ids {
+				_, err := ranke.GetClaim(ctx, u, id)
+				require.NoError(t, err)
+			}
+			universeDur := time.Since(c3b)
+
+			r1, w1 := u.phaseIO("1-write")
+			r2, _ := u.phaseIO("2-verify")
+			r3a, _ := u.phaseIO("3a-branch")
+			r3b, _ := u.phaseIO("3b-universe")
+			t.Logf("backend=%-8s size=%d claims=%d verified=%d accesses=%d\n"+
+				"      ch1-write=%s (%dw %dr)  ch2-verify=%s (%dr)  ch3a-branch=%s (%dr)  ch3b-universe=%s (%dr)\n      %s",
+				be.name, size, m.ClaimCount, run.Verified(), len(ids),
+				writeDur.Round(time.Millisecond), w1, r1,
+				verifyDur.Round(time.Millisecond), r2,
+				branchDur.Round(time.Millisecond), r3a,
+				universeDur.Round(time.Millisecond), r3b,
+				u.report())
 		})
 	}
+}
+
+// accessCount is how many random accesses chapter 3 performs, from
+// RANKE_PERF_ACCESS (default 50). The branch path is O(closure) per access, so
+// this stays modest — the point is the per-access latency contrast, not
+// throughput.
+func accessCount(t *testing.T) int {
+	v := os.Getenv("RANKE_PERF_ACCESS")
+	if v == "" {
+		return 50
+	}
+	n, err := strconv.Atoi(v)
+	require.NoError(t, err, "RANKE_PERF_ACCESS must be an integer")
+	require.Positive(t, n)
+	return n
+}
+
+// accessOrder builds a deterministic pseudo-random sequence of n claim ids
+// drawn from the manifest's content claims (sources, derivations, entities,
+// relations) — a fixed seed so the access pattern is reproducible across runs
+// and backends. Sampling with replacement when the pool is smaller than n.
+func accessOrder(m *generator.Manifest, n int) []ranke.Id {
+	pool := make([]ranke.Id, 0, len(m.Sources)+len(m.Derivations)+len(m.Entities)+len(m.Relations))
+	pool = append(pool, m.Sources...)
+	pool = append(pool, m.Derivations...)
+	pool = append(pool, m.Entities...)
+	pool = append(pool, m.Relations...)
+	if len(pool) == 0 {
+		return nil
+	}
+	rng := rand.New(rand.NewSource(1)) // fixed seed → reproducible access order
+	out := make([]ranke.Id, n)
+	for i := range out {
+		out[i] = pool[rng.Intn(len(pool))]
+	}
+	return out
 }

@@ -126,29 +126,30 @@ func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.
 		return nil, fmt.Errorf("dev.Sequencer: verify: %d failure(s), first: %v", len(fs), fs[0])
 	}
 
+	// Step 5 — seed. This Graph writes every added claim straight to 𝒰 (both
+	// AddClaims above and Consolidate below), so populate already seeded the
+	// batch: a separate PutClaims here would write each claim a second time.
+	// Everything below is therefore added THROUGH the graph so 𝒰 is written
+	// exactly once per claim.
+
 	// Consolidate the batch's open heads into one head.
-	toPersist := append([]ranke.Claim(nil), claims...)
-	batchHead, extra, err := s.consolidateGraph(ctx, g)
+	batchHead, err := s.consolidateGraph(ctx, g)
 	if err != nil {
 		return nil, err
 	}
-	toPersist = append(toPersist, extra...)
 
 	// Fold the previous main head in, so the branch closure accumulates across
-	// successive adds.
+	// successive adds. The folding head is added through the graph (one write).
 	newMain := batchHead
 	if s.mainHead != nil {
 		hc, err := s.consolidateHeads(s.mainHead, batchHead)
 		if err != nil {
 			return nil, err
 		}
-		toPersist = append(toPersist, hc)
+		if err := g.AddClaims(ctx, hc); err != nil {
+			return nil, fmt.Errorf("dev.Sequencer: fold heads: %w", err)
+		}
 		newMain = hc.ID()
-	}
-
-	// Step 5 — seed 𝒰.
-	if err := s.u.PutClaims(ctx, toPersist); err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: seed: %w", err)
 	}
 
 	// Step 6 — merge: new branch table main → newMain, advance head, record it.
@@ -165,17 +166,17 @@ func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.
 }
 
 // consolidateGraph returns the single open head of g, consolidating via a
-// contribution/head claim when g has several. The returned claims are the ones
-// that consolidation newly created (empty when g was already single-headed).
-func (s *Sequencer) consolidateGraph(ctx context.Context, g ranke.Graph) (ranke.Id, []ranke.Claim, error) {
+// contribution/head claim (added through the graph, so written to 𝒰) when g
+// has several open heads.
+func (s *Sequencer) consolidateGraph(ctx context.Context, g ranke.Graph) (ranke.Id, error) {
 	if g.IsConsolidated() {
-		return g.Heads()[0], nil, nil
+		return g.Heads()[0], nil
 	}
 	head, err := g.Consolidate(ctx, s.self, s.clock.Tick())
 	if err != nil {
-		return nil, nil, fmt.Errorf("dev.Sequencer: consolidate: %w", err)
+		return nil, fmt.Errorf("dev.Sequencer: consolidate: %w", err)
 	}
-	return head.ID(), []ranke.Claim{head}, nil
+	return head.ID(), nil
 }
 
 // consolidateHeads builds a contribution/head claim wrapping the given heads —

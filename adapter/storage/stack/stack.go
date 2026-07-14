@@ -142,7 +142,7 @@ func (s *stack) PutContents(ctx context.Context, blobs []ranke.ContentBlob) erro
 	return nil
 }
 
-func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, error) {
+func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	pending := seq(len(ids))
 	for li := range s.layers {
@@ -165,7 +165,9 @@ func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, e
 			}
 		}
 		if len(hitIDs) > 0 {
-			got, err := s.layers[li].u.GetClaims(ctx, hitIDs)
+			// Fetch raw delta from the layer; materialise at the stack level
+			// (below) so a diff's predecessor resolves across all layers.
+			got, err := s.layers[li].u.GetClaims(ctx, hitIDs, ranke.WithNotDiffMaterialized())
 			if err != nil {
 				return nil, err
 			}
@@ -179,7 +181,8 @@ func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, e
 	if len(pending) > 0 {
 		return nil, ranke.ErrNotFound
 	}
-	return out, nil
+	// Materialise diff overlays at the stack level, honouring the read opts.
+	return ranke.DefaultMaterialize(ctx, s, out, opts...)
 }
 
 func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
@@ -297,19 +300,19 @@ func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ran
 	return ranke.DefaultCopyContents(ctx, s, src, refs, opts...)
 }
 
-// InClosure reports whether id is in head's closure.
-//
-// TODO: implement — delegate to the most capable layer (a graph engine
-// answers natively); otherwise fall through the layers like a read.
+// InClosure reports whether id is reachable from any of heads. The stack has
+// no graph engine of its own, so it delegates to the ADT walk — which reads
+// claims back through the stack's own GetClaims, falling through the layers
+// like any read. A graph-native layer would let a future override answer
+// natively.
 func (s *stack) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	panic("TODO: stack.InClosure not implemented")
+	return ranke.DefaultInClosure(ctx, s, heads, id)
 }
 
-// GetFromClosure returns the claim at id if it is in head's closure.
-//
-// TODO: implement — delegate to the layer that answers InClosure.
+// GetFromClosure returns the claim at id if it is reachable from any of
+// heads, else ErrNotFound. Delegates to the ADT default over the stack.
 func (s *stack) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	panic("TODO: stack.GetFromClosure not implemented")
+	return ranke.DefaultGetFromClosure(ctx, s, heads, id)
 }
 
 // Capabilities derives the stack's from its layers, per capability:

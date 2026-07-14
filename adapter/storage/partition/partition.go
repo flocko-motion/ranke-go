@@ -97,14 +97,16 @@ func (p *partition) PutContents(ctx context.Context, blobs []ranke.ContentBlob) 
 	return nil
 }
 
-func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, error) {
+func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	groups := p.groupIds(ids)
 	for s, idx := range groups {
 		if len(idx) == 0 {
 			continue
 		}
-		got, err := p.shards[s].GetClaims(ctx, at(ids, idx))
+		// Fetch raw delta from the shard; materialise at the partition level
+		// (below) so a diff's predecessor resolves across shards.
+		got, err := p.shards[s].GetClaims(ctx, at(ids, idx), ranke.WithNotDiffMaterialized())
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +114,8 @@ func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Clai
 			out[idx[k]] = c
 		}
 	}
-	return out, nil
+	// Materialise diff overlays at the partition level, honouring read opts.
+	return ranke.DefaultMaterialize(ctx, p, out, opts...)
 }
 
 func (p *partition) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
@@ -198,21 +201,18 @@ func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs [
 // Capabilities reports an ability only if every shard has it: a key may land on
 // any shard, so the partition can promise a capability only when all shards can
 // (Enumerate and a GQL query likewise span every shard).
-// InClosure reports whether id is in head's closure.
-//
-// TODO: implement — a closure can span shards, so this cannot route by a
-// single id; it needs a traversal that resolves each referenced claim
-// through the partition. Likely delegates per-claim as the walk proceeds.
+// InClosure reports whether id is reachable from any of heads. A closure can
+// span shards, so it delegates to the ADT walk — which resolves each
+// referenced claim through the partition's own GetClaims (routing each id to
+// its shard) as the traversal proceeds.
 func (p *partition) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	panic("TODO: partition.InClosure not implemented")
+	return ranke.DefaultInClosure(ctx, p, heads, id)
 }
 
-// GetFromClosure returns the claim at id if it is in head's closure.
-//
-// TODO: implement — closure-membership check, then route the id to its
-// shard via the normal partition read.
+// GetFromClosure returns the claim at id if it is reachable from any of
+// heads, else ErrNotFound. Delegates to the ADT default over the partition.
 func (p *partition) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	panic("TODO: partition.GetFromClosure not implemented")
+	return ranke.DefaultGetFromClosure(ctx, p, heads, id)
 }
 
 func (p *partition) Capabilities() ranke.Capabilities {
