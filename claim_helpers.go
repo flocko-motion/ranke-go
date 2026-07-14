@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"fmt"
 )
 
 // splitType parses "class/sub" into its two non-empty segments.
@@ -23,7 +22,7 @@ func splitType(s string) (class, sub string, err error) {
 		}
 	}
 	if slash <= 0 || slash == len(s)-1 {
-		return "", "", fmt.Errorf("expected \"class/sub\", got %q", s)
+		return "", "", withDetail(errExpectedClassSub, s)
 	}
 	return s[:slash], s[slash+1:], nil
 }
@@ -70,7 +69,7 @@ func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, 
 	}
 	encoded, err := EncodePublicKey(signingKey.Public())
 	if err != nil {
-		return fmt.Errorf("encode signing key's pubkey: %w", err)
+		return wrap(errEncodeSigningKey, err)
 	}
 	if !bytes.Equal(encoded, resolvedPubkey) {
 		return errResolvedMismatch

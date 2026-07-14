@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"fmt"
 )
 
 // Claim is a node together with the edges in its edges set.
@@ -85,7 +84,7 @@ func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) 
 	}
 	keyPubkey, err := EncodePublicKey(signingKey[0].Public())
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Claim.AsContributor: encode signing key pubkey: %w", err)
+		return nil, wrap(errEncodeSigningKey, err)
 	}
 	if !bytes.Equal(keyPubkey, c.node.pubkey) {
 		return nil, errSigningKeyMismatch

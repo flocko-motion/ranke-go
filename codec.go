@@ -6,6 +6,7 @@ package ranke
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -189,7 +190,7 @@ func (c *claim) Encode() ([]byte, error) {
 	}
 	data, err := encodingMode.Marshal(encClaimFile{Node: en, Edges: ee})
 	if err != nil {
-		return nil, fmt.Errorf("ranke: encode claim %s: %w", c.node.id.String(), err)
+		return nil, wrapDetail(errEncodeClaim, c.node.id.String(), err)
 	}
 	return data, nil
 }
@@ -202,18 +203,18 @@ func (c *claim) Encode() ([]byte, error) {
 func DecodeClaim(id Id, b []byte) (Claim, error) {
 	var ec encClaimFile
 	if err := cbor.Unmarshal(b, &ec); err != nil {
-		return nil, fmt.Errorf("DecodeClaim: %w", err)
+		return nil, wrap(errDecodeClaim, err)
 	}
 	n, err := decodeNode(ec.Node)
 	if err != nil {
-		return nil, fmt.Errorf("DecodeClaim: node: %w", err)
+		return nil, wrapDetail(errDecodeClaim, "node", err)
 	}
 	n.id = id
 	edges := make([]*edge, len(ec.Edges))
 	for i, ee := range ec.Edges {
 		e, err := decodeEdge(ee)
 		if err != nil {
-			return nil, fmt.Errorf("DecodeClaim: edge %d: %w", i, err)
+			return nil, wrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
 		}
 		if i < len(n.edges) {
 			e.id = n.edges[i]

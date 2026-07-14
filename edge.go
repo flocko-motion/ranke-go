@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"sort"
 )
@@ -91,7 +90,7 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewEdge: Type: %w", err)
+			return nil, wrapDetail(errNewEdge, "Type", err)
 		}
 		cfg.TypeClass = EdgeClass(class)
 		cfg.TypeSub = sub
@@ -115,7 +114,7 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		}
 	} else {
 		if cfg.RelationDirection != 0 {
-			return nil, fmt.Errorf("ranke.NewEdge: RelationDirection must be 0 for non-relation edges (%s/*)", cfg.TypeClass)
+			return nil, withDetail(errRelationDirNonRel, string(cfg.TypeClass)+"/*")
 		}
 	}
 
@@ -131,7 +130,7 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		// Inline: hold the bytes, address them by their hash.
 		ch, err := hashContent(cfg.Content)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewEdge: content hash: %w", err)
+			return nil, wrapDetail(errNewEdge, "content hash", err)
 		}
 		e.content = cfg.Content
 		e.contentHash = ch
@@ -145,11 +144,11 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	// Compute the edge's own id over its canonical encoding.
 	b, err := encodeEdge(e)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewEdge: canonical encode: %w", err)
+		return nil, wrapDetail(errNewEdge, "canonical encode", err)
 	}
 	id, err := hashContent(b)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewEdge: hash: %w", err)
+		return nil, wrapDetail(errNewEdge, "hash", err)
 	}
 	e.id = id
 	return e, nil

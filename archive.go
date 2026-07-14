@@ -6,7 +6,6 @@ package ranke
 
 import (
 	"context"
-	"fmt"
 	"io"
 )
 
@@ -43,7 +42,7 @@ func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	}
 	claims, err := u.GetClaims(ctx, []Id{k})
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewArchive: load head %s: %w", k.String(), err)
+		return nil, wrapDetail(errArchiveLoadHead, k.String(), err)
 	}
 	if len(claims) == 0 {
 		return nil, errHeadNotFound

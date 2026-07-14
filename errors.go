@@ -1,7 +1,7 @@
 // package: ranke / errors
 // type:    data
 // job:     centralized package error sentinels — one static error per fixed condition
-// limits:  dynamic errors (fmt.Errorf with %w wrapping or %s/%q/%d formatting) stay at their call sites
+// limits:  no fmt.Errorf anywhere in the package — dynamic errors compose via wrap/withDetail/wrapDetail over these sentinels
 package ranke
 
 import "errors"
@@ -68,6 +68,37 @@ var (
 	errUnknownEncodingClass = errors.New("ranke.NewClaim: unknown encoding class")
 	errUnknownEdgeClass     = errors.New("ranke.NewEdge: unknown edge class")
 	errFieldNotSet          = errors.New("ranke: field not set")
+
+	// --- Operation-prefix sentinels (fmt.Errorf replacements) ---
+	// Used with wrap/wrapDetail: the sentinel is the operation prefix, the
+	// detail carries the stage or a dynamic value, the cause is wrapped.
+	errNewClaim              = errors.New("ranke.NewClaim")
+	errProvenanceRequired    = errors.New("ranke.NewClaim: this claim class must carry at least one derivation/* edge (§3.5 provenance invariant); type")
+	errNewEdge               = errors.New("ranke.NewEdge")
+	errRelationDirNonRel     = errors.New("ranke.NewEdge: RelationDirection must be 0 for non-relation edges")
+	errBuildGraph            = errors.New("ranke.NewGraphFromClosure")
+	errGraphAddClaim         = errors.New("ranke.Graph.AddClaims")
+	errUnknownRefClaim       = errors.New("ranke.Graph: edge references unknown claim (atomic creation rule §4.3)")
+	errRefMissingClaim       = errors.New("ranke.Graph: edge references missing claim")
+	errConsolidate           = errors.New("ranke.Graph.Consolidate")
+	errGraphVerifyStage      = errors.New("ranke.Graph.Verify")
+	errContributorNotInGraph = errors.New("ranke.Graph: contributor claim not in graph")
+	errEncodeClaim           = errors.New("ranke: encode claim")
+	errDecodeClaim           = errors.New("ranke.DecodeClaim")
+	errID                    = errors.New("ranke.Id")
+	errEncodePubkey          = errors.New("ranke: unsupported public key type")
+	errDecodePubkey          = errors.New("ranke.DecodePublicKey")
+	errSignHash              = errors.New("ranke.signHash")
+	errVerifySig             = errors.New("ranke.verifySignature")
+	errLoadKeypair           = errors.New("ranke.LoadPrivateKey")
+	errLoadPrivKey           = errors.New("ranke.LoadEd25519PrivateKeyPEM")
+	errLoadPubKey            = errors.New("ranke.LoadEd25519PublicKeyPEM")
+	errVerifyContentOp       = errors.New("ranke.VerifyContent")
+	errVerifyingReader       = errors.New("ranke.NewVerifyingReader")
+	errContent               = errors.New("ranke: content")
+	errExpectedClassSub      = errors.New("ranke: expected \"class/sub\"")
+	errEncodeSigningKey      = errors.New("ranke: encode signing key's pubkey")
+	errArchiveLoadHead       = errors.New("ranke.NewArchive: load head")
 
 	// --- Archive ---
 	errNilUniverse     = errors.New("ranke.NewArchive: nil Universe")

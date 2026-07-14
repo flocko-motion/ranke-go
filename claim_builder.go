@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"fmt"
 	"sort"
 	"time"
 )
@@ -158,7 +157,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: Type: %w", err)
+			return nil, wrapDetail(errNewClaim, "Type", err)
 		}
 		cfg.TypeClass = NodeClass(class)
 		cfg.TypeSub = sub
@@ -172,7 +171,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if cfg.Encoding != "" {
 		class, sub, err := splitType(cfg.Encoding)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: Encoding: %w", err)
+			return nil, wrapDetail(errNewClaim, "Encoding", err)
 		}
 		cfg.EncodingClass = EncodingClass(class)
 		cfg.EncodingSub = sub
@@ -203,21 +202,21 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	for _, e := range cfg.Edges {
 		ce, err := asConcreteEdge(e)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+			return nil, wrap(errNewClaim, err)
 		}
 		edges = append(edges, ce)
 	}
 	if !isRootContributor {
 		ce, err := buildContributorEdge(cfg.Contributor)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: build contribution/contributor edge: %w", err)
+			return nil, wrapDetail(errNewClaim, "build contribution/contributor edge", err)
 		}
 		edges = append(edges, ce)
 	}
 
 	// Provenance invariant (§3.5).
 	if requiresProvenance(cfg.TypeClass) && !hasDerivationEdge(edges) {
-		return nil, fmt.Errorf("ranke.NewClaim: %s/%s claims must carry at least one derivation/* edge (§3.5 provenance invariant)", cfg.TypeClass, cfg.TypeSub)
+		return nil, withDetail(errProvenanceRequired, string(cfg.TypeClass)+"/"+cfg.TypeSub)
 	}
 
 	// Canonical edge order: by raw multihash bytes.
@@ -252,7 +251,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	} else if cfg.Content != nil {
 		ch, err := hashContent(cfg.Content)
 		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: content hash: %w", err)
+			return nil, wrapDetail(errNewClaim, "content hash", err)
 		}
 		n.contentHash = ch
 		n.contentSize = uint64(len(cfg.Content))
@@ -268,32 +267,32 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	// SigningKey was given (a bare contributor returns nil → identity Sign).
 	resolvedPubkey, err := resolveSigningPubkey(isRootContributor, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+		return nil, wrap(errNewClaim, err)
 	}
 	if cfg.SigningKey == nil && cfg.Contributor != nil {
 		cfg.SigningKey = cfg.Contributor.SigningKey()
 	}
 	if err := checkSigningConsistency(cfg.SigningKey, resolvedPubkey); err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+		return nil, wrap(errNewClaim, err)
 	}
 
 	// id = Sign(H(S(node))). Identity-Sign (no key, empty pubkey) leaves
 	// the hash bytes unchanged, so id is just the multihash.
 	encoded, err := encodeNode(n)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: canonical encode: %w", err)
+		return nil, wrapDetail(errNewClaim, "canonical encode", err)
 	}
 	hash, err := hashContent(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: hash: %w", err)
+		return nil, wrapDetail(errNewClaim, "hash", err)
 	}
 	idPayload, err := signHash(cfg.SigningKey, hash.raw)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: sign: %w", err)
+		return nil, wrapDetail(errNewClaim, "sign", err)
 	}
 	nodeID, err := idFromBytes(idPayload)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: wrap id: %w", err)
+		return nil, wrapDetail(errNewClaim, "wrap id", err)
 	}
 	n.id = nodeID
 

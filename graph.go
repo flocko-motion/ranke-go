@@ -6,7 +6,7 @@ package ranke
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -104,7 +104,7 @@ func NewGraphFromClosure(ctx context.Context, root Claim, universe Universe) (Gr
 			}
 			next, err := loadClaimAs(ctx, universe, e.reference)
 			if err != nil {
-				return nil, fmt.Errorf("NewGraphFromClosure: load %s: %w", e.reference.String(), err)
+				return nil, wrapDetail(errBuildGraph, "load "+e.reference.String(), err)
 			}
 			queue = append(queue, next)
 		}
@@ -147,7 +147,7 @@ func unwrapClaim(c Contributor) *claim {
 func (g *graph) AddClaims(claims ...Claim) error {
 	for i, cl := range claims {
 		if err := g.addOne(cl); err != nil {
-			return fmt.Errorf("Graph.Add: claim %d: %w", i, err)
+			return wrapDetail(errGraphAddClaim, "claim "+strconv.Itoa(i), err)
 		}
 	}
 	return nil
@@ -175,7 +175,7 @@ func (g *graph) addOne(cl Claim) error {
 	for _, e := range c.edges {
 		refKey := e.reference.String()
 		if _, ok := g.claims[refKey]; !ok {
-			return fmt.Errorf("edge references unknown claim %s (atomic creation rule, §4.3)", refKey)
+			return withDetail(errUnknownRefClaim, refKey)
 		}
 	}
 	// Insert the claim and mark each referenced claim.
@@ -236,7 +236,7 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 			TypeSub:   "head",
 		})
 		if err != nil {
-			return nil, fmt.Errorf("ranke.Graph.Consolidate: build head edge: %w", err)
+			return nil, wrapDetail(errConsolidate, "build head edge", err)
 		}
 		edges = append(edges, e)
 	}
@@ -250,7 +250,7 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 		return nil, err
 	}
 	if err := g.AddClaims(head); err != nil {
-		return nil, fmt.Errorf("ranke.Graph.Consolidate: add head: %w", err)
+		return nil, wrapDetail(errConsolidate, "add head", err)
 	}
 	return head, nil
 }
@@ -291,7 +291,7 @@ func (g *graph) verifyRecursive(id Id, depth int, seen map[string]bool, report [
 		r(c, depth, err)
 	}
 	if err != nil && *firstErr == nil {
-		*firstErr = fmt.Errorf("validate %s: %w", k, err)
+		*firstErr = wrapDetail(errGraphVerifyStage, "validate "+k, err)
 	}
 	for _, e := range c.edges {
 		g.verifyRecursive(e.reference, depth+1, seen, report, firstErr)
@@ -307,27 +307,27 @@ func (g *graph) verifyRecursive(id Id, depth int, seen map[string]bool, report [
 func (g *graph) verifyOne(c *claim) error {
 	for _, e := range c.edges {
 		if _, ok := g.claims[e.reference.String()]; !ok {
-			return fmt.Errorf("edge references missing claim %s", e.reference.String())
+			return withDetail(errRefMissingClaim, e.reference.String())
 		}
 	}
 	encoded, err := encodeNode(c.node)
 	if err != nil {
-		return fmt.Errorf("encode: %w", err)
+		return wrapDetail(errGraphVerifyStage, "encode", err)
 	}
 	recomputed, err := hashContent(encoded)
 	if err != nil {
-		return fmt.Errorf("hash: %w", err)
+		return wrapDetail(errGraphVerifyStage, "hash", err)
 	}
 	pubkey, err := g.resolveClaimPubkey(c)
 	if err != nil {
-		return fmt.Errorf("resolve pubkey: %w", err)
+		return wrapDetail(errGraphVerifyStage, "resolve pubkey", err)
 	}
 	idH, ok := c.node.id.(*id)
 	if !ok {
 		return errForeignIdType
 	}
 	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
-		return fmt.Errorf("§5.7: %w", err)
+		return wrapDetail(errGraphVerifyStage, "§5.7", err)
 	}
 	// Content integrity (§5.10) is enforced at Universe.GetContent /
 	// StreamContent time; bytes reaching verifyOne are already verified.
@@ -348,7 +348,7 @@ func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
 		if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
 			contributor, ok := g.claims[e.reference.String()]
 			if !ok {
-				return nil, fmt.Errorf("contributor claim %s not in graph", e.reference.String())
+				return nil, withDetail(errContributorNotInGraph, e.reference.String())
 			}
 			return contributor.node.pubkey, nil
 		}
