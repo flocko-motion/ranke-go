@@ -6,9 +6,7 @@ package ranke
 
 import (
 	"bytes"
-	"context"
 	"crypto"
-	"errors"
 	"fmt"
 )
 
@@ -31,12 +29,6 @@ type Claim interface {
 	// subsequent claims attributed to it sign automatically.
 	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
-	// Graph materializes the claim's provenance by walking edge
-	// references.
-	Graph(ctx context.Context) (Graph, error)
-	// Validate is the §5.10 check across the claim's provenance —
-	// convenience for Graph(ctx).Validate().
-	Verify(ctx context.Context) error
 	// Encode returns the claim's canonical CBOR serialization — the
 	// same bytes its id is derived from, storage-agnostic. Inverse of
 	// the package-level DecodeClaim. Persistence adapters use it to
@@ -48,14 +40,6 @@ type claim struct {
 	node        *node
 	edges       []*edge // same order as node.edges
 	contributor Contributor
-}
-
-func (c *claim) Verify(ctx context.Context) error {
-	g, err := c.Graph(ctx)
-	if err != nil {
-		return err
-	}
-	return g.Validate()
 }
 
 func (c *claim) Node() Node { return c.node }
@@ -91,20 +75,20 @@ func (c *claim) IsContributor() bool {
 
 func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) {
 	if !c.IsContributor() {
-		return nil, fmt.Errorf("ranke.Claim.AsContributor: claim has type %s, not contribution/contributor", c.node.Type())
+		return nil, withDetail(errNotContributorClaim, c.node.Type())
 	}
 	if len(signingKey) == 0 || signingKey[0] == nil {
 		return c, nil // unwrapped — caller didn't ask to bind a key
 	}
 	if len(c.node.pubkey) == 0 {
-		return nil, errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
+		return nil, errSigningKeyNoPubkey
 	}
 	keyPubkey, err := EncodePublicKey(signingKey[0].Public())
 	if err != nil {
 		return nil, fmt.Errorf("ranke.Claim.AsContributor: encode signing key pubkey: %w", err)
 	}
 	if !bytes.Equal(keyPubkey, c.node.pubkey) {
-		return nil, errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
+		return nil, errSigningKeyMismatch
 	}
 	return WithSigningKey(c, signingKey[0]), nil
 }
@@ -113,9 +97,12 @@ func (c *claim) IsBranch() bool {
 	return c.node.typeClass == NodeClassContribution && NodeSubtype(c.node.typeSub) == NodeSubtypeBranch
 }
 
-func (c *claim) AsBranch() (Branch, error) {
+// AsBranch views this claim as a Branch scoped to u — the Universe its
+// closure is read from (handed over explicitly; the claim itself holds no
+// storage reference).
+func (c *claim) AsBranch(u Universe) (Branch, error) {
 	if !c.IsBranch() {
-		return nil, err.Error("claim is not a branch")
+		return nil, errNotBranch
 	}
-	return c, nil
+	return &branch{claim: c, u: u}, nil
 }

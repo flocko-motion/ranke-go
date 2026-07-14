@@ -4,10 +4,7 @@
 // limits:  the base Claim + concrete claim live in claim.go; construction/signing in claim_builder.go
 package ranke
 
-import (
-	"context"
-	"crypto"
-)
+import "crypto"
 
 // Contributor is a typed view over a Claim whose node type is
 // "contribution/contributor". Obtain via Claim.AsContributor or
@@ -49,9 +46,6 @@ func (s *signedContributor) IsContributor() bool            { return s.contribut
 func (s *signedContributor) AsContributor(key ...crypto.Signer) (Contributor, error) {
 	return s.contributor.AsContributor(key...)
 }
-func (s *signedContributor) ID() Id { return s.contributor.ID() }
-func (s *signedContributor) Verify(ctx context.Context) error {
-	return s.contributor.Verify(ctx)
-}
+func (s *signedContributor) ID() Id                    { return s.contributor.ID() }
 func (s *signedContributor) Encode() ([]byte, error)   { return s.contributor.Encode() }
 func (s *signedContributor) SigningKey() crypto.Signer { return s.key }

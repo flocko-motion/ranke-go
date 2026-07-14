@@ -59,8 +59,10 @@ func nodeClassFromAlias(c NodeClass) NodeClass {
 type NodeSubtype string
 
 const (
-	NodeSubtypeBranches         NodeSubtype = "branches"
+	NodeSubtypeBranch           NodeSubtype = "branch"
 	NodeSubtypeBranchAlias      NodeSubtype = "b"
+	NodeSubtypeBranches         NodeSubtype = "branches"
+	NodeSubtypeBranchesAlias    NodeSubtype = "B"
 	NodeSubtypeContributor      NodeSubtype = "contributor"
 	NodeSubtypeContributorAlias NodeSubtype = "c"
 	NodeSubtypeDiff             NodeSubtype = "diff"
@@ -77,8 +79,12 @@ func nodeSubtypeToAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeContributorAlias
 	case NodeSubtypeBranch:
 		return NodeSubtypeBranchAlias
+	case NodeSubtypeBranches:
+		return NodeSubtypeBranchesAlias
 	case NodeSubtypeDiff:
 		return NodeSubtypeDiffAlias
+	case NodeSubtypeHead:
+		return NodeSubtypeHeadAlias
 	default:
 		return s
 	}
@@ -90,8 +96,12 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeContributor
 	case NodeSubtypeBranchAlias:
 		return NodeSubtypeBranch
+	case NodeSubtypeBranchesAlias:
+		return NodeSubtypeBranches
 	case NodeSubtypeDiffAlias:
 		return NodeSubtypeDiff
+	case NodeSubtypeHeadAlias:
+		return NodeSubtypeHead
 	default:
 		return s
 	}
@@ -101,7 +111,7 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 const (
 	NodeTypeContributor = string(NodeClassContribution) + "/" + string(NodeSubtypeContributor)
 	NodeTypeHead        = string(NodeClassContribution) + "/" + string(NodeSubtypeHead)
-	NodeTypBranches     = string(NodeClassContribution) + "/" + string(NodeSybtypeBranches)
+	NodeTypBranches     = string(NodeClassContribution) + "/" + string(NodeSubtypeBranches)
 )
 
 // EncodingClass is the closed top-level MIME vocabulary (RFC 6838

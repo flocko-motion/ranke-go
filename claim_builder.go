@@ -190,7 +190,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		return nil, errClaimContentXOR
 	}
 
-	isRootContributor := cfg.TypeClass == NodeContribution &&
+	isRootContributor := cfg.TypeClass == NodeClassContribution &&
 		cfg.TypeSub == "contributor" &&
 		cfg.Contributor == nil
 
@@ -248,14 +248,14 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	// ContentHash supplied (no Content), size is 0.
 	if cfg.ContentHash != nil {
 		n.contentHash = cfg.ContentHash
-		n.size = uint64(len(cfg.Content))
+		n.contentSize = uint64(len(cfg.Content))
 	} else if cfg.Content != nil {
 		ch, err := hashContent(cfg.Content)
 		if err != nil {
 			return nil, fmt.Errorf("ranke.NewClaim: content hash: %w", err)
 		}
 		n.contentHash = ch
-		n.size = uint64(len(cfg.Content))
+		n.contentSize = uint64(len(cfg.Content))
 	}
 
 	n.edges = make([]Id, len(edges))

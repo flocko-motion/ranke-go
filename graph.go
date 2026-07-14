@@ -12,7 +12,7 @@ import (
 
 // Graph is a Ranke-Graph instance RG ⊆ 𝒰 (spec §4.5), in memory.
 // Built standalone via NewGraph for fresh contributions, or
-// materialized from a loaded Claim via Claim.Graph(ctx).
+// materialized from a loaded Claim via NewGraphFromClosure(ctx, claim, u).
 type Graph interface {
 	// Add inserts claims atomically. Every edge reference must
 	// already be reachable in the graph (atomic creation rule, §4.3).
@@ -63,7 +63,16 @@ func NewGraph(root Contributor) Graph {
 	return g
 }
 
-func NewGraphFromClosure(ctx context.Context, claim Claim, universe Universe) (Graph, error) {
+// NewGraphFromClosure materializes root's provenance closure into a
+// Graph by walking edge references. Referenced claims are loaded from
+// universe (or, per-claim, from the Universe each was loaded from). When
+// no Universe is available it falls back to an in-memory best effort:
+// only the already-resolved contributor is reachable.
+func NewGraphFromClosure(ctx context.Context, root Claim, universe Universe) (Graph, error) {
+	c, ok := root.(*claim)
+	if !ok {
+		return nil, errForeignClaim
+	}
 	g := &graph{
 		claims:     make(map[string]*claim),
 		referenced: make(map[string]struct{}),
@@ -82,7 +91,7 @@ func NewGraphFromClosure(ctx context.Context, claim Claim, universe Universe) (G
 		g.claims[k] = cur
 		for _, e := range cur.edges {
 			g.referenced[e.reference.String()] = struct{}{}
-			if cur.universe == nil {
+			if universe == nil {
 				// In-memory best effort: include the resolved contributor
 				// if it's this edge's target.
 				if cur.contributor != nil && cur.contributor.ID() != nil &&
@@ -93,14 +102,28 @@ func NewGraphFromClosure(ctx context.Context, claim Claim, universe Universe) (G
 				}
 				continue
 			}
-			next, err := loadClaimAs(ctx, cur.universe, e.reference)
+			next, err := loadClaimAs(ctx, universe, e.reference)
 			if err != nil {
-				return nil, fmt.Errorf("Claim.Graph: load %s: %w", e.reference.String(), err)
+				return nil, fmt.Errorf("NewGraphFromClosure: load %s: %w", e.reference.String(), err)
 			}
 			queue = append(queue, next)
 		}
 	}
 	return g, nil
+}
+
+// loadClaimAs loads the claim at id from u and unwraps it to the concrete
+// *claim.
+func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
+	cl, err := GetClaim(ctx, u, id)
+	if err != nil {
+		return nil, err
+	}
+	c, ok := cl.(*claim)
+	if !ok {
+		return nil, errForeignClaim
+	}
+	return c, nil
 }
 
 // unwrapClaim peels any wrapper (e.g. *signedContributor) off a
@@ -209,7 +232,7 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 	for _, h := range heads {
 		e, err := NewEdge(EdgeConfig{
 			Reference: h,
-			TypeClass: EdgeContribution,
+			TypeClass: EdgeClassContribution,
 			TypeSub:   "head",
 		})
 		if err != nil {
@@ -226,7 +249,7 @@ func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Cl
 	if err != nil {
 		return nil, err
 	}
-	if err := g.Add(head); err != nil {
+	if err := g.AddClaims(head); err != nil {
 		return nil, fmt.Errorf("ranke.Graph.Consolidate: add head: %w", err)
 	}
 	return head, nil
@@ -271,7 +294,7 @@ func (g *graph) verifyRecursive(id Id, depth int, seen map[string]bool, report [
 		*firstErr = fmt.Errorf("validate %s: %w", k, err)
 	}
 	for _, e := range c.edges {
-		g.validateRecursive(e.reference, depth+1, seen, report, firstErr)
+		g.verifyRecursive(e.reference, depth+1, seen, report, firstErr)
 	}
 }
 
@@ -322,7 +345,7 @@ func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
 		return c.node.pubkey, nil
 	}
 	for _, e := range c.edges {
-		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
+		if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
 			contributor, ok := g.claims[e.reference.String()]
 			if !ok {
 				return nil, fmt.Errorf("contributor claim %s not in graph", e.reference.String())

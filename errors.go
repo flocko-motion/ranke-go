@@ -22,6 +22,7 @@ var (
 	// --- Claim / Contributor ---
 	errSigningKeyNoPubkey = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
 	errSigningKeyMismatch = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
+	errNotBranch          = errors.New("ranke.Claim.AsBranch: claim is not contribution/branch")
 	errMissingContributor = errors.New("ranke: missing contributor")
 	errNilContributor     = errors.New("ranke: nil contributor")
 	errResolvedNoPubkey   = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
@@ -78,26 +79,49 @@ var (
 	errVerifyTODO      = errors.New("ranke: verification not implemented")
 )
 
-// detailError attaches an optional detail to a sentinel without building a
-// string at construction — the message is composed lazily in Error(), and
-// errors.Is(err, sentinel) still matches via Unwrap. Construct with
-// withDetail.
-type detailError struct {
+// wrapErr attaches an optional detail string and/or an optional cause to a
+// sentinel without building any string at construction — the message is
+// composed lazily in Error(). errors.Is/As match the sentinel and, when
+// present, the cause (via Unwrap). It replaces fmt.Errorf across the
+// package: withDetail for %s/%q/%d-style detail, wrap for %w-style cause,
+// wrapDetail for both.
+type wrapErr struct {
 	sentinel error
 	detail   string
+	cause    error
 }
 
-func (e *detailError) Error() string {
-	if e.detail == "" {
-		return e.sentinel.Error()
+func (e *wrapErr) Error() string {
+	msg := e.sentinel.Error()
+	if e.detail != "" {
+		msg += ": " + e.detail
 	}
-	return e.sentinel.Error() + ": " + e.detail
+	if e.cause != nil {
+		msg += ": " + e.cause.Error()
+	}
+	return msg
 }
 
-func (e *detailError) Unwrap() error { return e.sentinel }
+// Unwrap exposes the sentinel and, when present, the cause, so errors.Is
+// and errors.As match either.
+func (e *wrapErr) Unwrap() []error {
+	if e.cause == nil {
+		return []error{e.sentinel}
+	}
+	return []error{e.sentinel, e.cause}
+}
 
-// withDetail returns sentinel with detail appended lazily. The returned
-// error still matches errors.Is(err, sentinel).
+// withDetail returns sentinel with detail appended lazily.
 func withDetail(sentinel error, detail string) error {
-	return &detailError{sentinel: sentinel, detail: detail}
+	return &wrapErr{sentinel: sentinel, detail: detail}
+}
+
+// wrap returns sentinel wrapping cause; both are matchable via errors.Is.
+func wrap(sentinel, cause error) error {
+	return &wrapErr{sentinel: sentinel, cause: cause}
+}
+
+// wrapDetail returns sentinel with detail and a wrapped cause.
+func wrapDetail(sentinel error, detail string, cause error) error {
+	return &wrapErr{sentinel: sentinel, detail: detail, cause: cause}
 }

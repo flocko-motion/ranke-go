@@ -49,7 +49,7 @@ type Edge interface {
 // EdgeConfig is the data-only input to NewEdge.
 //
 // Required: Reference plus a type (either Type or TypeClass+TypeSub).
-// Content is optional inline content; ContentHash+Size instead reference
+// Content is optional inline content; ContentHash+ContentSize instead reference
 // external content (a Universe blob). Content and ContentHash are mutually
 // exclusive. RelationDirection must be set (RelationFrom or RelationTo)
 // for relation/* edges and left zero otherwise; NewEdge enforces this.
@@ -60,7 +60,7 @@ type EdgeConfig struct {
 	TypeSub           string
 	Content           []byte
 	ContentHash       Id
-	Size              uint64
+	ContentSize       uint64
 	RelationDirection RelationDirection
 	Fields            map[string]string
 }
@@ -72,7 +72,9 @@ type edge struct {
 	reference         Id
 	typeClass         EdgeClass
 	typeSub           string
-	content           []byte
+	contentHash       Id     // H(content); nil when no content
+	content           []byte // inline content bytes; nil when external
+	contentSize       uint64 // content byte length
 	relationDirection RelationDirection
 	fields            map[string]string
 	id                Id // = H(S(edge))
@@ -133,11 +135,11 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		}
 		e.content = cfg.Content
 		e.contentHash = ch
-		e.size = uint64(len(cfg.Content))
+		e.contentSize = uint64(len(cfg.Content))
 	case cfg.ContentHash != nil:
 		// External: reference a Universe blob by hash + size.
 		e.contentHash = cfg.ContentHash
-		e.size = cfg.Size
+		e.contentSize = cfg.ContentSize
 	}
 
 	// Compute the edge's own id over its canonical encoding.
@@ -160,7 +162,7 @@ func (e *edge) TypeSub() string      { return e.typeSub }
 
 func (e *edge) IsContentExternal() bool { return e.content == nil && e.contentHash != nil }
 func (e *edge) GetContentHash() Id      { return e.contentHash }
-func (e *edge) GetContentLen() uint64   { return e.size }
+func (e *edge) GetContentLen() uint64   { return e.contentSize }
 
 func (e *edge) GetInlineContent() ([]byte, error) {
 	if e.IsContentExternal() {
@@ -179,7 +181,7 @@ func (e *edge) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
 	if u == nil {
 		return nil, errNoUniverseForContent
 	}
-	return u.StreamContent(ctx, e.contentHash, e.size)
+	return u.StreamContent(ctx, e.contentHash, e.contentSize)
 }
 
 func (e *edge) RelationDirection() RelationDirection { return e.relationDirection }

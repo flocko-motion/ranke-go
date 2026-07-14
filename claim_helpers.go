@@ -98,7 +98,7 @@ func isTypedNil(i any) bool {
 // one derivation/* edge (§3.5).
 func requiresProvenance(c NodeClass) bool {
 	switch c {
-	case NodeDerivation, NodeEntity, NodeRelation:
+	case NodeClassDerivation, NodeClassEntity, NodeClassRelation:
 		return true
 	}
 	return false
@@ -107,7 +107,7 @@ func requiresProvenance(c NodeClass) bool {
 // hasDerivationEdge reports whether edges contains a derivation/* edge.
 func hasDerivationEdge(edges []*edge) bool {
 	for _, e := range edges {
-		if e.typeClass == EdgeDerivation {
+		if e.typeClass == EdgeClassDerivation {
 			return true
 		}
 	}
@@ -134,7 +134,7 @@ func buildContributorEdge(c Contributor) (*edge, error) {
 	}
 	e, err := NewEdge(EdgeConfig{
 		Reference: c.ID(),
-		TypeClass: EdgeContribution,
+		TypeClass: EdgeClassContribution,
 		TypeSub:   "contributor",
 	})
 	if err != nil {

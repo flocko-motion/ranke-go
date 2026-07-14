@@ -111,7 +111,7 @@ func buildEncNode(n *node) (encNode, error) {
 	}
 	if n.contentHash != nil {
 		en.ContentHash = idBytes(n.contentHash)
-		en.Size = n.size
+		en.Size = n.contentSize
 	}
 	if len(n.edges) > 0 {
 		en.Edges = make([][]byte, len(n.edges))
@@ -244,7 +244,7 @@ func decodeNode(en encNode) (*node, error) {
 			return nil, err
 		}
 		n.contentHash = ch
-		n.size = en.Size
+		n.contentSize = en.Size
 	}
 	if len(en.Edges) > 0 {
 		n.edges = make([]Id, len(en.Edges))

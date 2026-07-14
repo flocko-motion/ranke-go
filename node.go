@@ -66,7 +66,7 @@ type node struct {
 	title         string
 	contentHash   Id     // nil when no content
 	content       []byte // raw content bytes, kept with the node
-	size          uint64 // = len(content); paired with contentHash to defend against truncation/extension
+	contentSize   uint64 // = len(content); paired with contentHash to defend against truncation/extension
 	createdAt     time.Time
 	edges         []Id // edge ids, sorted canonically
 	fields        map[string]string
@@ -95,7 +95,7 @@ func (n *node) EncodingSub() string          { return n.encodingSub }
 
 func (n *node) IsContentExternal() bool { return n.content == nil && n.contentHash != nil }
 func (n *node) GetContentHash() Id      { return n.contentHash }
-func (n *node) GetContentLen() uint64   { return n.size }
+func (n *node) GetContentLen() uint64   { return n.contentSize }
 func (n *node) CreatedAt() time.Time    { return n.createdAt }
 func (n *node) ID() Id                  { return n.id }
 
@@ -122,7 +122,7 @@ func (n *node) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
 	if u == nil {
 		return nil, errNoUniverseForContent
 	}
-	return u.StreamContent(ctx, n.contentHash, n.size)
+	return u.StreamContent(ctx, n.contentHash, n.contentSize)
 }
 
 func (n *node) HasField(name string) bool {
@@ -209,22 +209,22 @@ func EncodingVideo(sub string) string { return encType(encVideo, sub) }
 func encType(class EncodingClass, sub string) string { return string(class) + "/" + sub }
 
 // TypeSource returns the "source/<sub>" node type.
-func TypeSource(sub string) string { return nodeType(NodeSource, sub) }
+func TypeSource(sub string) string { return nodeType(NodeClassSource, sub) }
 
 // TypeDerivation returns the "derivation/<sub>" node type.
-func TypeDerivation(sub string) string { return nodeType(NodeDerivation, sub) }
+func TypeDerivation(sub string) string { return nodeType(NodeClassDerivation, sub) }
 
 // TypeEntity returns the "entity/<sub>" node type.
-func TypeEntity(sub string) string { return nodeType(NodeEntity, sub) }
+func TypeEntity(sub string) string { return nodeType(NodeClassEntity, sub) }
 
 // TypeRelation returns the "relation/<sub>" node type.
-func TypeRelation(sub string) string { return nodeType(NodeRelation, sub) }
+func TypeRelation(sub string) string { return nodeType(NodeClassRelation, sub) }
 
 func nodeType(class NodeClass, sub string) string { return string(class) + "/" + sub }
 
 // Closed contribution/* node type strings, for ClaimBuilder.Type.
 const (
-	NodeContributor = string(NodeContribution) + "/contributor"
-	NodeHead        = string(NodeContribution) + "/head"
-	NodeBranches    = string(NodeContribution) + "/branches"
+	NodeContributor = string(NodeClassContribution) + "/contributor"
+	NodeHead        = string(NodeClassContribution) + "/head"
+	NodeBranches    = string(NodeClassContribution) + "/branches"
 )
