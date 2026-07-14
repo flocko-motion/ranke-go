@@ -68,6 +68,10 @@ var (
 	errUnknownEdgeClass       = errors.New("ranke.NewEdge: unknown edge class")
 	errFieldNotSet            = errors.New("ranke: field not set")
 	errInvalidFieldName       = errors.New("ranke: invalid field name (use lowercase letters, digits, and '_'; no leading '_')")
+	errFieldNameTooLong       = errors.New("ranke: field name too long (max 128 bytes)")
+	errFieldValueTooLong      = errors.New("ranke: field value too long (max 64 KiB) — put large data in content")
+	errTooManyFields          = errors.New("ranke: too many fields on one record (max 256)")
+	errInlineContentTooLarge  = errors.New("ranke: inline content too large (max 1 MiB) — use external content")
 	errInvalidSubtype         = errors.New("ranke: invalid subtype (use lowercase letters, digits, and '_'; no leading '_')")
 	errInvalidEncodingSubtype = errors.New("ranke: invalid encoding subtype")
 

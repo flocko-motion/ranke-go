@@ -164,10 +164,8 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		return nil, err
 	}
 
-	for k := range cfg.Fields {
-		if err := checkUserFieldName(k); err != nil {
-			return nil, err
-		}
+	if err := checkFields(cfg.Fields); err != nil {
+		return nil, err
 	}
 
 	n := &node{
@@ -228,8 +226,16 @@ func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err er
 	if hasInline && hasExternal {
 		return false, false, errClaimContentXOR
 	}
+	if hasInline && len(cfg.InlineContent) > maxInlineContent {
+		return false, false, errInlineContentTooLarge
+	}
 	return hasInline, hasExternal, nil
 }
+
+// maxInlineContent caps inline content at construction (NewClaim/NewEdge):
+// larger blobs belong in external content (dedup + streaming). Verification
+// and decode do not enforce it — an already-stored record is accepted as-is.
+const maxInlineContent = 1 << 20 // 1 MiB
 
 // resolveEncoding fills EncodingClass/Sub from the combined Encoding and
 // validates it. Encoding is the content media type, so it applies only with

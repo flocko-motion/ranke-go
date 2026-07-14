@@ -123,6 +123,9 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	if cfg.InlineContent != nil && cfg.ContentHash != nil {
 		return nil, errEdgeContentXOR
 	}
+	if len(cfg.InlineContent) > maxInlineContent {
+		return nil, errInlineContentTooLarge
+	}
 
 	// Relation direction rules (§4.7):
 	//   - relation/* edges must carry RelationFrom or RelationTo
@@ -137,10 +140,8 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		}
 	}
 
-	for k := range cfg.Fields {
-		if err := checkUserFieldName(k); err != nil {
-			return nil, err
-		}
+	if err := checkFields(cfg.Fields); err != nil {
+		return nil, err
 	}
 
 	e := &edge{

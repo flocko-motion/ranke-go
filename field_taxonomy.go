@@ -1,6 +1,20 @@
 package ranke
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
+
+// Field-size limits: reference-implementation caps (the paper leaves them
+// open). Fields are metadata — large data belongs in content (inline or
+// external, which carries content_size and dedups). Enforced at construction
+// (NewClaim/NewEdge); the codec and verifier never reject an already-stored
+// record over them.
+const (
+	maxFieldNameLen    = 128       // bytes, one field name
+	maxFieldValueLen   = 64 * 1024 // bytes, one field value
+	maxFieldsPerRecord = 256       // fields on one node or edge
+)
 
 // Field is a node/edge field name. Field names are open user vocabulary,
 // constrained to a safe charset (enforced by NewClaim/NewEdge): lowercase
@@ -48,12 +62,35 @@ func splitLines(s string) map[string]struct{} {
 	return out
 }
 
-// checkUserFieldName validates a user-supplied field name: non-empty, only
-// lowercase letters, digits, and "_", never starting with "_" (that prefix
-// — like "." — is a reserved system namespace).
+// checkUserFieldName validates a user-supplied field name: non-empty, at most
+// maxFieldNameLen bytes, only lowercase letters, digits, and "_", never
+// starting with "_" (that prefix — like "." — is a reserved system namespace).
 func checkUserFieldName(name string) error {
+	if len(name) > maxFieldNameLen {
+		return errFieldNameTooLong // don't echo a possibly-huge name
+	}
 	if !validFieldChars(name) {
 		return withDetail(errInvalidFieldName, name)
+	}
+	return nil
+}
+
+// checkFields validates a whole node/edge field set at construction: at most
+// maxFieldsPerRecord entries, each name valid and bounded, each value at most
+// maxFieldValueLen bytes. It covers every field — user fields and system ones
+// (e.g. edges_diff_omit) alike — so nothing slips through unbounded. Large
+// data belongs in content (inline or external), not a field.
+func checkFields(fields map[string]string) error {
+	if len(fields) > maxFieldsPerRecord {
+		return withDetail(errTooManyFields, strconv.Itoa(len(fields)))
+	}
+	for k, v := range fields {
+		if err := checkUserFieldName(k); err != nil {
+			return err
+		}
+		if len(v) > maxFieldValueLen {
+			return withDetail(errFieldValueTooLong, k)
+		}
 	}
 	return nil
 }
