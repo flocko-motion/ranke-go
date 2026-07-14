@@ -74,7 +74,7 @@ type blobUniverse struct {
 func (u *blobUniverse) Close() error { return u.store.Close() }
 
 //deadcode:keep
-func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, error) {
+func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	for i, id := range ids {
 		if id == nil {
@@ -90,7 +90,9 @@ func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.C
 		}
 		out[i] = c
 	}
-	return out, nil
+	// A byte store returns raw claims; the read path materialises diff overlays
+	// via the ADT default, honouring WithNotDiffMaterialized (passed through).
+	return ranke.DefaultMaterialize(ctx, u, out, opts...)
 }
 
 //deadcode:keep
