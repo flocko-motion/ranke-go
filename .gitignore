@@ -1,6 +1,7 @@
 bin/
 dist/
 coverage.out
+coverage-core.out
 
 # Stray binaries from `go build ./cmd/<tool>` at repo root.
 /scenariodoc
