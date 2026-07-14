@@ -5,14 +5,18 @@
 package ranke
 
 import (
-	"bytes"
 	"context"
+	"errors"
+	"io"
 	"time"
 )
 
+var errForeignClaim = errors.New("ranke: claim from a foreign implementation")
+
 // Branch is a convenience view over a contribution/branch claim: a Claim
-// (all its methods, including Contributor()) plus branch-specific
-// properties, provenance navigation, closure access, and verification.
+// (all its methods, including Contributor() and the §5.10 Verify) plus
+// branch-specific properties, provenance navigation, closure access, and
+// a long-running branch verification.
 type Branch interface {
 	Claim
 
@@ -25,19 +29,38 @@ type Branch interface {
 	// contribution/diff predecessor (nil when this is the first).
 	Prev(ctx context.Context) (Branch, error)
 
-	// Access the branch's closure
-	HasClaim(ctx context.Context, id Id) bool
+	// Access the branch's closure (rooted at this branch's head).
+	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
-	GetClaimContent(ctx context.Context, id Id) (bytes.Reader, error)
+	GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 
-	// Verify from this head
-	Verify(ctx context.Context) (VerificationRun, error)
+	// VerifyBranch runs a (possibly long-running) verification over this
+	// branch's closure. Named distinctly from the embedded Claim.Verify
+	// (the single-claim §5.10 check) since a Branch is a special Claim.
+	VerifyBranch(ctx context.Context) (VerificationRun, error)
 }
 
-// branch is a thin wrapper embedding the underlying claim, so every Claim
-// method is promoted and the branch extension adds the rest.
+// branch is a thin wrapper embedding the underlying head claim, so every
+// Claim method is promoted, plus the Universe the branch reads its closure
+// from. The wrapped claim is the branch's head, so its own id is the
+// closure root.
 type branch struct {
 	*claim
+	u Universe
+}
+
+// newBranch loads the claim at id (the branch's head) and wraps it as a
+// Branch scoped to u.
+func newBranch(ctx context.Context, u Universe, id Id) (Branch, error) {
+	c, err := GetClaim(ctx, u, id)
+	if err != nil {
+		return nil, err
+	}
+	cc, ok := c.(*claim)
+	if !ok {
+		return nil, errForeignClaim
+	}
+	return &branch{claim: cc, u: u}, nil
 }
 
 func (b *branch) Name() string {
@@ -45,8 +68,50 @@ func (b *branch) Name() string {
 	return name
 }
 
+// Head is the branch's head id — the branch wraps its head claim, so that
+// is this claim's own id.
+func (b *branch) Head() Id { return b.ID() }
+
+func (b *branch) Time() time.Time { return b.Node().CreatedAt() }
+
+// Prev returns the previous revision of this branch — the claim its
+// contribution/diff edge references — or nil when this is the first.
 func (b *branch) Prev(ctx context.Context) (Branch, error) {
-	return b.Edges(EdgeFilterFieldValue{
-		Type: EdgeDiff,
-	})
+	edges := b.Edges(EdgeFilterType{Type: EdgeTypeDiff})
+	if len(edges) == 0 {
+		return nil, nil
+	}
+	return newBranch(ctx, b.u, edges[0].Reference())
+}
+
+func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
+	if id == nil {
+		return false, errNilID
+	}
+	return b.u.InClosure(ctx, b.ID(), id)
+}
+
+func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
+	if id == nil {
+		return nil, errNilID
+	}
+	return b.u.GetFromClosure(ctx, b.ID(), id)
+}
+
+func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
+	c, err := b.GetClaim(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	n := c.Node()
+	if n.ContentHash() == nil {
+		return nil, errNoContent
+	}
+	return b.u.StreamContent(ctx, n.ContentHash(), n.Size())
+}
+
+func (b *branch) VerifyBranch(_ context.Context) (VerificationRun, error) {
+	// TODO: run verification over this branch's closure and return a
+	// progress handle. Pending the verification design (see VerificationRun).
+	return nil, errVerifyTODO
 }
