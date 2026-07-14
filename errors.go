@@ -12,8 +12,6 @@ var (
 	ErrIntegrity = errors.New("ranke: integrity check failed")
 	ErrClosed    = errors.New("ranke: closed")
 
-	errReadOnlyUniverse = errors.New("ranke: read-only Universe view (writes unsupported)")
-
 	// --- Id ---
 	errInvalidId     = errors.New("ranke: invalid id")
 	errInvalidVarint = errors.New("ranke: invalid varint prefix")
@@ -87,6 +85,8 @@ var (
 	errUnknownRefClaim       = errors.New("ranke.Graph: edge references unknown claim (atomic creation rule §4.3)")
 	errRefMissingClaim       = errors.New("ranke.Graph: edge references missing claim")
 	errConsolidate           = errors.New("ranke.Graph.Consolidate")
+	errCopyClaims            = errors.New("ranke.CopyClaims")
+	errCopyContents          = errors.New("ranke.CopyContents")
 	errVerify                = errors.New("ranke.verify")
 	errContributorUnresolved = errors.New("ranke.verify: contributor claim unresolved")
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")

@@ -197,12 +197,12 @@ func (u *blobUniverse) hasAll(ctx context.Context, ids []ranke.Id) ([]bool, erro
 
 //deadcode:keep
 func (u *blobUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return DefaultCopyClaims(ctx, u, src, ids, opts...)
+	return ranke.DefaultCopyClaims(ctx, u, src, ids, opts...)
 }
 
 //deadcode:keep
 func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return DefaultCopyContents(ctx, u, src, refs, opts...)
+	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
 // Capabilities surfaces the backing store's declared capabilities as the

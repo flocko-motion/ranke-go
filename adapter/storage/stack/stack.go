@@ -21,7 +21,6 @@ import (
 	"io"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 type mode int
@@ -291,11 +290,11 @@ func (s *stack) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (
 }
 
 func (s *stack) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyClaims(ctx, s, src, ids, opts...)
+	return ranke.DefaultCopyClaims(ctx, s, src, ids, opts...)
 }
 
 func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyContents(ctx, s, src, refs, opts...)
+	return ranke.DefaultCopyContents(ctx, s, src, refs, opts...)
 }
 
 // InClosure reports whether id is in head's closure.

@@ -18,7 +18,6 @@ import (
 	"io"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
 type partition struct {
@@ -189,11 +188,11 @@ func (p *partition) StreamContent(ctx context.Context, hash ranke.Id, size uint6
 }
 
 func (p *partition) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyClaims(ctx, p, src, ids, opts...)
+	return ranke.DefaultCopyClaims(ctx, p, src, ids, opts...)
 }
 
 func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyContents(ctx, p, src, refs, opts...)
+	return ranke.DefaultCopyContents(ctx, p, src, refs, opts...)
 }
 
 // Capabilities reports an ability only if every shard has it: a key may land on

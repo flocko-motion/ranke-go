@@ -1,7 +1,7 @@
 // package: ranke / graph
 // type:    logic
-// job:     in-memory Ranke-Graph (RG ⊆ 𝒰) — adds claims under the atomic-creation rule, tracks heads, consolidates
-// limits:  does not persist claims (-> universe); does not bind graphs to branches (-> archive); verification lives in verify.go
+// job:     a Ranke-Graph handle RG ⊆ 𝒰 — stages claims into a Universe under the atomic-creation rule, tracks open heads, consolidates
+// limits:  claims live in the Universe (-> universe); does not bind graphs to branches (-> archive); verification lives in verify.go
 package ranke
 
 import (
@@ -67,9 +67,9 @@ func NewGraph(root Contributor) Graph {
 // no Universe is available it falls back to an in-memory best effort:
 // only the already-resolved contributor is reachable.
 func NewGraphFromClosure(ctx context.Context, root Claim, universe Universe) (Graph, error) {
-	c, ok := root.(*claim)
-	if !ok {
-		return nil, errForeignClaim
+	c := unwrapClaim(root)
+	if c == nil {
+		return nil, errNilClaim
 	}
 	g := &graph{
 		claims:     make(map[string]*claim),
@@ -94,9 +94,7 @@ func NewGraphFromClosure(ctx context.Context, root Claim, universe Universe) (Gr
 				// if it's this edge's target.
 				if cur.contributor != nil && cur.contributor.ID() != nil &&
 					cur.contributor.ID().Equal(e.reference) {
-					if cc, ok := cur.contributor.(*claim); ok {
-						queue = append(queue, cc)
-					}
+					queue = append(queue, unwrapClaim(cur.contributor))
 				}
 				continue
 			}
@@ -117,29 +115,17 @@ func loadClaimAs(ctx context.Context, u Universe, id Id) (*claim, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, ok := cl.(*claim)
-	if !ok {
-		return nil, errForeignClaim
-	}
-	return c, nil
+	return unwrapClaim(cl), nil
 }
 
-// unwrapClaim peels any wrapper (e.g. *signedContributor) off a
-// Contributor to reach the underlying persisted *claim. Returns nil
-// if the chain doesn't end at our concrete type — i.e. the caller
-// passed a foreign implementation.
-func unwrapClaim(c Contributor) *claim {
-	for c != nil {
-		switch v := c.(type) {
-		case *claim:
-			return v
-		case *signedContributor:
-			c = v.contributor
-		default:
-			return nil
-		}
+// unwrapClaim returns the concrete *claim behind c, peeling any wrapper
+// (e.g. *signedContributor) via the sealed unwrap method. Returns nil only
+// for a nil Claim — Claim is sealed, so there is no foreign case.
+func unwrapClaim(c Claim) *claim {
+	if c == nil {
+		return nil
 	}
-	return nil
+	return c.unwrap()
 }
 
 func (g *graph) AddClaims(claims ...Claim) error {
@@ -155,10 +141,7 @@ func (g *graph) addOne(cl Claim) error {
 	if cl == nil {
 		return errNilClaim
 	}
-	c, ok := cl.(*claim)
-	if !ok {
-		return errForeignClaim
-	}
+	c := unwrapClaim(cl)
 	// Idempotency: same id ⇒ no-op.
 	key := c.node.id.String()
 	if _, exists := g.claims[key]; exists {

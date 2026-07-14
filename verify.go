@@ -160,12 +160,12 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 // --- the walk ---
 
 // runVerification walks the closure from roots in the background, verifying
-// each claim (§5.10), and returns a live handle. fetch obtains a claim by
-// id (an in-memory map lookup for a Graph, a Universe load for an
-// Archive/Branch); u is the Universe for external-content fetches (nil for
-// an in-memory graph). rootCheck, if set, validates each depth-0 root
-// (e.g. an Archive requires a branch-table head).
-func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Universe, cfg *verifyConfig, rootCheck func(*claim) error) *verificationRun {
+// each claim (§5.10), and returns a live handle. Everything comes from the
+// one Universe u: claims via GetClaim, content via the node (inline) or
+// GetContents/StreamContent (external). An in-memory Graph verifies against a
+// read-only Universe view of itself (graphUniverse). rootCheck, if set,
+// validates each depth-0 root (e.g. an Archive requires a branch-table head).
+func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyConfig, rootCheck func(Claim) error) *verificationRun {
 	run := newRun()
 	go func() {
 		defer run.finish()
@@ -201,7 +201,10 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				continue // pruned: already trusted/committed
 			}
 
-			c, err := getClaimNode(ctx, u, cur.id)
+			// Load the stored (delta) form: verification checks the exact
+			// bytes each claim was signed over and walks its stored edge
+			// references, so materialising the diff would be misleading here.
+			c, err := GetClaim(ctx, u, cur.id, WithNotDiffMaterialized())
 			if err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
@@ -210,7 +213,7 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 				continue
 			}
 
-			if !cfg.createdAfter.IsZero() && c.node.createdAt.Before(cfg.createdAfter) {
+			if !cfg.createdAfter.IsZero() && c.Node().CreatedAt().Before(cfg.createdAfter) {
 				continue // pruned: older than the created_at bound
 			}
 
@@ -241,8 +244,8 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 			// reaches the full closure, including a diff predecessor and,
 			// through it, inherited entries.
 			if cfg.maxDepth == 0 || cur.depth < cfg.maxDepth {
-				for _, e := range c.edges {
-					queue = append(queue, item{e.reference, cur.depth + 1})
+				for _, e := range c.Edges() {
+					queue = append(queue, item{e.Reference(), cur.depth + 1})
 				}
 			}
 		}
@@ -250,11 +253,36 @@ func runVerification(ctx context.Context, roots []Id, fetch fetchFunc, u Univers
 	return run
 }
 
-// verifyClaim runs the §5.10 check on one claim: recompute H(S(node)) and
-// verify the signature against id(v) (integrity + authenticity, §5.2 +
-// §5.7), then verify content integrity (inline always; external only when
-// configured).
-func verifyClaim(ctx context.Context, c *claim, cfg *verifyConfig, u Universe) error {
+// verifyClaim runs the §5.10 check on one claim, entirely through the public
+// interface: recompute-and-check the signature against id(v) (the claim does
+// that itself via verifyID — the one step needing the id-preimage encoding),
+// resolve the signing pubkey, then verify content integrity (inline always;
+// external only when configured).
+func verifyClaim(ctx context.Context, c Claim, cfg *verifyConfig, u Universe) error {
+	pubkey, err := resolveClaimPubkey(ctx, c, u)
+	if err != nil {
+		return wrapDetail(errVerify, "resolve pubkey", err)
+	}
+	if err := c.verifyID(pubkey); err != nil {
+		return wrapDetail(errVerify, "§5.7", err)
+	}
+	// Content integrity: node, then each edge.
+	if err := verifyContentRef(ctx, c.Node(), cfg, u); err != nil {
+		return wrapDetail(errVerify, "node content", err)
+	}
+	for _, e := range c.Edges() {
+		if err := verifyContentRef(ctx, e, cfg, u); err != nil {
+			return wrapDetail(errVerify, "edge content", err)
+		}
+	}
+	return nil
+}
+
+// verifyID recomputes H(S(node)) and checks that this claim's id is a valid
+// signature over it by pubkey (§5.2 + §5.7). It is the single verification
+// step that needs the node's canonical id-preimage encoding and the raw id
+// bytes, so the claim does it itself rather than exposing either.
+func (c *claim) verifyID(pubkey []byte) error {
 	encoded, err := encodeNode(c.node)
 	if err != nil {
 		return wrapDetail(errVerify, "encode", err)
@@ -263,42 +291,27 @@ func verifyClaim(ctx context.Context, c *claim, cfg *verifyConfig, u Universe) e
 	if err != nil {
 		return wrapDetail(errVerify, "hash", err)
 	}
-	pubkey, err := resolveClaimPubkey(ctx, c, u)
-	if err != nil {
-		return wrapDetail(errVerify, "resolve pubkey", err)
-	}
-	idH, ok := c.node.id.(*id)
-	if !ok {
-		return errForeignIdType
-	}
-	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
-		return wrapDetail(errVerify, "§5.7", err)
-	}
-
-	// Content integrity: node, then each edge.
-	if err := verifyContentRef(ctx, c.node.contentHash, c.node.contentSize, c.node.content, cfg, u); err != nil {
-		return wrapDetail(errVerify, "node content", err)
-	}
-	for _, e := range c.edges {
-		if err := verifyContentRef(ctx, e.contentHash, e.contentSize, e.content, cfg, u); err != nil {
-			return wrapDetail(errVerify, "edge content", err)
-		}
-	}
-	return nil
+	return verifySignature(pubkey, recomputed.raw, idBytes(c.node.id))
 }
 
-// resolveClaimPubkey returns the pubkey whose private key signed this
-func resolveClaimPubkey(ctx context.Context, c *claim, u Universe) ([]byte, error) {
-	src := c // initial node (no edges): the pubkey is its own content
-	if len(c.edges) > 0 {
+// resolveClaimPubkey returns the pubkey whose private key signed this claim's
+// id (§5.7): the claim's own content for an initial node (no edges), else the
+// content of the contributor named by its contribution/contributor edge.
+// Purely interface-driven.
+func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error) {
+	src := c.Node() // initial node (no edges): the pubkey is its own content
+	if edges := c.Edges(); len(edges) > 0 {
 		src = nil
-		for _, e := range c.edges {
-			if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
-				contributor, err := getClaimNode(ctx, u, e.reference)
+		for _, e := range edges {
+			if e.TypeClass() == EdgeClassContribution && e.TypeSub() == "contributor" {
+				// Materialise the contributor (the default): its pubkey may be
+				// inherited from a predecessor if the contributor is itself a
+				// diff, so the stored delta alone could be empty.
+				contributor, err := GetClaim(ctx, u, e.Reference())
 				if err != nil {
-					return nil, wrapDetail(errContributorUnresolved, e.reference.String(), err)
+					return nil, wrapDetail(errContributorUnresolved, e.Reference().String(), err)
 				}
-				src = contributor
+				src = contributor.Node()
 				break
 			}
 		}
@@ -306,33 +319,47 @@ func resolveClaimPubkey(ctx context.Context, c *claim, u Universe) ([]byte, erro
 			return nil, errNoContributorEdge
 		}
 	}
-	// node, external streamed from u. GetContent handles both (§5.7).
-	rdr, err := src.node.GetContent(ctx, u)
+	// Transparent: inline from the node, external streamed from u (§5.7).
+	rdr, err := src.GetContent(ctx, u)
 	if err != nil {
 		return nil, err
 	}
 	return io.ReadAll(rdr)
 }
 
-// verifyContentRef checks content integrity for one content reference.
-// Inline content is always re-hashed; external content is fetched and
-// verified only when cfg.externalContent is set and a Universe is available.
-func verifyContentRef(ctx context.Context, hash Id, size uint64, inline []byte, cfg *verifyConfig, u Universe) error {
+// contentCarrier is the content-addressing surface shared by Node and Edge —
+// enough to verify a content reference without the concrete type.
+type contentCarrier interface {
+	GetContentHash() Id
+	GetContentSize() uint64
+	IsContentExternal() bool
+	GetInlineContent() ([]byte, error)
+}
+
+// verifyContentRef checks content integrity for one node/edge. Inline content
+// is always re-hashed; external content is fetched and verified only when
+// cfg.externalContent is set and a Universe is available.
+func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig, u Universe) error {
+	hash := cc.GetContentHash()
 	if hash == nil {
 		return nil // no content
 	}
-	if inline != nil {
-		return VerifyContent(hash, size, inline)
+	if !cc.IsContentExternal() {
+		inline, err := cc.GetInlineContent()
+		if err != nil {
+			return err
+		}
+		return VerifyContent(hash, cc.GetContentSize(), inline)
 	}
 	if !cfg.externalContent || u == nil {
 		return nil // external content: skipped by default (may be huge)
 	}
-	rc, err := u.StreamContent(ctx, hash, size)
+	rc, err := u.StreamContent(ctx, hash, cc.GetContentSize())
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
-	vr, err := NewVerifyingReader(rc, hash, size)
+	vr, err := NewVerifyingReader(rc, hash, cc.GetContentSize())
 	if err != nil {
 		return err
 	}
@@ -348,19 +375,6 @@ func verifyContentRef(ctx context.Context, hash Id, size uint64, inline []byte, 
 func (g *graph) Verify(opts ...VerifyOption) VerificationRun {
 	cfg := newVerifyConfig(opts...)
 	return runVerification(context.Background(), g.Heads(), graphUniverse{g}, cfg, nil)
-}
-
-// getClaimNode loads a claim from u and unwraps it to the concrete *claim the
-// walk needs (materialising diffs, per GetClaim).
-func getClaimNode(ctx context.Context, u Universe, id Id) (*claim, error) {
-	cl, err := GetClaim(ctx, u, id)
-	if err != nil {
-		return nil, err
-	}
-	c, ok := cl.(*claim)
-	if !ok {
-		return nil, errForeignClaim
-	}
 }
 
 // Verify walks the archive's closure from its head and verifies each claim.
