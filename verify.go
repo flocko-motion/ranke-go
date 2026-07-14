@@ -265,7 +265,7 @@ func verifyClaim(ctx context.Context, c *claim, fetch fetchFunc, cfg *verifyConf
 	if err != nil {
 		return wrapDetail(errVerify, "hash", err)
 	}
-	pubkey, err := resolveClaimPubkey(ctx, c, fetch)
+	pubkey, err := resolveClaimPubkey(ctx, c, fetch, u)
 	if err != nil {
 		return wrapDetail(errVerify, "resolve pubkey", err)
 	}

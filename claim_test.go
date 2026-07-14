@@ -1,6 +1,7 @@
 package ranke
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -167,7 +168,7 @@ func newSignedContributor(t *testing.T) (Contributor, ed25519.PrivateKey) {
 	require.NoError(t, err)
 	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
 	require.NoError(t, err)
-	view, err := c.AsContributor(priv)
+	view, err := c.AsContributor(context.Background(), nil, priv) // inline pubkey → no Universe needed
 	require.NoError(t, err)
 	return view, priv
 }
@@ -181,7 +182,7 @@ func newSignedContributor(t *testing.T) (Contributor, ed25519.PrivateKey) {
 func TestClaimRoundTrip_IdentityContributor(t *testing.T) {
 	claim, err := NewClaim(NodeContributor, nil).Sign() // no content, no key
 	require.NoError(t, err)
-	c, err := claim.AsContributor()
+	c, err := claim.AsContributor(context.Background(), nil)
 	require.NoError(t, err)
 
 	require.True(t, c.IsContributor(), "must be a contributor claim")

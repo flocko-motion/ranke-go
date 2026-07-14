@@ -20,14 +20,15 @@ var (
 	errEmptyType = errors.New("ranke: empty type")
 
 	// --- Claim / Contributor ---
-	errSigningKeyNoPubkey = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
-	errSigningKeyMismatch = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
-	errMissingContributor = errors.New("ranke: missing contributor")
-	errNilContributor     = errors.New("ranke: nil contributor")
-	errResolvedNoPubkey   = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
-	errResolvedNoKey      = errors.New("ranke: resolved contributor has a pubkey but no SigningKey was supplied")
-	errResolvedMismatch   = errors.New("ranke: SigningKey's public key does not match the resolved contributor pubkey")
-	errForeignClaim       = errors.New("ranke: claim from a foreign implementation")
+	errSigningKeyNoPubkey       = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
+	errSigningKeyMismatch       = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
+	errResolveContributorPubkey = errors.New("ranke.Claim.AsContributor: cannot resolve contributor pubkey from content")
+	errMissingContributor       = errors.New("ranke: missing contributor")
+	errNilContributor           = errors.New("ranke: nil contributor")
+	errResolvedNoPubkey         = errors.New("ranke: SigningKey supplied but resolved contributor has no pubkey")
+	errResolvedNoKey            = errors.New("ranke: resolved contributor has a pubkey but no SigningKey was supplied")
+	errResolvedMismatch         = errors.New("ranke: SigningKey's public key does not match the resolved contributor pubkey")
+	errForeignClaim             = errors.New("ranke: claim from a foreign implementation")
 
 	// --- Node / content ---
 	errContentExternal      = errors.New("ranke: content is external — use GetContent with a Universe")

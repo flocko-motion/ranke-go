@@ -6,7 +6,9 @@ package ranke
 
 import (
 	"bytes"
+	"context"
 	"crypto"
+	"io"
 	"sort"
 )
 
@@ -22,12 +24,14 @@ type Claim interface {
 	// root (no-edge) contributor.
 	Contributor() Contributor
 	IsContributor() bool
-	// AsContributor returns this claim as a Contributor. Errors if
-	// the claim isn't of type contribution/contributor. If a signing
-	// key is supplied it must match the contributor's pubkey; the
-	// returned Contributor is wrapped via WithSigningKey so
-	// subsequent claims attributed to it sign automatically.
-	AsContributor(signingKey ...crypto.Signer) (Contributor, error)
+	// AsContributor returns this claim as a Contributor. Errors if the
+	// claim isn't of type contribution/contributor. It resolves the
+	// contributor's pubkey once — transparently, inline or external via u
+	// (nil is fine for inline) — and caches it on the returned Contributor,
+	// so later signing can check keys without a Universe. If a signing key
+	// is supplied it must match that pubkey; the returned Contributor then
+	// signs subsequent claims attributed to it automatically.
+	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
 	// Encode returns the claim's canonical CBOR serialization — the
 	// same bytes its id is derived from, storage-agnostic. Inverse of
@@ -127,22 +131,36 @@ func (c *claim) IsContributor() bool {
 	return c.node.typeClass == NodeClassContribution && NodeSubtype(c.node.typeSub) == NodeSubtypeContributor
 }
 
-func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) {
+func (c *claim) AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error) {
 	if !c.IsContributor() {
 		return nil, withDetail(errNotContributorClaim, c.node.Type())
 	}
-	if len(signingKey) == 0 || signingKey[0] == nil {
-		return c, nil // unwrapped — caller didn't ask to bind a key
-	}
-	if len(c.node.content) == 0 {
-		return nil, errSigningKeyNoPubkey
-	}
-	keyPubkey, err := EncodePublicKey(signingKey[0].Public())
+	// Resolve the pubkey once, transparently — inline is served from the
+	// node, external is streamed from u (§5.7). Cached on the wrapper so
+	// signing later needs no Universe.
+	rdr, err := c.node.GetContent(ctx, u)
 	if err != nil {
-		return nil, wrap(errEncodeSigningKey, err)
+		return nil, wrap(errResolveContributorPubkey, err)
 	}
-	if !bytes.Equal(keyPubkey, c.node.content) {
-		return nil, errSigningKeyMismatch
+	pubkey, err := io.ReadAll(rdr)
+	if err != nil {
+		return nil, wrap(errResolveContributorPubkey, err)
 	}
-	return WithSigningKey(c, signingKey[0]), nil
+	var key crypto.Signer
+	if len(signingKey) > 0 {
+		key = signingKey[0]
+	}
+	if key != nil {
+		if len(pubkey) == 0 {
+			return nil, errSigningKeyNoPubkey
+		}
+		keyPubkey, err := EncodePublicKey(key.Public())
+		if err != nil {
+			return nil, wrap(errEncodeSigningKey, err)
+		}
+		if !bytes.Equal(keyPubkey, pubkey) {
+			return nil, errSigningKeyMismatch
+		}
+	}
+	return &signedContributor{contributor: c, key: key, pubkey: pubkey}, nil
 }

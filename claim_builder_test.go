@@ -2,6 +2,7 @@ package ranke
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -107,8 +108,7 @@ func TestBuilderWithFieldImmutable(t *testing.T) {
 func TestBuilderSignedRootContributor(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
 	c, err := NewClaim(NodeContributor, nil).
-		WithInlineContent([]byte("alice")).
-		WithPubkey(pubkey).
+		WithInlineContent(pubkey). // the pubkey IS the content
 		WithSigningKey(priv).
 		Sign()
 	require.NoError(t, err)
@@ -116,12 +116,61 @@ func TestBuilderSignedRootContributor(t *testing.T) {
 	require.Equal(t, "ed25519-pub", c.ID().Algorithm())
 }
 
+// TestContributorExternalPubkey: a contributor's pubkey IS its content
+// (§5.7) and content may be external (§4.4) — inline is not assumed.
+// AsContributor resolves the pubkey transparently (inline from the node,
+// external streamed from the Universe) and checks the signing key against
+// the resolved bytes.
+func TestContributorExternalPubkey(t *testing.T) {
+	ctx := context.Background()
+	priv, pubkey := ed25519Keys(t)
+	hash, err := HashContent(pubkey)
+	require.NoError(t, err)
+
+	// A contributor whose pubkey lives externally: only hash+size on the
+	// claim, the bytes in the Universe.
+	claim, err := NewClaim(NodeContributor, nil).
+		WithExternalContent(hash, uint64(len(pubkey))).
+		Sign()
+	require.NoError(t, err)
+
+	u := newStubUniverse()
+	require.NoError(t, u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: pubkey}}))
+
+	// Resolves the external pubkey from the Universe and matches the key.
+	c, err := claim.AsContributor(ctx, u, priv)
+	require.NoError(t, err, "external pubkey resolves from the Universe and matches the key")
+	require.True(t, c.IsContributor())
+
+	// A wrong key is rejected against the resolved external pubkey.
+	_, wrongPriv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	_, err = claim.AsContributor(ctx, u, wrongPriv)
+	require.Error(t, err, "the key is checked against the resolved external pubkey")
+
+	// Without the Universe the external pubkey can't be resolved.
+	_, err = claim.AsContributor(ctx, nil, priv)
+	require.Error(t, err, "external pubkey needs a Universe to resolve")
+
+	// The payoff: a claim ATTRIBUTED to the external-pubkey contributor signs
+	// with no Universe — resolveSigningPubkey reads the pubkey cached on the
+	// Contributor (Pubkey()) at AsContributor time, agnostic of whether it
+	// was inline or external.
+	child, err := NewClaim(TypeSource("note"), c).
+		WithInlineContent([]byte("body")).
+		Sign() // no explicit key, no Universe — both come from c
+	require.NoError(t, err, "child of an external-pubkey contributor signs from the cached pubkey")
+	require.Equal(t, "ed25519-pub", child.ID().Algorithm(), "signed by the contributor's key")
+	require.True(t, child.Edges(EdgeFilterType{Type: EdgeTypeContributor})[0].Reference().Equal(c.ID()),
+		"attributed to the external-pubkey contributor")
+}
+
 // --- claim views --------------------------------------------------------
 
 // TestClaimContributor: a normal claim exposes the contributor it was
 // attributed to.
 func TestClaimContributor(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	c := srcClaim(t, alice, "s")
 	require.NotNil(t, c.Contributor())
 	require.True(t, c.Contributor().ID().Equal(alice.ID()))
@@ -144,7 +193,7 @@ func TestSignedContributorForwarding(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, enc, "Encode forwarded")
 
-	view, err := wrapped.AsContributor()
+	view, err := wrapped.AsContributor(context.Background(), nil)
 	require.NoError(t, err)
 	require.True(t, view.ID().Equal(alice.ID()), "AsContributor forwarded")
 }
@@ -159,7 +208,7 @@ func TestSignedContributorForwarding(t *testing.T) {
 // interpretations of existing claims — must cite at least one derivation/*
 // edge. The auto-built contribution/contributor edge does NOT satisfy it.
 func TestProvenanceRequired(t *testing.T) {
-	ctr := identityContributor(t, "agent@example.com")
+	ctr := contributor(t)
 	for _, typ := range []string{
 		TypeDerivation("summary"),
 		TypeEntity("person"),
@@ -173,7 +222,7 @@ func TestProvenanceRequired(t *testing.T) {
 // TestProvenanceSatisfied: the same claims build fine once they carry a
 // derivation/* edge to a source (the positive control for §3.5).
 func TestProvenanceSatisfied(t *testing.T) {
-	ctr := identityContributor(t, "agent@example.com")
+	ctr := contributor(t)
 	source := srcClaim(t, ctr, "the source")
 	for _, typ := range []string{
 		TypeDerivation("summary"),
@@ -194,7 +243,7 @@ func TestProvenanceSatisfied(t *testing.T) {
 // edge naming who ingested it. Provenance is universal (§4.5); only the
 // initial node is exempt (see TestInitialNodeMayLackProvenance).
 func TestSourceCarriesProvenance(t *testing.T) {
-	ctr := identityContributor(t, "agent@example.com")
+	ctr := contributor(t)
 	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte("x")).Sign()
 	require.NoError(t, err, "source/* builds without a derivation edge")
 	require.Len(t, c.Edges(EdgeFilterType{Type: EdgeTypeContributor}), 1,
@@ -208,7 +257,7 @@ func TestSourceCarriesProvenance(t *testing.T) {
 // "only the first founding claim" restriction is a write-path concern
 // enforced by the Sequencer, not here.
 func TestInitialNodeMayLackProvenance(t *testing.T) {
-	root := identityContributor(t, "root@example.com")
+	root := contributor(t)
 	require.Empty(t, root.Edges(), "an initial node (root contributor) has no edges")
 	require.True(t, root.IsContributor())
 }
@@ -217,7 +266,7 @@ func TestInitialNodeMayLackProvenance(t *testing.T) {
 // provenance. A content claim (source/*) always gets a contribution/
 // contributor edge, and the builder refuses one with no contributor.
 func TestContentClaimRequiresContributor(t *testing.T) {
-	root := identityContributor(t, "root@example.com")
+	root := contributor(t)
 	child := srcClaim(t, root, "x")
 	require.NotEmpty(t, child.Edges(), "a non-initial claim always carries provenance")
 
@@ -231,8 +280,8 @@ func TestContentClaimRequiresContributor(t *testing.T) {
 // contributor. Attributing to alice auto-builds one contribution/
 // contributor edge; a second one (to bob) must be rejected.
 func TestClaimRejectsTwoContributors(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
-	bob := identityContributor(t, "bob@example.com")
+	alice := contributor(t)
+	bob := contributor(t)
 	extra := mustEdge(t, EdgeConfig{Reference: bob.ID(), Type: EdgeTypeContributor})
 
 	_, err := NewClaim(TypeSource("note"), alice).
@@ -245,7 +294,7 @@ func TestClaimRejectsTwoContributors(t *testing.T) {
 // TestClaimRejectsTwoDiffEdges: a claim overlays at most one predecessor,
 // so it may carry only one contribution/diff edge.
 func TestClaimRejectsTwoDiffEdges(t *testing.T) {
-	alice := identityContributor(t, "alice@example.com")
+	alice := contributor(t)
 	pred1 := srcClaim(t, alice, "v1")
 	pred2 := srcClaim(t, alice, "v1-alt")
 	extraDiff := mustEdge(t, EdgeConfig{Reference: pred2.ID(), Type: EdgeTypeDiff})
@@ -274,21 +323,17 @@ func TestSignerMustMatchPubkey(t *testing.T) {
 	require.Error(t, err, "signer/contributor pubkey mismatch must be rejected")
 }
 
-// TestSignedContributorRequiresSigner: declaring a pubkey without
-// supplying the matching signing key is rejected — the data says "signed
-// by this key" but the call never provides it.
+// TestSignedContributorRequiresSigner: a contributor whose content is a
+// pubkey but which is given no signing key is rejected — the content says
+// "signed by this key" while the call never provides it.
 func TestSignedContributorRequiresSigner(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	pubkey, err := EncodePublicKey(priv.Public())
-	require.NoError(t, err)
+	_, pubkey := ed25519Keys(t)
 
-	_, err = NewClaim(NodeContributor, nil).
-		WithInlineContent([]byte("alice")).
-		WithPubkey(pubkey).
-		// no Sign(priv) — signing key withheld on purpose
+	_, err := NewClaim(NodeContributor, nil).
+		WithInlineContent(pubkey). // content is a pubkey...
+		// ...but no Sign(priv) — signing key withheld on purpose
 		Sign()
-	require.Error(t, err, "pubkey-without-signer must be rejected")
+	require.Error(t, err, "a pubkey-as-content with no signer must be rejected")
 }
 
 // ============================================================
@@ -302,7 +347,7 @@ func TestSignedContributorRequiresSigner(t *testing.T) {
 // contribution/diff edge to the predecessor, coexisting with the auto
 // contribution/contributor edge.
 func TestClaimDiffEdgeNamesPredecessor(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred := srcClaim(t, alice, "v1")
 
 	c, err := NewClaim(TypeSource("note"), alice).
@@ -321,7 +366,7 @@ func TestClaimDiffEdgeNamesPredecessor(t *testing.T) {
 // TestClaimDiffRestatesNodeChanges: a diff restates changed node content
 // and fields — the built claim carries the new values verbatim.
 func TestClaimDiffRestatesNodeChanges(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred := srcClaim(t, alice, "old body")
 
 	c, err := NewClaim(TypeSource("note"), alice).
@@ -342,7 +387,7 @@ func TestClaimDiffRestatesNodeChanges(t *testing.T) {
 // edge is NAMED, since a diff claim's edges are overlaid by name (see
 // TestClaimDiffRejectsUnnamedEdge). The derivation/* edge also satisfies §3.5.
 func TestClaimDiffAddsEdges(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred := srcClaim(t, alice, "v1")
 	src := srcClaim(t, alice, "cited source")
 	named := mustEdge(t, EdgeConfig{
@@ -368,7 +413,7 @@ func TestClaimDiffAddsEdges(t *testing.T) {
 // the singletons (limited to one each, so unambiguous without a name). A
 // diff claim carrying an unnamed derivation edge must be rejected.
 func TestClaimDiffRejectsUnnamedEdge(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred := srcClaim(t, alice, "v1")
 	src := srcClaim(t, alice, "cited source")
 	unnamed := mustEdge(t, EdgeConfig{Reference: src.ID(), Type: TypeDerivation("source")}) // no name field
@@ -384,7 +429,7 @@ func TestClaimDiffRejectsUnnamedEdge(t *testing.T) {
 // TestClaimDiffAllowsNamedEdge: the positive control — the same diff claim
 // with the edge NAMED builds fine, since a named edge is overlay-addressable.
 func TestClaimDiffAllowsNamedEdge(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred := srcClaim(t, alice, "v1")
 	src := srcClaim(t, alice, "cited source")
 	named := mustEdge(t, EdgeConfig{
@@ -405,7 +450,7 @@ func TestClaimDiffAllowsNamedEdge(t *testing.T) {
 // participates in its id — the same content diffed over a different
 // predecessor is a different claim (content-addressing, §5.2).
 func TestClaimDiffIsPartOfId(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	pred1 := srcClaim(t, alice, "p1")
 	pred2 := srcClaim(t, alice, "p2")
 	at := pred1.Node().CreatedAt() // pin created_at so only the diff edge differs
@@ -429,7 +474,7 @@ func TestClaimDiffIsPartOfId(t *testing.T) {
 // the storage optimisation §4.3 promises ("a storage optimisation carrying
 // full provenance").
 func TestClaimDiffIsSmallerThanFull(t *testing.T) {
-	alice := identityContributor(t, "op@example.com")
+	alice := contributor(t)
 	big := bytes.Repeat([]byte("a repeated payload block — "), 200)
 
 	// Predecessor holds the large content.
