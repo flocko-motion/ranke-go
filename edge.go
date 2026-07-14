@@ -1,28 +1,42 @@
 // package: ranke / edge
 // type:    data
 // job:     the Edge directed-reference type, its filters, and the closed edge type vocabulary
-// limits:  does not build claims (-> claim) or serialize edges (-> serialize)
+// limits:  does not build claims (-> claim) or serialize edges (-> codec)
 package ranke
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"sort"
 )
 
 // Edge is a directed reference from the owning claim to a prior claim
 // (spec §4.2). Each edge is part of exactly one claim. Direction is
 // universal: every edge runs from an older claim (its Reference) to
-// the newer claim that owns it.
+// the newer claim that owns it. Like a node, an edge may carry content —
+// inline or external (see the content methods).
 type Edge interface {
 	Reference() Id
 	Type() string
 	TypeClass() EdgeClass
 	TypeSub() string
-	// Content is inline (paper §4.2 simplified schema) — no separate
-	// content_hash for edges.
-	GetContent(ctx context.Context) ([]byte, error)
+
+	// IsContentExternal reports whether the content is stored as a
+	// separate Universe blob (true) or inline in the edge (false).
+	IsContentExternal() bool
+	// GetContentHash is H(content); nil when the edge carries no content.
+	GetContentHash() Id
+	// GetContentLen is the content's byte length (0 when no content).
+	GetContentLen() uint64
+	// GetInlineContent returns the inline content bytes (nil when none);
+	// it errors when the content is external.
+	GetInlineContent() ([]byte, error)
+	// GetContent returns a reader over the content, transparently
+	// streaming external content from u; u may be nil for inline content.
+	GetContent(ctx context.Context, u Universe) (io.Reader, error)
+
 	// RelationDirection is RelationFrom (+1) or RelationTo (-1) on
 	// relation/* edges, 0 elsewhere (§4.7).
 	RelationDirection() RelationDirection
@@ -35,15 +49,18 @@ type Edge interface {
 // EdgeConfig is the data-only input to NewEdge.
 //
 // Required: Reference plus a type (either Type or TypeClass+TypeSub).
-// Content is the edge's inline content (paper §4.2 simplified schema).
-// RelationDirection must be set (RelationFrom or RelationTo) for
-// relation/* edges and left zero otherwise; NewEdge enforces this.
+// Content is optional inline content; ContentHash+Size instead reference
+// external content (a Universe blob). Content and ContentHash are mutually
+// exclusive. RelationDirection must be set (RelationFrom or RelationTo)
+// for relation/* edges and left zero otherwise; NewEdge enforces this.
 type EdgeConfig struct {
 	Reference         Id
 	Type              string
 	TypeClass         EdgeClass
 	TypeSub           string
 	Content           []byte
+	ContentHash       Id
+	Size              uint64
 	RelationDirection RelationDirection
 	Fields            map[string]string
 }
@@ -61,16 +78,12 @@ type edge struct {
 	id                Id // = H(S(edge))
 }
 
-// NewEdge constructs an Edge from the given config (paper §4.2
-// simplified schema). Validates type and relation_direction
-// consistency; computes the edge's id as H(canonical(edge)).
-//
-// Edges have inline content — Content bytes travel directly with
-// the edge in the canonical encoding; there is no separate
-// content_hash for edges.
+// NewEdge constructs an Edge from the given config (paper §4.2). Validates
+// type and relation_direction consistency, resolves inline vs external
+// content, and computes the edge's id as H(canonical(edge)).
 func NewEdge(cfg EdgeConfig) (Edge, error) {
 	if cfg.Reference == nil {
-		return nil, errors.New("ranke.NewEdge: Reference is required")
+		return nil, errEdgeRefRequired
 	}
 	// Type takes precedence over the split form — see EdgeConfig docs.
 	if cfg.Type != "" {
@@ -82,18 +95,21 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		cfg.TypeSub = sub
 	}
 	if cfg.TypeClass == "" || cfg.TypeSub == "" {
-		return nil, errors.New("ranke.NewEdge: Type (or TypeClass + TypeSub) is required")
+		return nil, errEdgeTypeRequired
 	}
 	if !validEdgeClass(cfg.TypeClass) {
-		return nil, fmt.Errorf("ranke.NewEdge: unknown EdgeClass %q", cfg.TypeClass)
+		return nil, withDetail(errUnknownEdgeClass, string(cfg.TypeClass))
+	}
+	if cfg.Content != nil && cfg.ContentHash != nil {
+		return nil, errEdgeContentXOR
 	}
 
 	// Relation direction rules (§4.7):
 	//   - relation/* edges must carry RelationFrom or RelationTo
 	//   - non-relation edges must leave it zero
-	if cfg.TypeClass == EdgeRelation {
+	if cfg.TypeClass == EdgeClassRelation {
 		if cfg.RelationDirection != RelationFrom && cfg.RelationDirection != RelationTo {
-			return nil, errors.New("ranke.NewEdge: relation/* edges must set RelationDirection (RelationFrom or RelationTo)")
+			return nil, errEdgeRelationDir
 		}
 	} else {
 		if cfg.RelationDirection != 0 {
@@ -105,18 +121,31 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 		reference:         cfg.Reference,
 		typeClass:         cfg.TypeClass,
 		typeSub:           cfg.TypeSub,
-		content:           cfg.Content,
 		relationDirection: cfg.RelationDirection,
 		fields:            cloneFields(cfg.Fields),
 	}
+	switch {
+	case cfg.Content != nil:
+		// Inline: hold the bytes, address them by their hash.
+		ch, err := hashContent(cfg.Content)
+		if err != nil {
+			return nil, fmt.Errorf("ranke.NewEdge: content hash: %w", err)
+		}
+		e.content = cfg.Content
+		e.contentHash = ch
+		e.size = uint64(len(cfg.Content))
+	case cfg.ContentHash != nil:
+		// External: reference a Universe blob by hash + size.
+		e.contentHash = cfg.ContentHash
+		e.size = cfg.Size
+	}
 
-	// Compute the edge's own id over the canonical encoding (which
-	// includes content inline).
-	bytes, err := encodeEdge(e)
+	// Compute the edge's own id over its canonical encoding.
+	b, err := encodeEdge(e)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewEdge: canonical encode: %w", err)
 	}
-	id, err := hashContent(bytes)
+	id, err := hashContent(b)
 	if err != nil {
 		return nil, fmt.Errorf("ranke.NewEdge: hash: %w", err)
 	}
@@ -124,11 +153,35 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	return e, nil
 }
 
-func (e *edge) Reference() Id                        { return e.reference }
-func (e *edge) Type() string                         { return string(e.typeClass) + "/" + e.typeSub }
-func (e *edge) TypeClass() EdgeClass                 { return e.typeClass }
-func (e *edge) TypeSub() string                      { return e.typeSub }
-func (e *edge) Content() []byte                      { return e.content }
+func (e *edge) Reference() Id        { return e.reference }
+func (e *edge) Type() string         { return string(e.typeClass) + "/" + e.typeSub }
+func (e *edge) TypeClass() EdgeClass { return e.typeClass }
+func (e *edge) TypeSub() string      { return e.typeSub }
+
+func (e *edge) IsContentExternal() bool { return e.content == nil && e.contentHash != nil }
+func (e *edge) GetContentHash() Id      { return e.contentHash }
+func (e *edge) GetContentLen() uint64   { return e.size }
+
+func (e *edge) GetInlineContent() ([]byte, error) {
+	if e.IsContentExternal() {
+		return nil, errContentExternal
+	}
+	return e.content, nil
+}
+
+func (e *edge) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
+	if e.contentHash == nil {
+		return bytes.NewReader(nil), nil // no content
+	}
+	if e.content != nil {
+		return bytes.NewReader(e.content), nil // inline
+	}
+	if u == nil {
+		return nil, errNoUniverseForContent
+	}
+	return u.StreamContent(ctx, e.contentHash, e.size)
+}
+
 func (e *edge) RelationDirection() RelationDirection { return e.relationDirection }
 func (e *edge) ID() Id                               { return e.id }
 
@@ -140,7 +193,7 @@ func (e *edge) HasField(name string) bool {
 func (e *edge) GetField(name string) (string, error) {
 	v, ok := e.fields[name]
 	if !ok {
-		return "", fmt.Errorf("ranke.Edge.GetField: %q not set", name)
+		return "", withDetail(errFieldNotSet, name)
 	}
 	return v, nil
 }
@@ -158,7 +211,7 @@ func (e *edge) Fields() []string {
 
 func validEdgeClass(c EdgeClass) bool {
 	switch c {
-	case EdgeDerivation, EdgeRelation, EdgeContribution:
+	case EdgeClassDerivation, EdgeClassRelation, EdgeClassContribution:
 		return true
 	}
 	return false
@@ -166,7 +219,7 @@ func validEdgeClass(c EdgeClass) bool {
 
 func validNodeClass(c NodeClass) bool {
 	switch c {
-	case NodeSource, NodeDerivation, NodeEntity, NodeRelation, NodeContribution:
+	case NodeClassSource, NodeClassDerivation, NodeClassEntity, NodeClassRelation, NodeClassContribution:
 		return true
 	}
 	return false

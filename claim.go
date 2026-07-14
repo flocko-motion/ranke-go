@@ -86,7 +86,7 @@ func (c *claim) Contributor() Contributor {
 }
 
 func (c *claim) IsContributor() bool {
-	return c.node.typeClass == NodeClassContribution && c.node.typeSub == NodeSubtypeContributor
+	return c.node.typeClass == NodeClassContribution && NodeSubtype(c.node.typeSub) == NodeSubtypeContributor
 }
 
 func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) {
@@ -110,7 +110,7 @@ func (c *claim) AsContributor(signingKey ...crypto.Signer) (Contributor, error) 
 }
 
 func (c *claim) IsBranch() bool {
-	return c.node.typeClass == NodeClassContribution && c.node.typeSub == NodeSubtypeBranch
+	return c.node.typeClass == NodeClassContribution && NodeSubtype(c.node.typeSub) == NodeSubtypeBranch
 }
 
 func (c *claim) AsBranch() (Branch, error) {

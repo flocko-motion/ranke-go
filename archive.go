@@ -6,20 +6,8 @@ package ranke
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-)
-
-var (
-	errNilUniverse     = errors.New("ranke.NewArchive: nil Universe")
-	errNilHeadID       = errors.New("ranke.NewArchive: nil head id")
-	errHeadNotFound    = errors.New("ranke.NewArchive: head claim not found")
-	errNilID           = errors.New("ranke.Archive: nil id")
-	errNoContent       = errors.New("ranke.Archive.GetClaimContent: claim carries no content")
-	errBranchNotFound  = errors.New("ranke.Archive.GetBranch: branch not found")
-	errBranchCollision = errors.New("ranke.Archive.GetBranch: name collision — multiple branches match")
-	errVerifyTODO      = errors.New("ranke: verification not implemented")
 )
 
 // Archive is an immutable read snapshot of a Ranke-Archive: the tuple
@@ -82,11 +70,9 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 	if err != nil {
 		return nil, err
 	}
-	n := c.Node()
-	if n.ContentHash() == nil {
-		return nil, errNoContent
-	}
-	return a.u.StreamContent(ctx, n.ContentHash(), n.Size())
+	// Transparent: inline is served from the node, external is streamed
+	// from 𝒰 — GetContent handles both.
+	return c.Node().GetContent(ctx, a.u)
 }
 
 // --- Branches ---

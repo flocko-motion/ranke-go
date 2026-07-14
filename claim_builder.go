@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -165,10 +164,10 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		cfg.TypeSub = sub
 	}
 	if cfg.TypeClass == "" || cfg.TypeSub == "" {
-		return nil, errors.New("ranke.NewClaim: Type (or TypeClass + TypeSub) is required")
+		return nil, errClaimTypeRequired
 	}
 	if !validNodeClass(cfg.TypeClass) {
-		return nil, fmt.Errorf("ranke.NewClaim: unknown NodeClass %q", cfg.TypeClass)
+		return nil, withDetail(errUnknownNodeClass, string(cfg.TypeClass))
 	}
 	if cfg.Encoding != "" {
 		class, sub, err := splitType(cfg.Encoding)
@@ -185,10 +184,10 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		cfg.EncodingSub = "plain"
 	}
 	if !validEncodingClass(cfg.EncodingClass) {
-		return nil, fmt.Errorf("ranke.NewClaim: unknown EncodingClass %q", cfg.EncodingClass)
+		return nil, withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
 	}
 	if cfg.Content != nil && cfg.ContentHash != nil {
-		return nil, errors.New("ranke.NewClaim: Content and ContentHash are mutually exclusive")
+		return nil, errClaimContentXOR
 	}
 
 	isRootContributor := cfg.TypeClass == NodeContribution &&
@@ -196,7 +195,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		cfg.Contributor == nil
 
 	if !isRootContributor && cfg.Contributor == nil {
-		return nil, errors.New("ranke.NewClaim: Contributor is required (only the root contribution/contributor may omit it)")
+		return nil, errClaimContributorRequired
 	}
 
 	// Collect edges; auto-build the contribution/contributor edge unless root.

@@ -6,7 +6,6 @@ package ranke
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -133,11 +132,11 @@ func (g *graph) AddClaims(claims ...Claim) error {
 
 func (g *graph) addOne(cl Claim) error {
 	if cl == nil {
-		return errors.New("nil claim")
+		return errNilClaim
 	}
 	c, ok := cl.(*claim)
 	if !ok {
-		return errors.New("claim from foreign implementation")
+		return errForeignClaim
 	}
 	// Idempotency: same id ⇒ no-op.
 	key := c.node.id.String()
@@ -146,7 +145,7 @@ func (g *graph) addOne(cl Claim) error {
 	}
 	// Only the root may have no edges; the root was set at NewGraph.
 	if len(c.edges) == 0 {
-		return errors.New("only the root contribution/contributor (set at NewGraph) may have no edges")
+		return errRootOnlyNoEdges
 	}
 	// Atomic creation rule (§4.3): every edge reference must already
 	// be present in the graph.
@@ -201,10 +200,10 @@ func (g *graph) IsConsolidated() bool {
 func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error) {
 	heads := g.Heads()
 	if len(heads) == 0 {
-		return nil, errors.New("ranke.Graph.Consolidate: empty graph")
+		return nil, errEmptyGraph
 	}
 	if len(heads) == 1 {
-		return nil, errors.New("ranke.Graph.Consolidate: graph is already consolidated")
+		return nil, errAlreadyConsolidated
 	}
 	edges := make([]Edge, 0, len(heads))
 	for _, h := range heads {
@@ -302,7 +301,7 @@ func (g *graph) verifyOne(c *claim) error {
 	}
 	idH, ok := c.node.id.(*id)
 	if !ok {
-		return errors.New("id not a concrete *id (foreign id type)")
+		return errForeignIdType
 	}
 	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
 		return fmt.Errorf("§5.7: %w", err)
@@ -331,5 +330,5 @@ func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
 			return contributor.node.pubkey, nil
 		}
 	}
-	return nil, errors.New("non-initial claim missing contribution/contributor edge")
+	return nil, errNoContributorEdge
 }

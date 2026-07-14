@@ -6,12 +6,9 @@ package ranke
 
 import (
 	"context"
-	"errors"
 	"io"
 	"time"
 )
-
-var errForeignClaim = errors.New("ranke: claim from a foreign implementation")
 
 // Branch is a convenience view over a contribution/branch claim: a Claim
 // (all its methods, including Contributor() and the §5.10 Verify) plus
@@ -103,11 +100,7 @@ func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) 
 	if err != nil {
 		return nil, err
 	}
-	n := c.Node()
-	if n.ContentHash() == nil {
-		return nil, errNoContent
-	}
-	return b.u.StreamContent(ctx, n.ContentHash(), n.Size())
+	return c.Node().GetContent(ctx, b.u)
 }
 
 func (b *branch) VerifyBranch(_ context.Context) (VerificationRun, error) {

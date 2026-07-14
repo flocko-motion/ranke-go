@@ -6,7 +6,6 @@ package ranke
 
 import (
 	"context"
-	"errors"
 	"io"
 )
 
@@ -195,12 +194,6 @@ type CopyProgress struct {
 	// reflects what the receiver intends to fetch, not the absolute total.
 	DiscoveryComplete bool
 }
-
-var (
-	ErrNotFound  = errors.New("ranke: not found")
-	ErrIntegrity = errors.New("ranke: integrity check failed")
-	ErrClosed    = errors.New("ranke: closed")
-)
 
 // GetClaim is the single-item form of Universe.GetClaims.
 func GetClaim(ctx context.Context, u Universe, id Id) (Claim, error) {

@@ -5,8 +5,9 @@
 package ranke
 
 import (
-	"errors"
-	"fmt"
+	"bytes"
+	"context"
+	"io"
 	"sort"
 	"time"
 )
@@ -18,15 +19,23 @@ type Node interface {
 	Type() string
 	TypeClass() NodeClass
 	TypeSub() string
-	// ContentHash is H(content); nil if the node carries no content.
-	ContentHash() Id
-	// Size is the byte-length of the content addressed by ContentHash;
-	// 0 when no content. Paired with ContentHash to defend against
-	// truncation/extension and let storage layers know size without
-	// loading the bytes.
-	Size() uint64
-	// Content returns the node's content bytes, or (nil, nil) if none.
-	Content() ([]byte, error)
+	// IsContentExternal reports whether the content is stored as a
+	// separate Universe blob (true) or inline in the node (false).
+	IsContentExternal() bool
+	// GetContentHash is H(content) — the content's address; nil when the
+	// node carries no content.
+	GetContentHash() Id
+	// GetContentLen is the content's byte length (0 when no content).
+	// Paired with the hash to defend against truncation/extension and to
+	// let storage layers know the size without loading the bytes.
+	GetContentLen() uint64
+	// GetInlineContent returns the inline content bytes (nil when the node
+	// carries no content); it errors when the content is external — check
+	// IsContentExternal first, or use GetContent with a Universe.
+	GetInlineContent() ([]byte, error)
+	// GetContent returns a reader over the content, transparently
+	// streaming external content from u; u may be nil for inline content.
+	GetContent(ctx context.Context, u Universe) (io.Reader, error)
 	Encoding() string
 	EncodingClass() EncodingClass
 	EncodingSub() string
@@ -84,10 +93,11 @@ func (n *node) Encoding() string {
 func (n *node) EncodingClass() EncodingClass { return n.encodingClass }
 func (n *node) EncodingSub() string          { return n.encodingSub }
 
-func (n *node) ContentHash() Id      { return n.contentHash }
-func (n *node) Size() uint64         { return n.size }
-func (n *node) CreatedAt() time.Time { return n.createdAt }
-func (n *node) ID() Id               { return n.id }
+func (n *node) IsContentExternal() bool { return n.content == nil && n.contentHash != nil }
+func (n *node) GetContentHash() Id      { return n.contentHash }
+func (n *node) GetContentLen() uint64   { return n.size }
+func (n *node) CreatedAt() time.Time    { return n.createdAt }
+func (n *node) ID() Id                  { return n.id }
 
 func (n *node) Edges() []Id {
 	out := make([]Id, len(n.edges))
@@ -95,14 +105,24 @@ func (n *node) Edges() []Id {
 	return out
 }
 
-func (n *node) Content() ([]byte, error) {
-	if n.contentHash == nil {
-		return nil, nil
-	}
-	if n.content == nil {
-		return nil, errors.New("ranke.Node.Content: content not loaded")
+func (n *node) GetInlineContent() ([]byte, error) {
+	if n.IsContentExternal() {
+		return nil, errContentExternal
 	}
 	return n.content, nil
+}
+
+func (n *node) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
+	if n.contentHash == nil {
+		return bytes.NewReader(nil), nil // no content — empty reader
+	}
+	if n.content != nil {
+		return bytes.NewReader(n.content), nil // inline
+	}
+	if u == nil {
+		return nil, errNoUniverseForContent
+	}
+	return u.StreamContent(ctx, n.contentHash, n.size)
 }
 
 func (n *node) HasField(name string) bool {
@@ -113,7 +133,7 @@ func (n *node) HasField(name string) bool {
 func (n *node) GetField(name string) (string, error) {
 	v, ok := n.fields[name]
 	if !ok {
-		return "", fmt.Errorf("ranke.Node.GetField: %q not set", name)
+		return "", withDetail(errFieldNotSet, name)
 	}
 	return v, nil
 }

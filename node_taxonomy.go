@@ -59,12 +59,14 @@ func nodeClassFromAlias(c NodeClass) NodeClass {
 type NodeSubtype string
 
 const (
+	NodeSubtypeBranches         NodeSubtype = "branches"
+	NodeSubtypeBranchAlias      NodeSubtype = "b"
 	NodeSubtypeContributor      NodeSubtype = "contributor"
 	NodeSubtypeContributorAlias NodeSubtype = "c"
-	NodeSubtypeBranch           NodeSubtype = "branch"
-	NodeSubtypeBranchAlias      NodeSubtype = "b"
 	NodeSubtypeDiff             NodeSubtype = "diff"
 	NodeSubtypeDiffAlias        NodeSubtype = "d"
+	NodeSubtypeHead             NodeSubtype = "head"
+	NodeSubtypeHeadAlias        NodeSubtype = "h"
 )
 
 // nodeSubtypeToAlias / nodeSubtypeFromAlias convert the closed node
@@ -94,6 +96,13 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 		return s
 	}
 }
+
+// Closed contribution/* node type strings, for ClaimBuilder.Type.
+const (
+	NodeTypeContributor = string(NodeClassContribution) + "/" + string(NodeSubtypeContributor)
+	NodeTypeHead        = string(NodeClassContribution) + "/" + string(NodeSubtypeHead)
+	NodeTypBranches     = string(NodeClassContribution) + "/" + string(NodeSybtypeBranches)
+)
 
 // EncodingClass is the closed top-level MIME vocabulary (RFC 6838
 // media types); the subtype is open.

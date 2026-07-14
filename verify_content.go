@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 
@@ -25,7 +24,7 @@ import (
 // mismatch.
 func VerifyContent(hash Id, size uint64, data []byte) error {
 	if hash == nil {
-		return errors.New("ranke.VerifyContent: nil hash")
+		return errNilHash
 	}
 	decoded, err := multihash.Decode(idBytes(hash))
 	if err != nil {
@@ -51,7 +50,7 @@ func VerifyContent(hash Id, size uint64, data []byte) error {
 // content without buffering it whole.
 func NewVerifyingReader(src io.ReadCloser, hash Id, size uint64) (io.ReadCloser, error) {
 	if hash == nil {
-		return nil, errors.New("ranke.NewVerifyingReader: nil hash")
+		return nil, errNilHash
 	}
 	decoded, err := multihash.Decode(idBytes(hash))
 	if err != nil {

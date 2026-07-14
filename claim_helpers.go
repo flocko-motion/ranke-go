@@ -7,14 +7,13 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"errors"
 	"fmt"
 )
 
 // splitType parses "class/sub" into its two non-empty segments.
 func splitType(s string) (class, sub string, err error) {
 	if s == "" {
-		return "", "", errors.New("empty")
+		return "", "", errEmptyType
 	}
 	slash := -1
 	for i := 0; i < len(s); i++ {
@@ -49,7 +48,7 @@ func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, err
 		return cfg.Pubkey, nil
 	}
 	if cfg.Contributor == nil {
-		return nil, errors.New("missing contributor")
+		return nil, errMissingContributor
 	}
 	return cfg.Contributor.Node().Pubkey(), nil
 }
@@ -65,16 +64,16 @@ func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, 
 	case !hasSigner && !hasPubkey:
 		return nil // identity-Sign case
 	case hasSigner && !hasPubkey:
-		return errors.New("SigningKey supplied but resolved contributor has no pubkey")
+		return errResolvedNoPubkey
 	case !hasSigner && hasPubkey:
-		return errors.New("resolved contributor has a pubkey but no SigningKey was supplied")
+		return errResolvedNoKey
 	}
 	encoded, err := EncodePublicKey(signingKey.Public())
 	if err != nil {
 		return fmt.Errorf("encode signing key's pubkey: %w", err)
 	}
 	if !bytes.Equal(encoded, resolvedPubkey) {
-		return errors.New("SigningKey's public key does not match the resolved contributor pubkey")
+		return errResolvedMismatch
 	}
 	return nil
 }
@@ -118,11 +117,11 @@ func hasDerivationEdge(edges []*edge) bool {
 // asConcreteEdge unwraps an Edge into the concrete *edge type.
 func asConcreteEdge(e Edge) (*edge, error) {
 	if e == nil {
-		return nil, errors.New("nil edge")
+		return nil, errNilEdge
 	}
 	ce, ok := e.(*edge)
 	if !ok {
-		return nil, errors.New("edge from foreign implementation")
+		return nil, errForeignEdge
 	}
 	return ce, nil
 }
@@ -131,7 +130,7 @@ func asConcreteEdge(e Edge) (*edge, error) {
 // references c.
 func buildContributorEdge(c Contributor) (*edge, error) {
 	if c == nil {
-		return nil, errors.New("nil contributor")
+		return nil, errNilContributor
 	}
 	e, err := NewEdge(EdgeConfig{
 		Reference: c.ID(),

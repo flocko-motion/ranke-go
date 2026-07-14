@@ -7,7 +7,6 @@ package ranke
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/multiformats/go-multibase"
@@ -103,6 +102,3 @@ func (h *id) Algorithm() string {
 	}
 	return "unknown"
 }
-
-// errInvalidId is returned when an Id parameter is required but missing.
-var errInvalidId = errors.New("invalid id")

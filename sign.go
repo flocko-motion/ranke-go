@@ -11,7 +11,6 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
 
@@ -95,7 +94,7 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 	if len(pubkey) == 0 {
 		// Identity Sign: id is just the hash.
 		if !bytesEqual(hash, idPayload) {
-			return errors.New("ranke.verifySignature: identity Sign mismatch (hash ≠ id)")
+			return errIdentitySignMismatch
 		}
 		return nil
 	}
@@ -120,7 +119,7 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 			return fmt.Errorf("ranke.verifySignature: ed25519 sig has %d bytes, want %d", len(sig), ed25519.SignatureSize)
 		}
 		if !ed25519.Verify(edPub, hash, sig) {
-			return errors.New("ranke.verifySignature: ed25519 verification failed")
+			return errEd25519Verify
 		}
 		return nil
 	default:
@@ -217,7 +216,7 @@ func prependCode(code multicodec.Code, payload []byte) []byte {
 func splitCode(b []byte) (multicodec.Code, []byte, error) {
 	v, n := binary.Uvarint(b)
 	if n <= 0 {
-		return 0, nil, errors.New("invalid varint prefix")
+		return 0, nil, errInvalidVarint
 	}
 	return multicodec.Code(v), b[n:], nil
 }
