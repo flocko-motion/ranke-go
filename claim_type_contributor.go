@@ -41,7 +41,8 @@ type signedContributor struct {
 // Forward every Claim/Contributor method to the wrapped Contributor.
 // Embedding the interface bare would shadow it with a same-named field —
 // Go's method promotion doesn't fire on a *named* field.
-func (s *signedContributor) Node() Node                     { return s.contributor.Node() }
+func (s *signedContributor) Node() Node { return s.contributor.Node() }
+
 func (s *signedContributor) Edges(filters ...Filter) []Edge { return s.contributor.Edges(filters...) }
 func (s *signedContributor) Contributor() Contributor       { return s.contributor.Contributor() }
 func (s *signedContributor) IsContributor() bool            { return s.contributor.IsContributor() }
@@ -49,11 +50,8 @@ func (s *signedContributor) AsContributor(key ...crypto.Signer) (Contributor, er
 	return s.contributor.AsContributor(key...)
 }
 func (s *signedContributor) ID() Id { return s.contributor.ID() }
-func (s *signedContributor) Graph(ctx context.Context) (Graph, error) {
-	return s.contributor.Graph(ctx)
-}
-func (s *signedContributor) Validate(ctx context.Context) error {
-	return s.contributor.Validate(ctx)
+func (s *signedContributor) Verify(ctx context.Context) error {
+	return s.contributor.Verify(ctx)
 }
 func (s *signedContributor) Encode() ([]byte, error)   { return s.contributor.Encode() }
 func (s *signedContributor) SigningKey() crypto.Signer { return s.key }

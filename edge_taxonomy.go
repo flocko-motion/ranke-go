@@ -39,6 +39,75 @@ const (
 	EdgeSubtypeDiffAlias        EdgeSubtype = "d"
 )
 
+// edgeClassToAlias / edgeClassFromAlias convert the closed edge classes;
+// unknown values pass through unchanged.
+func edgeClassToAlias(c EdgeClass) EdgeClass {
+	switch c {
+	case EdgeClassContribution:
+		return EdgeClassContributionAlias
+	case EdgeClassDerivation:
+		return EdgeClassDerivationAlias
+	case EdgeClassRelation:
+		return EdgeClassRelationAlias
+	default:
+		return c
+	}
+}
+
+func edgeClassFromAlias(c EdgeClass) EdgeClass {
+	switch c {
+	case EdgeClassContributionAlias:
+		return EdgeClassContribution
+	case EdgeClassDerivationAlias:
+		return EdgeClassDerivation
+	case EdgeClassRelationAlias:
+		return EdgeClassRelation
+	default:
+		return c
+	}
+}
+
+// edgeSubtypeToAlias / edgeSubtypeFromAlias convert the closed
+// contribution/* edge subtypes; open-vocabulary subtypes pass through
+// unchanged.
+func edgeSubtypeToAlias(s EdgeSubtype) EdgeSubtype {
+	switch s {
+	case EdgeSubtypeContributor:
+		return EdgeSubtypeContributorAlias
+	case EdgeSubtypeHead:
+		return EdgeSubtypeHeadAlias
+	case EdgeSubtypeBranches:
+		return EdgeSubtypeBranchesAlias
+	case EdgeSubtypeBranch:
+		return EdgeSubtypeBranchAlias
+	case EdgeSubtypePrune:
+		return EdgeSubtypePruneAlias
+	case EdgeSubtypeDiff:
+		return EdgeSubtypeDiffAlias
+	default:
+		return s
+	}
+}
+
+func edgeSubtypeFromAlias(s EdgeSubtype) EdgeSubtype {
+	switch s {
+	case EdgeSubtypeContributorAlias:
+		return EdgeSubtypeContributor
+	case EdgeSubtypeHeadAlias:
+		return EdgeSubtypeHead
+	case EdgeSubtypeBranchesAlias:
+		return EdgeSubtypeBranches
+	case EdgeSubtypeBranchAlias:
+		return EdgeSubtypeBranch
+	case EdgeSubtypePruneAlias:
+		return EdgeSubtypePrune
+	case EdgeSubtypeDiffAlias:
+		return EdgeSubtypeDiff
+	default:
+		return s
+	}
+}
+
 // Closed contribution/* edge type strings, for EdgeConfig.Type — each
 // combined from its class and subtype constants. Branch and Prune are
 // edge-only — no claim counterpart.
