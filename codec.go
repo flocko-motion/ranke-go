@@ -147,12 +147,12 @@ func unaliasFieldKeys(fields map[string]string) map[string]string {
 // (Claim.Encode), independent of where the bytes are later stored.
 func buildEncNode(n *node) (encNode, error) {
 	en := encNode{
-		TypeClass:     string(n.typeClass),
-		TypeSub:       n.typeSub,
-		EncodingClass: string(n.encodingClass),
-		EncodingSub:   n.encodingSub,
+		TypeClass:     aliasToWire(n.typeClass, nodeClassToAlias),
+		TypeSub:       aliasToWire(NodeSubtype(n.typeSub), nodeSubtypeToAlias),
+		EncodingClass: aliasToWire(n.encodingClass, encodingClassToAlias),
+		EncodingSub:   n.encodingSub, // encoding subtypes have no aliases yet
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
-		Fields:        n.fields,
+		Fields:        aliasFieldKeys(n.fields),
 	}
 	if n.contentHash != nil {
 		en.ContentHash = idBytes(n.contentHash)
@@ -173,10 +173,10 @@ func buildEncNode(n *node) (encNode, error) {
 func buildEncEdge(e *edge) (encEdge, error) {
 	ee := encEdge{
 		Reference:         idBytes(e.reference),
-		TypeClass:         string(e.typeClass),
-		TypeSub:           e.typeSub,
+		TypeClass:         aliasToWire(e.typeClass, edgeClassToAlias),
+		TypeSub:           aliasToWire(EdgeSubtype(e.typeSub), edgeSubtypeToAlias),
 		RelationDirection: int8(e.relationDirection),
-		Fields:            e.fields,
+		Fields:            aliasFieldKeys(e.fields),
 	}
 	if e.contentHash != nil {
 		ee.ContentHash = idBytes(e.contentHash)
@@ -303,12 +303,12 @@ func decodeNode(en encNode) (*node, error) {
 		return nil, err
 	}
 	n := &node{
-		typeClass:     NodeClass(en.TypeClass),
-		typeSub:       en.TypeSub,
-		encodingClass: EncodingClass(en.EncodingClass),
+		typeClass:     aliasFromWire(en.TypeClass, nodeClassFromAlias),
+		typeSub:       string(aliasFromWire(en.TypeSub, nodeSubtypeFromAlias)),
+		encodingClass: aliasFromWire(en.EncodingClass, encodingClassFromAlias),
 		encodingSub:   en.EncodingSub,
 		createdAt:     createdAt,
-		fields:        en.Fields,
+		fields:        unaliasFieldKeys(en.Fields),
 	}
 	if len(en.ContentHash) > 0 {
 		ch, err := hashFromMultihashBytes(en.ContentHash)
@@ -338,10 +338,10 @@ func decodeEdge(ee encEdge) (*edge, error) {
 	}
 	e := &edge{
 		reference:         ref,
-		typeClass:         EdgeClass(ee.TypeClass),
-		typeSub:           ee.TypeSub,
+		typeClass:         aliasFromWire(ee.TypeClass, edgeClassFromAlias),
+		typeSub:           string(aliasFromWire(ee.TypeSub, edgeSubtypeFromAlias)),
 		relationDirection: RelationDirection(ee.RelationDirection),
-		fields:            ee.Fields,
+		fields:            unaliasFieldKeys(ee.Fields),
 	}
 	// Inline content bytes (if any) are attached by DecodeClaim from the
 	// storage shape; here we restore only the hash+size reference.

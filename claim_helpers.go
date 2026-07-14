@@ -40,11 +40,12 @@ func matchAll(e Edge, filters []Filter) bool {
 }
 
 // resolveSigningPubkey returns the pubkey whose private key must produce
-// this claim's signature: cfg.Pubkey for the root contributor, else the
-// referenced contributor's node pubkey.
+// this claim's signature (§5.7). A contributor carries its pubkey as its
+// content, so this is the root contributor's own InlineContent, else the
+// referenced contributor claim's content.
 func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, error) {
 	if isRootContributor {
-		return cfg.Pubkey, nil
+		return cfg.InlineContent, nil
 	}
 	if cfg.Contributor == nil {
 		return nil, errMissingContributor

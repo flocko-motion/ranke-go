@@ -92,15 +92,12 @@ type Universe interface {
 	// every claim reachable from it by following edges. Closure traversal
 	// is engine-dependent (a graph-native backend answers with one query;
 	// a plain byte store walks the edges), so it lives on the Universe
-	// port and each backend implements it its own way.
-	//
-	// TODO: implement across backends (edge walk for byte stores, native
-	// query pushdown for graph engines).
+	// port. Byte-store backends delegate to DefaultInClosure (a simple
+	// reference edge walk); graph-native backends push the query down.
 	InClosure(ctx context.Context, head, id Id) (bool, error)
 	// GetFromClosure returns the claim at id, but only if it is in head's
-	// closure; ErrNotFound otherwise. Engine-dependent, like InClosure.
-	//
-	// TODO: implement across backends.
+	// closure; ErrNotFound otherwise. Engine-dependent, like InClosure —
+	// byte stores delegate to DefaultGetFromClosure.
 	GetFromClosure(ctx context.Context, head, id Id) (Claim, error)
 
 	// CopyClaims copies the claim records at ids from src into the
@@ -175,8 +172,6 @@ func WithContent() CopyOption { return func(c *CopyConfig) { c.Content = true } 
 // completion (e.g. opaque native bulk ops), or may never call it. Keep
 // the callback cheap: it runs on the copy's goroutine, so a slow
 // callback throttles the copy.
-//
-//deadcode:keep
 func WithProgress(fn func(CopyProgress)) CopyOption {
 	return func(c *CopyConfig) { c.Progress = fn }
 }

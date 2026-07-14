@@ -82,7 +82,7 @@ func (c *claim) Edges(filters ...Filter) []Edge {
 }
 
 // Diff materialisation (setting diffClaim / diffEdges / node.diffFields)
-// lives in universe_materialize.go — DefaultMaterialize, applied by the read path.
+// lives in materialize.go — DefaultMaterialize, applied by the read path.
 
 // computeDiffEdges builds diffEdges: inherit the predecessor's named
 // edges, drop those named in edges_diff_omit, overlay self's named edges

@@ -32,12 +32,10 @@ type Graph interface {
 	// time.Now().UTC() when zero / omitted; must satisfy
 	// monotonicity (§4.3).
 	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
-	// Verify walks the closure from every open head and runs the
-	// §5.10 per-claim integrity + authenticity check. Walks the
-	// full closure (so verbose callers see every claim) and returns
-	// the first error, or nil. Optional report callbacks are called
-	// once per visited claim with its depth and result.
-	Verify(report ...func(c Claim, depth int, err error)) error
+	// Verify walks the closure from every open head and verifies each
+	// claim (§5.10 integrity + authenticity), returning a live run. See
+	// verify.go for options (depth, trusted-prune, external content, …).
+	Verify(opts ...VerifyOption) VerificationRun
 }
 
 // graph is the concrete implementation of Graph (= RG ⊆ 𝒰, spec §4.5).
@@ -267,91 +265,4 @@ func firstNonZero(ts []time.Time) time.Time {
 	return time.Time{}
 }
 
-func (g *graph) Verify(report ...func(c Claim, depth int, err error)) error {
-	seen := map[string]bool{}
-	var firstErr error
-	for _, h := range g.Heads() {
-		g.verifyRecursive(h, 0, seen, report, &firstErr)
-	}
-	return firstErr
-}
-
-func (g *graph) verifyRecursive(id Id, depth int, seen map[string]bool, report []func(Claim, int, error), firstErr *error) {
-	k := id.String()
-	if seen[k] {
-		return
-	}
-	seen[k] = true
-	c, ok := g.claims[k]
-	if !ok {
-		return
-	}
-	err := g.verifyOne(c)
-	for _, r := range report {
-		r(c, depth, err)
-	}
-	if err != nil && *firstErr == nil {
-		*firstErr = wrapDetail(errGraphVerifyStage, "validate "+k, err)
-	}
-	for _, e := range c.edges {
-		g.verifyRecursive(e.reference, depth+1, seen, report, firstErr)
-	}
-}
-
-// verifyOne runs the §5.10 checks on a single claim:
-//   - every edge reference resolves to a claim in the graph;
-//   - canonical re-encode + recompute H(S(v)) + signature check
-//     against id(v) (record integrity + authenticity, §5.2 + §5.7);
-//   - if content_hash is set, re-hash the actual content bytes and
-//     compare (content integrity).
-func (g *graph) verifyOne(c *claim) error {
-	for _, e := range c.edges {
-		if _, ok := g.claims[e.reference.String()]; !ok {
-			return withDetail(errRefMissingClaim, e.reference.String())
-		}
-	}
-	encoded, err := encodeNode(c.node)
-	if err != nil {
-		return wrapDetail(errGraphVerifyStage, "encode", err)
-	}
-	recomputed, err := hashContent(encoded)
-	if err != nil {
-		return wrapDetail(errGraphVerifyStage, "hash", err)
-	}
-	pubkey, err := g.resolveClaimPubkey(c)
-	if err != nil {
-		return wrapDetail(errGraphVerifyStage, "resolve pubkey", err)
-	}
-	idH, ok := c.node.id.(*id)
-	if !ok {
-		return errForeignIdType
-	}
-	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
-		return wrapDetail(errGraphVerifyStage, "§5.7", err)
-	}
-	// Content integrity (§5.10) is enforced at Universe.GetContent /
-	// StreamContent time; bytes reaching verifyOne are already verified.
-	return nil
-}
-
-// resolveClaimPubkey returns the pubkey whose matching private key
-// signed this claim's id (§5.7). For the initial contributor (a
-// claim with no edges, per §4.3), the pubkey is on the claim's own
-// node. For every other claim, it is on the node of the contributor
-// referenced by the claim's contribution/contributor edge.
-func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
-	if len(c.edges) == 0 {
-		// Initial node (the only no-edge claim a graph may contain).
-		return c.node.pubkey, nil
-	}
-	for _, e := range c.edges {
-		if e.typeClass == EdgeClassContribution && e.typeSub == "contributor" {
-			contributor, ok := g.claims[e.reference.String()]
-			if !ok {
-				return nil, withDetail(errContributorNotInGraph, e.reference.String())
-			}
-			return contributor.node.pubkey, nil
-		}
-	}
-	return nil, errNoContributorEdge
-}
+// Verify lives in verify.go (the configurable closure verifier).
