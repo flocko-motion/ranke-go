@@ -163,3 +163,26 @@ func TestNodeHeightIncrementsDownChain(t *testing.T) {
 	require.Equal(t, uint64(1), a.Node().Height(), "source over the height-0 contributor")
 	require.Equal(t, uint64(2), b.Node().Height(), "entity over the height-1 source")
 }
+
+// TestEncodingConstructors covers the media-type constructor family: each
+// builds the canonical "<top-level>/<sub>" string for its IANA type.
+func TestEncodingConstructors(t *testing.T) {
+	cases := []struct {
+		got  string
+		want string
+	}{
+		{EncodingApplication("cbor"), "application/cbor"},
+		{EncodingAudio("mpeg"), "audio/mpeg"},
+		{EncodingExample("sample"), "example/sample"},
+		{EncodingFont("woff2"), "font/woff2"},
+		{EncodingImage("png"), "image/png"},
+		{EncodingMessage("rfc822"), "message/rfc822"},
+		{EncodingModel("gltf-binary"), "model/gltf-binary"},
+		{EncodingMultipart("mixed"), "multipart/mixed"},
+		{EncodingText("plain"), "text/plain"},
+		{EncodingVideo("mp4"), "video/mp4"},
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, c.got)
+	}
+}

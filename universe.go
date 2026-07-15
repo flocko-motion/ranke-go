@@ -140,6 +140,27 @@ type Universe interface {
 	// from it, deserialising only the misses.
 	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
 
+	// --- Tagging (Capabilities.Tags): mutable, pure-functional per-claim tags
+	// — branch membership and branch-table revisions — a runtime overlay, not
+	// part of a claim. A backend that can't hold mutable side-data (an opaque
+	// byte store) returns ErrUnsupported and reports Tags: false; TagArchive
+	// drives these on a tags-capable Universe. ---
+
+	// TagBranch stamps the branch entry revision across head's closure, pruning
+	// at already-tagged claims (the first revision to reach a claim wins). A
+	// graph-native backend does it in one query; others via defaultTagBranch.
+	TagBranch(ctx context.Context, branch string, head Id, revision uint64) error
+	// SetBranchRevision records that claim joined branch at revision.
+	SetBranchRevision(ctx context.Context, claim Id, branch string, revision uint64) error
+	// BranchRevision returns the revision claim joined branch; ok is false when
+	// claim is not a member.
+	BranchRevision(ctx context.Context, claim Id, branch string) (uint64, bool, error)
+	// SetSpineRevision records a branch-table claim's spine revision (_rev).
+	SetSpineRevision(ctx context.Context, claim Id, revision uint64) error
+	// SpineRevision returns a branch-table claim's _rev; ok is false when it is
+	// not yet processed.
+	SpineRevision(ctx context.Context, claim Id) (uint64, bool, error)
+
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:
 	//

@@ -81,7 +81,10 @@ type neo4jUniverse struct {
 }
 
 // Compile-time proof the adapter satisfies the full Universe contract.
-var _ ranke.Universe = (*neo4jUniverse)(nil)
+var (
+	_ ranke.Universe = (*neo4jUniverse)(nil)
+	_ ranke.Tagger   = (*neo4jUniverse)(nil)
+)
 
 var (
 	errNilClaim = errors.New("adapter/neo4j: nil claim or id")
@@ -503,9 +506,75 @@ func (u *neo4jUniverse) CopyContents(ctx context.Context, src ranke.Universe, re
 	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
+// --- Tagger: branch-membership tags (Capabilities.Tags) ---
+//
+// Tags are mutable node properties keyed _b_<branch>; the _b_ prefix keeps
+// user branch names from colliding with fixed system keys. They are a pure-
+// functional overlay — never part of the claim, and (since claim fields live
+// in field_keys/field_vals arrays, not node properties) never read back into
+// ClaimParts.
+
+func branchTagKey(branch string) string { return "_b_" + branch }
+
+const cypherTagBranch = `
+MATCH (h:` + labelClaim + ` {id: $head})
+WHERE h[$key] IS NULL
+MATCH (h) (()-[:` + relReferences + `]->(m:` + labelClaim + `) WHERE m[$key] IS NULL)* (c:` + labelClaim + `)
+SET c[$key] = $rev`
+
+// TagBranch stamps _b_<branch>=revision across head's closure in one query,
+// pruned at tagged claims: the quantified path only extends through untagged
+// nodes (WHERE m[$key] IS NULL), so it touches just the delta — already-tagged
+// claims (and their closures, tagged too) are never revisited. A head that is
+// already tagged matches nothing and is a no-op. Call oldest→newest.
+func (u *neo4jUniverse) TagBranch(ctx context.Context, branch string, head ranke.Id, revision uint64) error {
+	if head == nil {
+		return errNilID
+	}
+	_, err := u.query(ctx, cypherTagBranch, map[string]any{
+		"head": head.String(), "key": branchTagKey(branch), "rev": int64(revision),
+	})
+	if err != nil {
+		return fmt.Errorf("%w: tag branch: %w", errQuery, err)
+	}
+	return nil
+}
+
+const cypherSetBranchRevision = `MATCH (c:` + labelClaim + ` {id: $id}) SET c[$key] = $rev`
+
+func (u *neo4jUniverse) SetBranchRevision(ctx context.Context, claim ranke.Id, branch string, revision uint64) error {
+	if claim == nil {
+		return errNilID
+	}
+	_, err := u.query(ctx, cypherSetBranchRevision, map[string]any{
+		"id": claim.String(), "key": branchTagKey(branch), "rev": int64(revision),
+	})
+	if err != nil {
+		return fmt.Errorf("%w: set branch revision: %w", errQuery, err)
+	}
+	return nil
+}
+
+const cypherBranchRevision = `MATCH (c:` + labelClaim + ` {id: $id}) RETURN c[$key] AS rev`
+
+func (u *neo4jUniverse) BranchRevision(ctx context.Context, claim ranke.Id, branch string) (uint64, bool, error) {
+	if claim == nil {
+		return 0, false, errNilID
+	}
+	res, err := u.query(ctx, cypherBranchRevision, map[string]any{
+		"id": claim.String(), "key": branchTagKey(branch),
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("%w: branch revision: %w", errQuery, err)
+	}
+	if len(res.Records) == 0 || valOf(res.Records[0], "rev") == nil {
+		return 0, false, nil
+	}
+	return uint64(asInt(valOf(res.Records[0], "rev"))), true, nil
+}
+
 // Capabilities: a graph DB can overwrite, delete, and enumerate, is durable,
-// and exposes a GQL (Cypher) query surface. (Durability is the store's; as a
-// cache it is still rebuildable from the authoritative Universe.)
+// exposes a GQL (Cypher) query surface, and holds branch tags.
 func (u *neo4jUniverse) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
 		Overwrite:  true,
@@ -513,6 +582,7 @@ func (u *neo4jUniverse) Capabilities() ranke.Capabilities {
 		Enumerate:  true,
 		Persistent: true,
 		GQL:        true,
+		Tags:       true,
 	}
 }
 

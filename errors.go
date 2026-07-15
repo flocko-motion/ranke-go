@@ -11,6 +11,9 @@ var (
 	ErrNotFound  = errors.New("ranke: not found")
 	ErrIntegrity = errors.New("ranke: integrity check failed")
 	ErrClosed    = errors.New("ranke: closed")
+	// ErrUnsupported: the backend does not support this operation (e.g. an
+	// opaque byte store asked to tag). Callers gate on the relevant Capability.
+	ErrUnsupported = errors.New("ranke: operation not supported by this backend")
 	// ErrContentCapped: a layer holds a claim/reference but its stored content
 	// is shorter than the expected content_size — capped or truncated (e.g. a
 	// cache filled under a smaller cap in a previous run). A stack treats it
@@ -104,6 +107,7 @@ var (
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")
 	errAssemble              = errors.New("ranke.AssembleClaim")
 	errNodePreimage          = errors.New("ranke: claim CBOR has no node preimage")
+	errNotArchive            = errors.New("ranke.TagArchive: Archive is not the built-in type")
 	errID                    = errors.New("ranke.Id")
 	errEncodePubkey          = errors.New("ranke: unsupported public key type")
 	errDecodePubkey          = errors.New("ranke.DecodePublicKey")
