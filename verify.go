@@ -6,6 +6,8 @@ package ranke
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -114,8 +116,9 @@ type verifyConfig struct {
 	createdAfter    time.Time     // prune claims created before this; zero = no bound
 	trusted         func(Id) bool // prune predicate; nil = trust nothing
 	externalContent bool          // fetch + verify external content (default: inline only)
-	stopAfter       int           // stop after n failures; 0 = verify everything
-	onError         func(Failure) // fired per failure, from the run goroutine
+	stopAfter       int             // stop after n failures; 0 = verify everything
+	onError         func(Failure)   // fired per failure, from the run goroutine
+	skipRule        map[string]bool // verifyRules[].name to omit (WithSkipRules)
 }
 
 // VerifyOption configures a verification run.
@@ -149,6 +152,35 @@ func WithStopAfter(n int) VerifyOption { return func(c *verifyConfig) { c.stopAf
 // WithOnError registers a callback fired as each failure is found. It runs
 // on the run's goroutine, so it must be cheap and concurrency-safe.
 func WithOnError(fn func(Failure)) VerifyOption { return func(c *verifyConfig) { c.onError = fn } }
+
+// WithSkipRules omits the named verification rules from the run. Names match
+// VerifyRule.Name (see VerifyRuleSet) — a scan can drop expensive rules for
+// duration reasons while keeping the rest. Unknown names are ignored.
+func WithSkipRules(names ...string) VerifyOption {
+	return func(c *verifyConfig) {
+		if c.skipRule == nil {
+			c.skipRule = make(map[string]bool, len(names))
+		}
+		for _, n := range names {
+			c.skipRule[n] = true
+		}
+	}
+}
+
+// VerifyRule describes a registered verification rule for reports and for
+// selecting which to skip (WithSkipRules): Name is the stable identifier,
+// Rule the human-readable statement printed on violation.
+type VerifyRule struct{ Name, Rule string }
+
+// VerifyRuleSet lists the verification rules, in application order — the
+// menu a caller picks from when deciding what to skip.
+func VerifyRuleSet() []VerifyRule {
+	out := make([]VerifyRule, len(verifyRules))
+	for i, r := range verifyRules {
+		out[i] = VerifyRule{Name: r.name, Rule: r.rule}
+	}
+	return out
+}
 
 func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 	c := &verifyConfig{}
@@ -266,29 +298,160 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 	return run
 }
 
-// verifyClaim runs the §5.10 check on one claim: resolve the signing pubkey,
-// check the id signature over the node preimage taken from the stored raw CBOR
-// (c.verifyID — hashes stored bytes, never re-encodes), re-derive height, then
-// verify content integrity (inline always; external only when configured).
+// verifyClaim runs every verification rule against one claim (§5.10). Each rule
+// is a small, self-contained function checking one invariant; verifyRules is
+// the registry the walk applies to every claim. Adding an invariant means
+// adding a rule below and one entry to verifyRules — the rule's statement and
+// its check live side by side, and the walk stays untouched.
 func verifyClaim(ctx context.Context, c Claim, raw []byte, cfg *verifyConfig, u Universe) error {
 	pubkey, err := resolveClaimPubkey(ctx, c, u)
 	if err != nil {
 		return wrapDetail(errVerify, "resolve pubkey", err)
 	}
-	if err := c.verifyID(pubkey, raw); err != nil {
-		return wrapDetail(errVerify, "§5.7", err)
+	t := &claimUnderVerification{claim: c, raw: raw, pubkey: pubkey, cfg: cfg, u: u}
+	fail := func(r verifyRule, err error) error {
+		return wrapDetail(errVerify, r.name+" — "+r.rule, err) // name the rule + its statement
 	}
-	if err := verifyHeight(ctx, c, u); err != nil {
-		return wrapDetail(errVerify, "§4.1 height", err)
-	}
-	// Content integrity: node, then each edge.
-	if err := verifyContentRef(ctx, c.Node(), cfg, u); err != nil {
-		return wrapDetail(errVerify, "node content", err)
-	}
-	for _, e := range c.Edges() {
-		if err := verifyContentRef(ctx, e, cfg, u); err != nil {
-			return wrapDetail(errVerify, "edge content", err)
+	// Per claim, and per content carrier (the node).
+	for _, r := range verifyRules {
+		if cfg.skipRule[r.name] {
+			continue
 		}
+		if r.claim != nil {
+			if err := r.claim(ctx, t); err != nil {
+				return fail(r, err)
+			}
+		}
+		if r.content != nil {
+			if err := r.content(ctx, c.Node(), t); err != nil {
+				return fail(r, err)
+			}
+		}
+	}
+	// Per edge — each edge is also a content carrier.
+	for _, e := range c.Edges() {
+		for _, r := range verifyRules {
+			if cfg.skipRule[r.name] {
+				continue
+			}
+			if r.content != nil {
+				if err := r.content(ctx, e, t); err != nil {
+					return fail(r, err)
+				}
+			}
+			if r.edge != nil {
+				if err := r.edge(ctx, e, t); err != nil {
+					return fail(r, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// verifyArchiveHead runs the archive-scoped rules against an archive's head
+// claim; wired as runVerification's depth-0 root check by archive.Verify.
+func verifyArchiveHead(ctx context.Context, head Claim, u Universe, cfg *verifyConfig) error {
+	t := &claimUnderVerification{claim: head, cfg: cfg, u: u}
+	for _, r := range verifyRules {
+		if r.archive == nil || cfg.skipRule[r.name] {
+			continue
+		}
+		if err := r.archive(ctx, t); err != nil {
+			return wrapDetail(errVerify, r.name+" — "+r.rule, err)
+		}
+	}
+	return nil
+}
+
+// claimUnderVerification bundles everything a rule may inspect about one claim:
+// the decoded claim, its stored raw CBOR (the bytes the id was signed over),
+// the resolved signing pubkey, the run config, and the Universe (to resolve
+// references). Rules read; they do not mutate.
+type claimUnderVerification struct {
+	claim  Claim
+	raw    []byte
+	pubkey []byte
+	cfg    *verifyConfig
+	u      Universe
+}
+
+// verifyRule is one verification invariant: a short name, the rule stated in
+// words (printed on violation, so a failure explains the invariant broken, not
+// just a label), and up to four scoped checks — each optional:
+//
+//	claim   — once per claim
+//	content — per content carrier: the node, and each edge (they share the
+//	          same content_hash/content_size/bytes logic)
+//	edge    — per edge (edge-specific, e.g. what it references)
+//	archive — once against an archive's head
+//
+// The walk applies claim/content/edge checks to every claim; archive checks run
+// once against the head (archive.Verify).
+type verifyRule struct {
+	name    string
+	rule    string
+	claim   func(ctx context.Context, t *claimUnderVerification) error
+	content func(ctx context.Context, cc contentCarrier, t *claimUnderVerification) error
+	edge    func(ctx context.Context, e Edge, t *claimUnderVerification) error
+	archive func(ctx context.Context, t *claimUnderVerification) error
+}
+
+// verifyRules is the ordered rule set. Register an invariant here; its
+// statement, scope, and implementation all live on this one entry.
+var verifyRules = []verifyRule{
+	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key", claim: ruleSignature},
+	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node", claim: ruleHeight},
+	{name: "content integrity", rule: "stored content matches its content_hash and content_size", content: ruleContent},
+	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim", edge: ruleBranchTableReference},
+	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
+}
+
+// ruleSignature: id(v) is a valid signature over H(preimage(raw)) by the
+// claim's signing pubkey (hashes the stored bytes, never re-encodes).
+func ruleSignature(_ context.Context, t *claimUnderVerification) error {
+	return t.claim.verifyID(t.pubkey, t.raw)
+}
+
+// ruleHeight: §4.1 committed height matches the reference structure.
+func ruleHeight(ctx context.Context, t *claimUnderVerification) error {
+	return verifyHeight(ctx, t.claim, t.u)
+}
+
+// ruleContent (per content carrier): stored content matches its content_hash
+// and content_size — inline always, external only when the run is configured
+// for it. The node and every edge share this logic, so one function serves both.
+func ruleContent(ctx context.Context, cc contentCarrier, t *claimUnderVerification) error {
+	return verifyContentRef(ctx, cc, t.cfg, t.u)
+}
+
+// ruleBranchTableReference (per edge): a contribution/branches (branch-table)
+// claim may be referenced ONLY by another branch-table claim. Branch tables
+// form their own lineage (the diff chain of tables heading an archive); ordinary
+// claims must never point into that archive-management layer. So if the owning
+// claim is not a branch table, this edge may not reference one.
+func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
+	if t.claim.Node().Type() == NodeBranches {
+		return nil // a branch table may reference branch tables (its lineage)
+	}
+	ref, err := GetClaim(ctx, t.u, e.Reference())
+	if errors.Is(err, ErrNotFound) {
+		return nil // dangling refs are caught elsewhere; judge only resolvable ones
+	}
+	if err != nil {
+		return err
+	}
+	if ref.Node().Type() == NodeBranches {
+		return fmt.Errorf("%s claim references branch table %s", t.claim.Node().Type(), e.Reference())
+	}
+	return nil
+}
+
+// ruleArchiveHead (per archive): an archive's head claim is a branch table
+// (contribution/branches) — the root of the branch-table lineage.
+func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
+	if t.claim.Node().Type() != NodeBranches {
+		return fmt.Errorf("archive head is %s, want %s", t.claim.Node().Type(), NodeBranches)
 	}
 	return nil
 }
@@ -431,13 +594,7 @@ func (g *graph) Verify(opts ...VerifyOption) VerificationRun {
 // It requires the head to be a contribution/branches claim (a branch table).
 func (a *archive) Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error) {
 	cfg := newVerifyConfig(opts...)
-	rootCheck := func(c Claim) error {
-		n := c.Node()
-		if n.TypeClass() == NodeClassContribution && n.TypeSub() == string(NodeSubtypeBranches) {
-			return nil
-		}
-		return errNotBranchTable
-	}
+	rootCheck := func(c Claim) error { return verifyArchiveHead(ctx, c, a.u, cfg) }
 	return runVerification(ctx, []Id{a.bth.ID()}, a.u, cfg, rootCheck), nil
 }
 

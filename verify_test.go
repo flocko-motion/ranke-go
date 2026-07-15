@@ -13,15 +13,25 @@ import (
 // WithOnError, WithExternalContent). Verify runs asynchronously and returns a
 // VerificationRun handle — Wait for completion, then read Verified/Failures/Err.
 
-// corruptNode mutates a claim's created_at — a field in the canonical node
-// encoding — WITHOUT changing its stored id, so the recomputed H(S(node)) no
-// longer matches id(v) and verification fails. White-box (package ranke); the
-// public API can't build such a claim, which is the whole point of §5.10.
-func corruptNode(t *testing.T, c Claim) {
+// corruptNode overwrites a claim's STORED bytes in the graph's Universe with a
+// re-encoded, mutated node (created_at bumped) filed under its ORIGINAL id.
+// The bytes still decode, but their node preimage no longer hashes to id(v),
+// so verification fails. Verification now hashes the stored bytes (not a
+// re-encode of the live claim), so the corruption must live in the store —
+// white-box (package ranke); the public API can't build such a claim, which is
+// the whole point of §5.10.
+func corruptNode(t *testing.T, g Graph, c Claim) {
 	t.Helper()
+	mu, ok := g.(*graph).u.(*memoryUniverse)
+	require.True(t, ok, "the test graph is backed by the in-memory Universe")
 	cc, ok := c.(*claim)
 	require.True(t, ok, "claim is the package's concrete type")
-	cc.node.createdAt = cc.node.createdAt.Add(time.Hour)
+	cc.node.createdAt = cc.node.createdAt.Add(time.Hour) // id stays as-signed
+	bad, err := cc.Encode()
+	require.NoError(t, err)
+	mu.mu.Lock()
+	mu.claims[c.ID().String()] = bad
+	mu.mu.Unlock()
 }
 
 // --- honest graphs verify ----------------------------------------------
@@ -182,7 +192,7 @@ func TestVerifyWithOnError(t *testing.T) {
 	g := newGraph(t, root)
 	bad := srcClaim(t, root, "will be corrupted")
 	require.NoError(t, g.AddClaims(context.Background(), bad))
-	corruptNode(t, bad)
+	corruptNode(t, g, bad)
 
 	var seen []Failure
 	run := g.Verify(WithOnError(func(f Failure) { seen = append(seen, f) }))
@@ -211,8 +221,8 @@ func TestVerifyWithStopAfter(t *testing.T) {
 	e1 := entityClaim(t, root, "person", "a", em)
 	e2 := entityClaim(t, root, "object", "b", em)
 	require.NoError(t, g.AddClaims(context.Background(), e1, e2))
-	corruptNode(t, e1) // both open heads fail
-	corruptNode(t, e2)
+	corruptNode(t, g, e1) // both open heads fail
+	corruptNode(t, g, e2)
 
 	run := g.Verify(WithStopAfter(1))
 	run.Wait()
@@ -313,4 +323,40 @@ func TestVerifyRejectsWrongHeight(t *testing.T) {
 		}
 	}
 	require.True(t, found, "the wrong-height claim is reported")
+}
+
+// TestVerifyRejectsBranchTableReference: a contribution/branches (branch-table)
+// claim may be referenced only by another branch table. An ordinary claim that
+// references one fails verification — the branch-table-reference rule keeps the
+// archive-management lineage out of the content graph.
+func TestVerifyRejectsBranchTableReference(t *testing.T) {
+	root := contributor(t)
+	g := newGraph(t, root)
+
+	// A branch table (the archive-management lineage layer).
+	bt := branchTable(t, root, []Claim{root}, branchEdge(t, "main", root.ID()))
+	require.NoError(t, g.AddClaims(context.Background(), bt))
+
+	// An ordinary derivation claim that illegally references the branch table
+	// via its (otherwise valid) derivation edge.
+	de, err := NewEdge(EdgeConfig{Reference: bt.ID(), Type: TypeDerivation("source")})
+	require.NoError(t, err)
+	bad, err := NewClaim(TypeDerivation("summary"), root).
+		WithEdges(de).
+		WithInlineContent([]byte("illegal branch-table reference")).
+		WithHeight(HeightOf(root, bt)).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(context.Background(), bad))
+
+	run := g.Verify()
+	run.Wait()
+	require.NotEmpty(t, run.Failures(), "a non-branch-table referencing a branch table must fail verification")
+	var found bool
+	for _, f := range run.Failures() {
+		if f.ID.Equal(bad.ID()) {
+			found = true
+		}
+	}
+	require.True(t, found, "the failure names the offending claim")
 }
