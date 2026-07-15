@@ -12,14 +12,17 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	neo4jstore "github.com/flocko-motion/ranke-go/adapter/storage/neo4j"
+	redisstore "github.com/flocko-motion/ranke-go/adapter/storage/redis"
 	"github.com/flocko-motion/ranke-go/adapter/storage/s3"
 	"github.com/flocko-motion/ranke-go/adapter/storage/sqlite"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
@@ -47,80 +50,133 @@ type Backend struct {
 	Open func() (ranke.Universe, func(), error)
 }
 
-// AllBackends is the matrix: mem (in-process), fs (temp dir), sqlite (temp db),
-// s3 (a MinIO podman pod). Each starts empty.
+// AllBackends is the matrix. Durable byte-stores run standalone (mem, fs,
+// sqlite, s3, redis). Neo4j is a graph-native CACHE — it holds no canonical
+// CBOR and drops content over its cap, so it can never pass a full
+// verification alone; it appears ONLY in stacks over a durable tier that holds
+// the bytes and serves content misses (neo4j/mem; the production
+// neo4j/redis/s3). Each row starts empty.
 func AllBackends() []Backend {
 	return []Backend{
-		{"mem", func() (ranke.Universe, func(), error) {
-			return mem.New(), func() {}, nil
-		}},
-		{"fs", func() (ranke.Universe, func(), error) {
-			dir, err := os.MkdirTemp("", "ranke-perf-fs-")
+		{"mem", openMem},
+		{"fs", openFS},
+		{"sqlite", openSqlite},
+		{"s3", openS3},
+		{"redis", openRedis},
+		{"neo4j/mem", stacked(openNeo4j, openMem)},
+		{"neo4j/redis/s3", stacked(openNeo4j, openRedis, openS3)},
+	}
+}
+
+// --- component openers: each yields a fresh, empty instance + cleanup, or
+// ErrUnavailable when it can't run here. Composed into standalone rows and,
+// via stacked(), into cache stacks. ---
+
+func openMem() (ranke.Universe, func(), error) { return mem.New(), func() {}, nil }
+
+func openFS() (ranke.Universe, func(), error) {
+	dir, err := os.MkdirTemp("", "ranke-perf-fs-")
+	if err != nil {
+		return nil, nil, err
+	}
+	u, err := fs.New(dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, nil, err
+	}
+	return u, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func openSqlite() (ranke.Universe, func(), error) {
+	dir, err := os.MkdirTemp("", "ranke-perf-sqlite-")
+	if err != nil {
+		return nil, nil, err
+	}
+	u, err := sqlite.New(filepath.Join(dir, "perf.db"))
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, nil, err
+	}
+	return u, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func openS3() (ranke.Universe, func(), error) {
+	client, bucket, cleanup, err := minioPod()
+	if err != nil {
+		return nil, nil, err
+	}
+	u, err := s3.New(client, bucket)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return u, cleanup, nil
+}
+
+func openRedis() (ranke.Universe, func(), error) {
+	addr, pass, cleanup, err := redisConn()
+	if err != nil {
+		return nil, nil, err
+	}
+	client := goredis.NewClient(&goredis.Options{Addr: addr, Password: pass})
+	u, err := redisstore.New(client)
+	if err != nil {
+		_ = client.Close()
+		cleanup()
+		return nil, nil, err
+	}
+	return u, func() { _ = client.Close(); cleanup() }, nil
+}
+
+func openNeo4j() (ranke.Universe, func(), error) {
+	conn, connCleanup, err := neo4jConn()
+	if err != nil {
+		return nil, nil, err
+	}
+	driver, err := neo4jdriver.NewDriverWithContext(
+		conn.BoltURI, neo4jdriver.BasicAuth(conn.User, conn.Password, ""))
+	if err != nil {
+		connCleanup()
+		return nil, nil, err
+	}
+	return neo4jstore.New(driver), func() {
+		_ = driver.Close(context.Background())
+		connCleanup()
+	}, nil
+}
+
+// stacked composes openers top→bottom into one Universe: every layer but the
+// last is a Lazy cache, the last is the Eager durable/authoritative tier. If
+// any component is unavailable (ErrUnavailable) the whole stack is, and any
+// already-opened components are cleaned up.
+func stacked(openers ...func() (ranke.Universe, func(), error)) func() (ranke.Universe, func(), error) {
+	return func() (ranke.Universe, func(), error) {
+		var cleanups []func()
+		cleanupAll := func() {
+			for i := len(cleanups) - 1; i >= 0; i-- {
+				cleanups[i]()
+			}
+		}
+		layers := make([]stack.Layer, 0, len(openers))
+		for i, open := range openers {
+			u, cl, err := open()
 			if err != nil {
+				cleanupAll()
 				return nil, nil, err
 			}
-			u, err := fs.New(dir)
-			if err != nil {
-				_ = os.RemoveAll(dir)
-				return nil, nil, err
+			cleanups = append(cleanups, cl)
+			if i == len(openers)-1 {
+				layers = append(layers, stack.Eager(u)) // durable authoritative tier
+			} else {
+				layers = append(layers, stack.Lazy(u)) // cache tier
 			}
-			return u, func() { _ = os.RemoveAll(dir) }, nil
-		}},
-		{"sqlite", func() (ranke.Universe, func(), error) {
-			dir, err := os.MkdirTemp("", "ranke-perf-sqlite-")
-			if err != nil {
-				return nil, nil, err
-			}
-			u, err := sqlite.New(filepath.Join(dir, "perf.db"))
-			if err != nil {
-				_ = os.RemoveAll(dir)
-				return nil, nil, err
-			}
-			return u, func() { _ = os.RemoveAll(dir) }, nil
-		}},
-		{"s3", func() (ranke.Universe, func(), error) {
-			client, bucket, cleanup, err := minioPod()
-			if err != nil {
-				return nil, nil, err
-			}
-			u, err := s3.New(client, bucket)
-			if err != nil {
-				cleanup()
-				return nil, nil, err
-			}
-			return u, cleanup, nil
-		}},
-		{"neo4j", func() (ranke.Universe, func(), error) {
-			// Neo4j is a graph-native CACHE: it stores structure id-faithfully
-			// but drops content over its cap and holds no external bytes, so it
-			// CANNOT pass a full verification alone. Its real deployment — and
-			// the only one that verifies — is stacked as a lazy cache over a
-			// durable tier that holds the bytes and serves content misses.
-			conn, connCleanup, err := neo4jConn()
-			if err != nil {
-				return nil, nil, err
-			}
-			driver, err := neo4jdriver.NewDriverWithContext(
-				conn.BoltURI, neo4jdriver.BasicAuth(conn.User, conn.Password, ""))
-			if err != nil {
-				connCleanup()
-				return nil, nil, err
-			}
-			u, err := stack.NewStack(
-				stack.Lazy(neo4jstore.New(driver)), // graph cache on top
-				stack.Eager(mem.New()),             // durable authoritative bytes below
-			)
-			if err != nil {
-				_ = driver.Close(context.Background())
-				connCleanup()
-				return nil, nil, err
-			}
-			cleanup := func() {
-				_ = driver.Close(context.Background())
-				connCleanup()
-			}
-			return u, cleanup, nil
-		}},
+		}
+		st, err := stack.NewStack(layers...)
+		if err != nil {
+			cleanupAll()
+			return nil, nil, err
+		}
+		return st, cleanupAll, nil
 	}
 }
 
@@ -168,7 +224,8 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	for _, be := range backends {
 		u0, cleanup, err := be.Open()
 		if errors.Is(err, ErrUnavailable) {
-			fmt.Fprintf(w, "backend=%-8s SKIP — %v\n", be.Name, err)
+			rule := strings.Repeat("═", 88)
+			fmt.Fprintf(w, "\n%s\n  %-14s  SKIP — %v\n%s\n", rule, be.Name, err, rule)
 			continue
 		}
 		if err != nil {
@@ -252,14 +309,15 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	r2, _ := u.phaseIO("2-verify")
 	r3a, _ := u.phaseIO("3a-branch")
 	r3b, _ := u.phaseIO("3b-universe")
-	fmt.Fprintf(w, "backend=%-8s size=%d claims=%d verified=%d accesses=%d\n"+
-		"      ch1-write=%s (%dw %dr)  ch2-verify=%s (%dr)  ch3a-branch=%s (%dr)  ch3b-universe=%s (%dr)\n      %s\n",
-		name, cfg.Size, m.ClaimCount, run.Verified(), len(ids),
-		writeDur.Round(time.Millisecond), w1, r1,
-		verifyDur.Round(time.Millisecond), r2,
-		branchDur.Round(time.Millisecond), r3a,
-		universeDur.Round(time.Millisecond), r3b,
-		u.report())
+	rule := strings.Repeat("═", 88)
+	ms := func(d time.Duration) string { return d.Round(time.Millisecond).String() }
+	fmt.Fprintf(w, "\n%s\n  %-14s  size=%d  claims=%d  verified=%d  accesses=%d\n%s\n",
+		rule, name, cfg.Size, m.ClaimCount, run.Verified(), len(ids), rule)
+	fmt.Fprintf(w, "  write            %-9s (%dw %dr)\n", ms(writeDur), w1, r1)
+	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
+	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r3a)
+	fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r3b)
+	fmt.Fprintf(w, "%s\n", u.report())
 	return run.Verified(), nil
 }
 

@@ -38,7 +38,12 @@ func performanceCmd() *cobra.Command {
 		Short: "Run the storage-backend performance matrix",
 		Long: "Generate a deterministic size-N archive into each storage backend and\n" +
 			"time the chapters (write / verify / random access), reporting per-step\n" +
-			"latency distributions. Backends: mem, fs, sqlite, s3 (a podman MinIO pod).",
+			"latency distributions.\n\n" +
+			"Backends — durable byte-stores standalone; neo4j is a graph cache, only\n" +
+			"stacked over a durable tier:\n" +
+			"  mem, fs, sqlite, s3(MinIO), redis, neo4j/mem, neo4j/redis/s3\n\n" +
+			"A backend that can't run here (no podman, no RANKE_NEO4J_*/RANKE_REDIS_*)\n" +
+			"is skipped, not failed.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := performance.Config{
 				Size:     size,
@@ -53,6 +58,6 @@ func performanceCmd() *cobra.Command {
 	f.IntVar(&size, "size", 100, "generator size (~5×size claims)")
 	f.Int64Var(&seed, "seed", 1, "generator seed (fixes every id)")
 	f.IntVar(&access, "access", 50, "chapter-3 random accesses")
-	f.StringSliceVar(&backends, "backends", nil, "backends to run (comma-separated: mem,fs,sqlite,s3); default all")
+	f.StringSliceVar(&backends, "backends", nil, "backends to run, comma-separated (mem,fs,sqlite,s3,redis,neo4j/mem,neo4j/redis/s3); default all")
 	return cmd
 }

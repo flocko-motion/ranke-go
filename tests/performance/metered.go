@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,6 +86,13 @@ func (m *metered) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.G
 	m.mu.Unlock()
 	m.rec("GetClaims", kindRead, len(ids), d)
 	return c, err
+}
+
+func (m *metered) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	t := time.Now()
+	b, err := m.inner.GetClaimsRaw(ctx, ids)
+	m.rec("GetClaimsRaw", kindRead, len(ids), time.Since(t))
+	return b, err
 }
 
 func (m *metered) PutClaims(ctx context.Context, cs []ranke.Claim) error {
@@ -276,7 +284,7 @@ func (m *metered) report() string {
 		if d.n == 0 {
 			return
 		}
-		b.printf("\n      %-18s %6s %7s %s %s %s %s %s %s",
+		b.printf("\n  %-17s %7s %7s %s %s %s %s %s %s",
 			label, intCell(d.n), intCell(d.items),
 			durCell(d.avg), durCell(d.p50), durCell(d.p90), durCell(d.p99), durCell(d.min), durCell(d.max))
 	}
@@ -302,7 +310,7 @@ func (m *metered) report() string {
 			writeOps++
 		}
 	}
-	b.printf("round-trips=%d  reads=%d writes=%d  content-bytes: in=%s out=%s",
+	b.printf("  round-trips=%d  reads=%d writes=%d  content in=%s out=%s",
 		len(m.samples), totalReads, writeOps,
 		bytesStr(m.contentBytesRead), bytesStr(m.contentBytesWritten))
 	if distinct > 0 {
@@ -310,12 +318,13 @@ func (m *metered) report() string {
 		if len(short) > 12 {
 			short = short[:12] + "…"
 		}
-		b.printf("\n      claim-reads: %d over %d distinct (%.1f× re-read) — hottest %s ×%d",
+		b.printf("\n  claim-reads: %d over %d distinct (%.1f× re-read) — hottest %s ×%d",
 			totalReads, distinct, factor, short, hottest)
 	}
-	// Header — column labels aligned over the right-aligned value cells.
-	b.printf("\n      %-18s %6s %7s %9s %9s %9s %9s %9s %9s",
-		"", "n", "items", "avg", "p50", "p90", "p99", "min", "max")
+	// Table header + rule, aligned over the right-aligned value cells.
+	header := fmt.Sprintf("\n  %-17s %7s %7s %9s %9s %9s %9s %9s %9s",
+		"operation", "n", "items", "avg", "p50", "p90", "p99", "min", "max")
+	b.printf("%s\n  %s", header, strings.Repeat("─", len(header)-3))
 	line("TOTAL", distOf(m.samples))
 	// Per phase (write, verify, access …): reads and writes separately, so the
 	// cost of each chapter's walk is visible on its own.
@@ -376,7 +385,7 @@ func (b *strBuilder) outliers(samples []sample) {
 			}
 		}
 		if shown > 0 {
-			b.printf("\n      slowest %s:%s", label, line)
+			b.printf("\n  slowest %-6s:%s", label, line)
 		}
 	}
 	emit("writes", kindWrite)
@@ -432,8 +441,8 @@ const durWidth = 9
 // Disabled when NO_COLOR is set.
 const (
 	cReset  = "\033[0m"
-	cFaint  = "\033[2;90m" // nanoseconds — smallest, darkest
-	cGrey   = "\033[90m"   // microseconds
+	cGrey   = "\033[90m"   // nanoseconds — smallest, dim but legible
+	cWhite  = "\033[97m"   // microseconds
 	cYellow = "\033[33m"   // milliseconds
 	cRed    = "\033[1;31m" // seconds — largest, loudest
 )
@@ -467,13 +476,13 @@ func durCell(d time.Duration) string {
 	var c string
 	switch {
 	case d < time.Microsecond:
-		c = cFaint // ns
+		c = cGrey // ns — no problem
 	case d < time.Millisecond:
-		c = cGrey // µs
+		c = cWhite // µs — ok
 	case d < time.Second:
-		c = cYellow // ms
+		c = cYellow // ms — warning
 	default:
-		c = cRed // s
+		c = cRed // s — problem
 	}
 	return c + s + cReset
 }
