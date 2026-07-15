@@ -222,6 +222,25 @@ func (p *partition) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint
 	return ranke.DefaultGetClaimHeights(ctx, p, ids)
 }
 
+// GetClaimsRaw routes each id to its shard and gathers the stored CBOR.
+func (p *partition) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	out := make([][]byte, len(ids))
+	groups := p.groupIds(ids)
+	for s, idx := range groups {
+		if len(idx) == 0 {
+			continue
+		}
+		got, err := p.shards[s].GetClaimsRaw(ctx, at(ids, idx))
+		if err != nil {
+			return nil, err
+		}
+		for k, b := range got {
+			out[idx[k]] = b
+		}
+	}
+	return out, nil
+}
+
 func (p *partition) Capabilities() ranke.Capabilities {
 	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true}
 	for _, s := range p.shards {

@@ -324,6 +324,15 @@ func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]
 	return out, nil
 }
 
+// GetClaimsRaw always misses: a structure/query cache stores no CBOR. The
+// ErrNotFound lets a stack route the request to the authoritative byte layer.
+func (u *neo4jUniverse) GetClaimsRaw(_ context.Context, ids []ranke.Id) ([][]byte, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("adapter/neo4j: stores no claim CBOR (structure-only cache): %w", ranke.ErrNotFound)
+}
+
 // GetContents returns inline content the cache holds (≤ cap); a hash it lacks
 // (external or over-cap content) is a miss (ranke.ErrNotFound) so the stack
 // falls through to the durable layer.

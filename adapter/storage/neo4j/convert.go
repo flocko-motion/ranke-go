@@ -116,7 +116,14 @@ func partsFromNode(id ranke.Id, props map[string]any, edgeRecs []any, content ma
 		if err != nil {
 			return ranke.ClaimParts{}, err
 		}
+		// The derived edge id is cached on the relationship (edge_id); hand it
+		// to AssembleClaim so it need not recompute (and can't drift).
+		eid, err := parseOptID(eprops["edge_id"])
+		if err != nil {
+			return ranke.ClaimParts{}, err
+		}
 		ep := ranke.EdgeParts{
+			ID:                eid,
 			Reference:         ref,
 			Type:              asString(eprops["type"]),
 			RelationDirection: ranke.RelationDirection(asInt(eprops["direction"])),
