@@ -187,10 +187,11 @@ type Universe interface {
 	// WithProgress is honored.
 	CopyContents(ctx context.Context, src Universe, refs []ContentRef, opts ...CopyOption) error
 
-	// SetClaimsTags sets tags on claims positionally: claims[i] gets tags[i].
-	// For each claim it first clears every existing tag whose key matches a
-	// clearTags glob (globs allowed), then applies tags[i].
-	SetClaimsTags(ctx context.Context, clearTags []string, claims []Id, tags []map[string]string) error
+	// SetClaimsTags applies tags per claim, keyed by claim-id string: for each
+	// claim it first clears every existing tag whose key matches a clearTags
+	// glob (globs allowed), then applies that claim's key→value pairs. A backend
+	// that can't hold tags (an opaque byte store) returns ErrUnsupported.
+	SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error
 	// GetClaimTags returns each claim's tags positionally (nil when a claim has
 	// none), like GetClaims/GetClaimHeights.
 	GetClaimTags(ctx context.Context, claims []Id) ([]map[string]string, error)

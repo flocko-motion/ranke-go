@@ -1,7 +1,7 @@
 // package: ranke / tagger
 // type:    logic
-// job:     TagArchive — descend an archive's branch-table spine and stamp every branch's closure with per-claim entry revisions (a pure-functional runtime overlay), producing the head-id history it walks
-// limits:  optional (gated by Capabilities.Tags); tags are set through the Universe's bulk GetClaimTags/SetClaimsTags — this file holds no backend I/O of its own
+// job:     TagArchive — descend an archive's branch-table spine and stamp every branch's closure with each member claim's .Height()
+// limits:  optional (gated by Capabilities.Tags); tags are read off the claims (GetClaims injects them) and written through the Universe's bulk SetClaimsTags — this file holds no backend I/O of its own
 package ranke
 
 import (
@@ -10,51 +10,48 @@ import (
 )
 
 // The tagger owns these tag keys; the Universe just stores them. spineRevKey
-// records the revision a branch-table claim sits at on the spine;
-// branchTagKey(b) marks a claim as a member of branch b's closure.
-const spineRevKey = "_rev"
+// records the spine revision a branch-table claim sits at; branchTagKey(b)
+// marks a claim as a member of branch b's closure, valued with the branch
+// table's height at the revision it entered. Both share the "_b" prefix so a
+// single "_b*" clear scopes exactly to the tagger's tags.
+const spineRevKey = "_br"
 
 func branchTagKey(branch string) string { return "_b_" + branch }
 
-// tagBranchClosure walks head's closure level by level (one bulk tag-read per
-// hop), stamping branchTagKey(branch)=rev on every claim that lacks it and
-// pruning where it is present — so the oldest revision to reach a claim wins.
-// New tags accumulate in pending (TagArchive flushes per revision); already-
-// flushed revisions are seen through GetClaimTags. ids keeps an Id per string
-// key so pending can be handed back to SetClaimsTags.
-func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, rev string,
-	pending map[string]map[string]string, ids map[string]Id,
-) error {
+// TagArchiveOptions tunes TagArchive.
+type TagArchiveOptions struct {
+	// RetagAll ignores the resume bound and descends to the spine root,
+	// re-tagging every revision from 0.
+	RetagAll bool
+}
+
+// tagBranchClosure walks head's closure level by level, recording
+// branchTagKey(branch)=height for every claim that lacks it and pruning where
+// it is present — so the oldest revision to reach a claim wins. It reads
+// membership off the claim it already fetches (GetClaims injects tags) or the
+// pending map, and accumulates new tags into tags (keyed by claim-id string) for
+// TagArchive to flush once per revision. The prune stops descending at an
+// already-tagged claim (whose closure is tagged too).
+func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, height int, tags map[string]map[string]string) error {
 	key := branchTagKey(branch)
+	val := strconv.Itoa(height)
 	frontier := []Id{head}
 	for len(frontier) > 0 {
-		tags, err := u.GetClaimTags(ctx, frontier)
-		if err != nil {
-			return err
-		}
-		var fresh []Id
-		for i, id := range frontier {
-			s := id.String()
-			if pending[s][key] != "" || tags[i][key] != "" {
-				continue // already a member (this run or a prior one) — prune
-			}
-			if pending[s] == nil {
-				pending[s] = map[string]string{}
-				ids[s] = id
-			}
-			pending[s][key] = rev
-			fresh = append(fresh, id)
-		}
-		if len(fresh) == 0 {
-			return nil
-		}
-		claims, err := u.GetClaims(ctx, fresh, WithNotDiffMaterialized())
+		claims, err := u.GetClaims(ctx, frontier, WithNotDiffMaterialized())
 		if err != nil {
 			return err
 		}
 		var next []Id
 		seen := map[string]struct{}{}
 		for _, c := range claims {
+			s := c.ID().String()
+			if c.Tag(key) != "" || tags[s][key] != "" {
+				continue // already a member (prior run or this revision) — prune
+			}
+			if tags[s] == nil {
+				tags[s] = map[string]string{}
+			}
+			tags[s][key] = val
 			for _, e := range c.Edges() {
 				r := e.Reference()
 				if r == nil {
@@ -72,81 +69,78 @@ func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, r
 	return nil
 }
 
-// TagArchive descends a's branch-table spine to its root, then tags each
-// revision's changed-branch closures oldest→newest, returning the head-id
-// history the descent produced. Each branch-table claim gets a spine-revision
-// tag in the same batch as its branch tags, so _rev is the commit marker and a
-// later call resumes past the already-tagged prefix. History is the output of
-// this walk, never an input.
-func TagArchive(ctx context.Context, a Archive, ...TagAcvhiveOptions) ([]HistoryItem, error) {
+// TagArchive descends a's branch-table spine and tags each revision's branch
+// closures oldest→newest
+func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]HistoryItem, error) {
 	arc, ok := a.(*archive)
 	if !ok {
 		return nil, errNotArchive
 	}
 	u := arc.u
+	var o TagArchiveOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 
-	// 1: descend the branch-table spine head→root via contribution/diff.
-	// TODO: *until* we hit a claim that already has a revision
+	// 1: descend the branch-table spine head→root
 	var spine []Claim // newest→oldest
+	base := uint64(0)
 	for id := arc.bth.ID(); id != nil; {
-		// NOTE: this can be done more efficient once we have queries
+		// NOTE: this can be done more efficiently once we have queries.
 		bt, err := GetClaim(ctx, u, id, WithNotDiffMaterialized())
 		if err != nil {
 			return nil, err
 		}
-    // TODO: unless otion "retag all" is set
-		if bt.Tag(spineRevKey) != "" {
+		if r := bt.Tag(spineRevKey); r != "" && !o.RetagAll {
+			k, err := strconv.ParseUint(r, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			base = k + 1
 			break
 		}
 		spine = append(spine, bt)
 		id = nil
-		for _, e := range bt.Edges(EdgeFilterType{Type: EdgeTypeDiff}) {
+		for _, e := range bt.Edges(EdgeFilterTypes{Types: []string{EdgeTypeDiff, EdgeTypeBranches}}) {
 			id = e.Reference()
 			break
 		}
 	}
 	if len(spine) == 0 {
-		return nil, nil
+		return nil, nil // already tagged up to the head — nothing new
 	}
 
-	// 2: iterate root→head, assuming revisions 0..n.
+	// 2: iterate the untagged spine oldest→newest, revisions base..n.
 	history := make([]HistoryItem, 0, len(spine))
-	rev := uint64(0)
-	for i := len(spine) - 1; i >= 0; i, rev = i-1, rev+1 {
+	revision := base
+	for i := len(spine) - 1; i >= 0; i, revision = i-1, revision+1 {
 		bt := spine[i]
-		revStr := strconv.FormatUint(rev, 10)
-		history = append(history, NewHistoryItem(bt.ID(), int(rev), bt.Node().CreatedAt()))
-		if spineTags[i][spineRevKey] == revStr {
-			continue // 2.1: already tagged at this revision — skip
-		}
-		// 2.2: the raw claim's branch edges are exactly the branches that moved
-		// this revision; tag each one's closure.
-		pending := map[string]map[string]string{}
-		pids := map[string]Id{}
+		revisionStr := strconv.FormatUint(revision, 10)
+		history = append(history, NewHistoryItem(bt.ID(), int(revision), int(bt.Node().Height()), bt.Node().CreatedAt()))
+
+		// 2.1: accumulate every branch's membership for this revision into one
+		// shared map, so a claim reached by several branches gets each
+		// _b_<branch> before the single flush. The value is the branch table's
+		// height at this revision.
+		tags := map[string]map[string]string{}
 		for _, e := range bt.Edges(EdgeFilterType{Type: EdgeTypeBranch}) {
 			name, err := e.GetField(FieldName)
 			if err != nil {
 				return nil, err
 			}
-			if err := tagBranchClosure(ctx, u, name, e.Reference(), revStr, pending, pids); err != nil {
+			if err := tagBranchClosure(ctx, u, name, e.Reference(), int(bt.Node().Height()), tags); err != nil {
 				return nil, err
 			}
 		}
-		// 2.3: stamp the spine revision in the same batch (the commit marker).
+		// 2.2: add the spine revision on the branch-table claim, then flush the
+		// revision at once — clearing _b* first (so a hidden branch's stale tags
+		// go) and writing each claim's accumulated set. _br is the commit marker.
 		s := bt.ID().String()
-		if pending[s] == nil {
-			pending[s] = map[string]string{}
-			pids[s] = bt.ID()
+		if tags[s] == nil {
+			tags[s] = map[string]string{}
 		}
-		pending[s][spineRevKey] = revStr
-
-		claims := make([]Id, 0, len(pending))
-		vals := make([]map[string]string, 0, len(pending))
-		for k, t := range pending {
-			claims = append(claims, pids[k])
-			vals = append(vals, t)
-		}
-		if err := u.SetClaimsTags(ctx, nil, claims, vals); err != nil {
+		tags[s][spineRevKey] = revisionStr
+		if err := u.SetClaimsTags(ctx, []string{"_b*"}, tags); err != nil {
 			return nil, err
 		}
 	}

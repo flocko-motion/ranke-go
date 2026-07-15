@@ -17,8 +17,9 @@ func TestHistoryItemGetters(t *testing.T) {
 	require.NoError(t, err)
 	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 
-	item := NewHistoryItem(id, 3, ts)
+	item := NewHistoryItem(id, 2, 3, ts)
 	require.True(t, item.GetId().Equal(id), "id round-trips")
+	require.Equal(t, 2, item.GetRevision())
 	require.Equal(t, 3, item.GetHeight())
 	require.True(t, item.GetTimestamp().Equal(ts))
 }

@@ -408,14 +408,14 @@ func (s *stack) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[stri
 
 // SetClaimsTags writes to every tag-holding layer (keeping them consistent);
 // unsupported if no layer holds tags.
-func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
+func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
 	found := false
 	for li := range s.layers {
 		if !s.layers[li].u.Capabilities().Tags {
 			continue
 		}
 		found = true
-		if err := s.layers[li].u.SetClaimsTags(ctx, clearTags, claims, tags); err != nil {
+		if err := s.layers[li].u.SetClaimsTags(ctx, clearTags, tags); err != nil {
 			return err
 		}
 	}

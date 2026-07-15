@@ -562,48 +562,52 @@ UNWIND $rows AS row
 MATCH (c:` + labelClaim + ` {id: row.id})
 SET c += row.props`
 
-// SetClaimsTags sets tags on claims[i] from tags[i]: for each claim it clears
-// every existing tag whose key matches a clearTags glob, then applies tags[i].
-// Both happen via SET c += props, where a null value removes a property (the
-// clear) and a string sets it.
-func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
-	if len(claims) != len(tags) {
-		return fmt.Errorf("adapter/neo4j: SetClaimsTags claims/tags length mismatch (%d vs %d)", len(claims), len(tags))
-	}
-	if len(claims) == 0 {
+// SetClaimsTags applies tags per claim (keyed by id string): for each claim it
+// clears every existing tag whose key matches a clearTags glob, then applies
+// the new key→value pairs. Both happen via SET c += props, where a null value
+// removes a property (the clear) and a string sets it.
+func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
+	if len(tags) == 0 {
 		return nil
 	}
 	// Clearing needs the current tag keys to know which to null out.
-	var current []map[string]string
+	var current map[string]map[string]string
 	if len(clearTags) > 0 {
-		var err error
-		if current, err = u.GetClaimTags(ctx, claims); err != nil {
+		ids := make([]ranke.Id, 0, len(tags))
+		for s := range tags {
+			id, err := ranke.ParseId(s)
+			if err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		got, err := u.GetClaimTags(ctx, ids)
+		if err != nil {
 			return err
 		}
-	}
-	rows := make([]map[string]any, 0, len(claims))
-	for i, id := range claims {
-		if id == nil {
-			return errNilID
+		current = make(map[string]map[string]string, len(ids))
+		for i, id := range ids {
+			current[id.String()] = got[i]
 		}
+	}
+	rows := make([]map[string]any, 0, len(tags))
+	for s, kv := range tags {
 		props := map[string]any{}
-		if current != nil {
-			for k := range current[i] {
-				for _, pat := range clearTags {
-					if ok, _ := path.Match(pat, k); ok {
-						props[k] = nil // null removes the property
-						break
-					}
+		for k := range current[s] {
+			for _, pat := range clearTags {
+				if ok, _ := path.Match(pat, k); ok {
+					props[k] = nil // null removes the property
+					break
 				}
 			}
 		}
-		for k, v := range tags[i] {
+		for k, v := range kv {
 			props[k] = v
 		}
 		if len(props) == 0 {
 			continue
 		}
-		rows = append(rows, map[string]any{"id": id.String(), "props": props})
+		rows = append(rows, map[string]any{"id": s, "props": props})
 	}
 	if len(rows) == 0 {
 		return nil

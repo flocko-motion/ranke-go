@@ -14,6 +14,7 @@ import (
 // read via the getters.
 type HistoryItem struct {
 	id        Id
+	revision  int
 	height    int
 	timestamp time.Time
 }
@@ -21,14 +22,17 @@ type HistoryItem struct {
 // NewHistoryItem builds a HistoryItem. It lets adapters outside package
 // ranke reconstruct an item from persisted storage (id + its recorded
 // height and append time).
-func NewHistoryItem(id Id, height int, timestamp time.Time) HistoryItem {
-	return HistoryItem{id: id, height: height, timestamp: timestamp}
+func NewHistoryItem(id Id, revision int, height int, timestamp time.Time) HistoryItem {
+	return HistoryItem{id: id, revision: revision, height: height, timestamp: timestamp}
 }
 
 // GetId returns the head id this entry records.
 func (h HistoryItem) GetId() Id { return h.id }
 
-// GetHeight returns the entry's position in the timeline (0 is the oldest).
+// GetRevision returns the entry's position in the timeline (0 is the oldest).
+func (h HistoryItem) GetRevision() int { return h.revision }
+
+// GetHeight returns the entry's height
 func (h HistoryItem) GetHeight() int { return h.height }
 
 // GetTimestamp returns the time the head was appended.

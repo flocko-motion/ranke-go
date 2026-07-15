@@ -137,19 +137,13 @@ func (u *memoryUniverse) GetClaimTags(_ context.Context, claims []Id) ([]map[str
 	return out, nil
 }
 
-// SetClaimsTags sets tags on claims[i] from tags[i]: for each claim it clears
-// every existing tag whose key matches a clearTags glob, then applies tags[i].
-func (u *memoryUniverse) SetClaimsTags(_ context.Context, clearTags []string, claims []Id, tags []map[string]string) error {
-	if len(claims) != len(tags) {
-		return errTagsLenMismatch
-	}
+// SetClaimsTags applies tags per claim (keyed by id string): for each claim it
+// first clears every existing tag whose key matches a clearTags glob, then
+// applies the new key→value pairs.
+func (u *memoryUniverse) SetClaimsTags(_ context.Context, clearTags []string, tags map[string]map[string]string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	for i, id := range claims {
-		if id == nil {
-			return errNilID
-		}
-		s := id.String()
+	for s, kv := range tags {
 		m := u.tags[s]
 		if m == nil {
 			m = map[string]string{}
@@ -162,7 +156,7 @@ func (u *memoryUniverse) SetClaimsTags(_ context.Context, clearTags []string, cl
 				}
 			}
 		}
-		for k, v := range tags[i] {
+		for k, v := range kv {
 			m[k] = v
 		}
 	}

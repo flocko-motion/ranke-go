@@ -267,22 +267,26 @@ func (p *partition) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[
 	return out, nil
 }
 
-// SetClaimsTags routes each claim (with its tags) to its shard; clearTags
-// applies on every shard touched.
-func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
-	if len(claims) != len(tags) {
-		return errors.New("partition.SetClaimsTags: claims and tags length mismatch")
+// SetClaimsTags routes each claim (by id) to its shard, grouping the per-claim
+// tag maps per shard; clearTags applies on every shard touched.
+func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
+	groups := make([]map[string]map[string]string, len(p.shards))
+	for s, kv := range tags {
+		id, err := ranke.ParseId(s)
+		if err != nil {
+			return err
+		}
+		sh := p.shardOf(id)
+		if groups[sh] == nil {
+			groups[sh] = map[string]map[string]string{}
+		}
+		groups[sh][s] = kv
 	}
-	groups := p.groupIds(claims)
-	for s, idx := range groups {
-		if len(idx) == 0 {
+	for sh, g := range groups {
+		if len(g) == 0 {
 			continue
 		}
-		sub := make([]map[string]string, len(idx))
-		for k, i := range idx {
-			sub[k] = tags[i]
-		}
-		if err := p.shards[s].SetClaimsTags(ctx, clearTags, at(claims, idx), sub); err != nil {
+		if err := p.shards[sh].SetClaimsTags(ctx, clearTags, g); err != nil {
 			return err
 		}
 	}

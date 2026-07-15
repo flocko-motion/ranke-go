@@ -103,7 +103,7 @@ func (c *claim) HasTag(key string) bool {
 }
 
 func (c *claim) SetTag(ctx context.Context, u Universe) error {
-	return u.SetClaimsTags(ctx, nil, []Id{c.ID()}, []map[string]string{c.tags})
+	return u.SetClaimsTags(ctx, nil, map[string]map[string]string{c.ID().String(): c.tags})
 }
 
 // effectiveEdges is the edge set reads see: the delta for a plain claim,

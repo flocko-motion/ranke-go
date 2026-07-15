@@ -369,7 +369,7 @@ func (u *blobUniverse) GetClaimTags(_ context.Context, _ []ranke.Id) ([]map[stri
 // SetClaimsTags is unsupported (see GetClaimTags).
 //
 //deadcode:keep
-func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ []ranke.Id, _ []map[string]string) error {
+func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ map[string]map[string]string) error {
 	return ranke.ErrUnsupported
 }
 
