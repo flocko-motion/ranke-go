@@ -138,6 +138,14 @@ vet:
 fmt:
 	gofmt -w .
 
+# Fail if any Go file is not gofmt-clean (lists the offenders). The check half
+# of `fmt`; wired into `verify`. Skips .worktrees (sibling agent checkouts).
+fmt-check:
+	@out="$$(find . -path ./.worktrees -prune -o -name '*.go' -print | xargs gofmt -l)"; \
+	if [ -n "$$out" ]; then \
+		echo "gofmt needed (run 'make fmt'):"; echo "$$out"; exit 1; \
+	fi
+
 tidy:
 	go mod tidy
 
@@ -242,9 +250,10 @@ docs-clean:
 lint:
 	brokkr lint
 
-# Quick quality gate: build the binaries and run the lint gate — the fast
-# "does it compile and pass lint" without vet or the full test suite (-> check).
-verify: build lint
+# Quick quality gate: build the binaries, check formatting, and run the lint
+# gate — the fast "does it compile, is it gofmt-clean, does it pass lint"
+# without vet or the full test suite (-> check).
+verify: build fmt-check lint
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance

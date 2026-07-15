@@ -29,6 +29,7 @@ type ClaimParts struct {
 	InlineContent []byte            // optional — omit for external/large content
 	Fields        map[string]string //
 	Edges         []EdgeParts       //
+	Tags          map[string]string // mutable runtime tags (branch membership, revision) — not part of the id
 }
 
 // EdgeParts is the parsed structure of one edge. ID (the derived edge id) is
@@ -114,5 +115,5 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	for i, e := range edges {
 		n.edges[i] = e.id
 	}
-	return &claim{node: n, edges: edges}, nil
+	return &claim{node: n, edges: edges, tags: cloneFields(parts.Tags)}, nil
 }

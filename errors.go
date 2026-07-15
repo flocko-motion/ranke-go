@@ -14,6 +14,9 @@ var (
 	// ErrUnsupported: the backend does not support this operation (e.g. an
 	// opaque byte store asked to tag). Callers gate on the relevant Capability.
 	ErrUnsupported = errors.New("ranke: operation not supported by this backend")
+	// errTagsLenMismatch: SetClaimsTags got claims and tags slices of unequal
+	// length (they are positional — claims[i] pairs with tags[i]).
+	errTagsLenMismatch = errors.New("ranke.SetClaimsTags: claims and tags length mismatch")
 	// ErrContentCapped: a layer holds a claim/reference but its stored content
 	// is shorter than the expected content_size — capped or truncated (e.g. a
 	// cache filled under a smaller cap in a previous run). A stack treats it

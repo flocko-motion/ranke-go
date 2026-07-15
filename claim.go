@@ -19,6 +19,13 @@ type Claim interface {
 	// Edges returns the edges in canonical order. With filters,
 	// only edges matching every filter (AND) are returned.
 	Edges(filters ...Filter) []Edge
+
+	Tags() map[string]string
+	// Tag returns value of tag best effort, with "" as fallback
+	Tag(key string) string
+	HasTag(key string) bool
+	SetTag(ctx context.Context, u Universe) error
+
 	// Contributor returns the contributor for this claim — always
 	// a contribution/contributor claim. Self-attribution for the
 	// root (no-edge) contributor.
@@ -33,6 +40,19 @@ type Claim interface {
 	// signs subsequent claims attributed to it automatically.
 	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
+
+	// Tags returns the claim's mutable runtime tags — a pure-functional overlay
+	// (branch membership, spine revision), not part of the id or the encoded
+	// bytes. The map is live: mutate it, then persist with SetTag. A tag-aware
+	// Universe injects these when handing out a claim (see GetClaims); an opaque
+	// byte store leaves them empty.
+	Tags() map[string]string
+	// Tag returns one tag's value, "" if unset (best effort).
+	Tag(key string) string
+	// HasTag reports whether key is set.
+	HasTag(key string) bool
+	// SetTag persists the claim's current tags to u (via u.SetClaimsTags).
+	SetTag(ctx context.Context, u Universe) error
 	// Encode returns the claim's canonical CBOR serialization — the whole
 	// storage record (node + edge bodies + any inline content), storage-
 	// agnostic. Inverse of the package-level DecodeClaim; persistence
@@ -70,11 +90,33 @@ type claim struct {
 	// ID()/Encode() stay the claim's own bytes.
 	diffClaim *claim
 	diffEdges []*edge
+
+	// tags is the mutable runtime tag overlay, injected by a tag-aware Universe
+	// on the way out of GetClaims. Not part of the id or encoded bytes.
+	tags map[string]string
 }
 
 func (c *claim) Node() Node     { return c.node }
 func (c *claim) ID() Id         { return c.node.id }
 func (c *claim) unwrap() *claim { return c }
+
+func (c *claim) Tags() map[string]string {
+	if c.tags == nil {
+		c.tags = map[string]string{}
+	}
+	return c.tags
+}
+
+func (c *claim) Tag(key string) string { return c.tags[key] }
+
+func (c *claim) HasTag(key string) bool {
+	_, ok := c.tags[key]
+	return ok
+}
+
+func (c *claim) SetTag(ctx context.Context, u Universe) error {
+	return u.SetClaimsTags(ctx, nil, []Id{c.ID()}, []map[string]string{c.tags})
+}
 
 // effectiveEdges is the edge set reads see: the delta for a plain claim,
 // the materialised overlay for a diff claim.

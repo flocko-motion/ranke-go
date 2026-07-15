@@ -87,8 +87,8 @@ func TestMaxContentSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStack: %v", err)
 	}
-	small, sb := blob(t, "hi")           // 2 bytes
-	big, bb := blob(t, "way too long")   // > 4 bytes
+	small, sb := blob(t, "hi")         // 2 bytes
+	big, bb := blob(t, "way too long") // > 4 bytes
 	if err := st.PutContents(ctx, []ranke.ContentBlob{{Hash: small, Content: sb}, {Hash: big, Content: bb}}); err != nil {
 		t.Fatalf("PutContents: %v", err)
 	}

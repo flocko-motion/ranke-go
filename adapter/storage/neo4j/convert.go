@@ -7,6 +7,7 @@ package neo4j
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
@@ -105,6 +106,7 @@ func partsFromNode(id ranke.Id, props map[string]any, edgeRecs []any, content ma
 		}
 	}
 	p.Fields = fieldsFrom(props)
+	p.Tags = tagsFrom(props)
 
 	for _, raw := range edgeRecs {
 		er, ok := raw.(map[string]any)
@@ -174,6 +176,22 @@ func fieldsFrom(props map[string]any) map[string]string {
 		if i < len(vals) {
 			out[k] = vals[i]
 		}
+	}
+	return out
+}
+
+// tagsFrom extracts the tag overlay from a node's properties — those under the
+// tagPrefix namespace, with the prefix stripped. nil when the node has none.
+func tagsFrom(props map[string]any) map[string]string {
+	var out map[string]string
+	for k, v := range props {
+		if !strings.HasPrefix(k, tagPrefix) {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[k] = asString(v) // key carries the "_" prefix — stored verbatim
 	}
 	return out
 }

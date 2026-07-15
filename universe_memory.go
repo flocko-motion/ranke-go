@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path"
 	"sync"
 )
 
@@ -19,7 +20,7 @@ func NewMemoryUniverse() Universe {
 	return &memoryUniverse{
 		claims:  make(map[string][]byte),
 		content: make(map[string][]byte),
-		tags:    make(map[string]map[string]uint64),
+		tags:    make(map[string]map[string]string),
 	}
 }
 
@@ -27,7 +28,7 @@ type memoryUniverse struct {
 	mu      sync.RWMutex
 	claims  map[string][]byte            // canonical CBOR by id
 	content map[string][]byte            // content by hash
-	tags    map[string]map[string]uint64 // id → branch → entry revision (a side-map; see Tagger)
+	tags    map[string]map[string]string // id → tag key → value (side-map)
 }
 
 func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
@@ -47,6 +48,13 @@ func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOpt
 		if err != nil {
 			u.mu.RUnlock()
 			return nil, err
+		}
+		if t := u.tags[id.String()]; len(t) > 0 {
+			cp := make(map[string]string, len(t))
+			for k, v := range t {
+				cp[k] = v
+			}
+			c.unwrap().tags = cp // inject the tag overlay (tag-aware Universe)
 		}
 		out[i] = c
 	}
@@ -106,34 +114,59 @@ func (u *memoryUniverse) GetClaimHeights(ctx context.Context, ids []Id) ([]uint6
 	return DefaultGetClaimHeights(ctx, u, ids)
 }
 
-// TagBranch uses the reference walk (mem has no native pass).
-func (u *memoryUniverse) TagBranch(ctx context.Context, branch string, head Id, revision uint64) error {
-	return DefaultTagBranch(ctx, u, u, branch, head, revision)
+// GetClaimTags returns each claim's tags positionally (nil when a claim has
+// none). Each entry is a copy, so callers can't mutate the store.
+func (u *memoryUniverse) GetClaimTags(_ context.Context, claims []Id) ([]map[string]string, error) {
+	out := make([]map[string]string, len(claims))
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	for i, id := range claims {
+		if id == nil {
+			return nil, errNilID
+		}
+		src := u.tags[id.String()]
+		if len(src) == 0 {
+			continue
+		}
+		cp := make(map[string]string, len(src))
+		for k, v := range src {
+			cp[k] = v
+		}
+		out[i] = cp
+	}
+	return out, nil
 }
 
-func (u *memoryUniverse) SetBranchRevision(_ context.Context, claim Id, branch string, revision uint64) error {
-	if claim == nil {
-		return errNilID
+// SetClaimsTags sets tags on claims[i] from tags[i]: for each claim it clears
+// every existing tag whose key matches a clearTags glob, then applies tags[i].
+func (u *memoryUniverse) SetClaimsTags(_ context.Context, clearTags []string, claims []Id, tags []map[string]string) error {
+	if len(claims) != len(tags) {
+		return errTagsLenMismatch
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	m := u.tags[claim.String()]
-	if m == nil {
-		m = make(map[string]uint64)
-		u.tags[claim.String()] = m
+	for i, id := range claims {
+		if id == nil {
+			return errNilID
+		}
+		s := id.String()
+		m := u.tags[s]
+		if m == nil {
+			m = map[string]string{}
+			u.tags[s] = m
+		}
+		for _, pat := range clearTags {
+			for k := range m {
+				if ok, _ := path.Match(pat, k); ok {
+					delete(m, k)
+				}
+			}
+		}
+		for k, v := range tags[i] {
+			m[k] = v
+		}
 	}
-	m[branch] = revision
 	return nil
-}
-
-func (u *memoryUniverse) BranchRevision(_ context.Context, claim Id, branch string) (uint64, bool, error) {
-	if claim == nil {
-		return 0, false, errNilID
-	}
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-	r, ok := u.tags[claim.String()][branch]
-	return r, ok, nil
 }
 
 func (u *memoryUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {

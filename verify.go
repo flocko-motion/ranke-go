@@ -111,11 +111,11 @@ func (r *verificationRun) finish() {
 // --- configuration ---
 
 type verifyConfig struct {
-	maxDepth        int           // 0 = unbounded
-	maxClaims       int           // stop after n claims processed; 0 = unlimited
-	createdAfter    time.Time     // prune claims created before this; zero = no bound
-	trusted         func(Id) bool // prune predicate; nil = trust nothing
-	externalContent bool          // fetch + verify external content (default: inline only)
+	maxDepth        int             // 0 = unbounded
+	maxClaims       int             // stop after n claims processed; 0 = unlimited
+	createdAfter    time.Time       // prune claims created before this; zero = no bound
+	trusted         func(Id) bool   // prune predicate; nil = trust nothing
+	externalContent bool            // fetch + verify external content (default: inline only)
 	stopAfter       int             // stop after n failures; 0 = verify everything
 	onError         func(Failure)   // fired per failure, from the run goroutine
 	skipRule        map[string]bool // verifyRules[].name to omit (WithSkipRules)

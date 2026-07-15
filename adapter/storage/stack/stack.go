@@ -386,6 +386,38 @@ func (s *stack) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, err
 	return nil, lastErr
 }
 
+// GetClaimTags reads from the first (top-down) tag-holding layer; a stack with
+// no such layer is unsupported. Tags are a per-claim runtime overlay, not
+// content — no fall-through or read-fill, one layer owns them.
+func (s *stack) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
+	for li := range s.layers {
+		if !s.layers[li].u.Capabilities().Tags {
+			continue
+		}
+		return s.layers[li].u.GetClaimTags(ctx, claims)
+	}
+	return nil, ranke.ErrUnsupported
+}
+
+// SetClaimsTags writes to every tag-holding layer (keeping them consistent);
+// unsupported if no layer holds tags.
+func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
+	found := false
+	for li := range s.layers {
+		if !s.layers[li].u.Capabilities().Tags {
+			continue
+		}
+		found = true
+		if err := s.layers[li].u.SetClaimsTags(ctx, clearTags, claims, tags); err != nil {
+			return err
+		}
+	}
+	if !found {
+		return ranke.ErrUnsupported
+	}
+	return nil
+}
+
 // Capabilities derives the stack's from its layers, per capability:
 //   - Overwrite: every eager layer can (repair must reach the durable tier);
 //   - Delete: every layer can (else a deleted key lingers in some layer);

@@ -202,38 +202,6 @@ func (n *node) Fields() []string {
 	return names
 }
 
-// EncodingApplication returns the "application/<sub>" media type.
-func EncodingApplication(sub string) string { return encType(encApplication, sub) }
-
-// EncodingAudio returns the "audio/<sub>" media type.
-func EncodingAudio(sub string) string { return encType(encAudio, sub) }
-
-// EncodingExample returns the "example/<sub>" media type.
-func EncodingExample(sub string) string { return encType(encExample, sub) }
-
-// EncodingFont returns the "font/<sub>" media type.
-func EncodingFont(sub string) string { return encType(encFont, sub) }
-
-// EncodingImage returns the "image/<sub>" media type.
-func EncodingImage(sub string) string { return encType(encImage, sub) }
-
-// EncodingMessage returns the "message/<sub>" media type.
-func EncodingMessage(sub string) string { return encType(encMessage, sub) }
-
-// EncodingModel returns the "model/<sub>" media type.
-func EncodingModel(sub string) string { return encType(encModel, sub) }
-
-// EncodingMultipart returns the "multipart/<sub>" media type.
-func EncodingMultipart(sub string) string { return encType(encMultipart, sub) }
-
-// EncodingText returns the "text/<sub>" media type.
-func EncodingText(sub string) string { return encType(encText, sub) }
-
-// EncodingVideo returns the "video/<sub>" media type.
-func EncodingVideo(sub string) string { return encType(encVideo, sub) }
-
-func encType(class EncodingClass, sub string) string { return string(class) + "/" + sub }
-
 // TypeSource returns the "source/<sub>" node type.
 func TypeSource(sub string) string { return nodeType(NodeClassSource, sub) }
 

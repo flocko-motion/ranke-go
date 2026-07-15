@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -81,10 +82,7 @@ type neo4jUniverse struct {
 }
 
 // Compile-time proof the adapter satisfies the full Universe contract.
-var (
-	_ ranke.Universe = (*neo4jUniverse)(nil)
-	_ ranke.Tagger   = (*neo4jUniverse)(nil)
-)
+var _ ranke.Universe = (*neo4jUniverse)(nil)
 
 var (
 	errNilClaim = errors.New("adapter/neo4j: nil claim or id")
@@ -506,71 +504,106 @@ func (u *neo4jUniverse) CopyContents(ctx context.Context, src ranke.Universe, re
 	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
-// --- Tagger: branch-membership tags (Capabilities.Tags) ---
+// --- Tags (Capabilities.Tags): mutable per-claim overlay ---
 //
-// Tags are mutable node properties keyed _b_<branch>; the _b_ prefix keeps
-// user branch names from colliding with fixed system keys. They are a pure-
-// functional overlay — never part of the claim, and (since claim fields live
-// in field_keys/field_vals arrays, not node properties) never read back into
-// ClaimParts.
+// Tags are node properties whose key carries the tagPrefix ("_"). No fixed
+// claim property (id, type, height, …) starts with "_", so the prefix cleanly
+// separates tags; the tagger's keys (_rev, _b_<branch>) already carry it, so
+// they are stored verbatim. GetClaims injects them back onto the claim
+// (partsFromNode); GetClaimTags is the tags-only shortcut.
 
-func branchTagKey(branch string) string { return "_b_" + branch }
+const tagPrefix = "_"
 
-const cypherTagBranch = `
-MATCH (h:` + labelClaim + ` {id: $head})
-WHERE h[$key] IS NULL
-MATCH (h) (()-[:` + relReferences + `]->(m:` + labelClaim + `) WHERE m[$key] IS NULL)* (c:` + labelClaim + `)
-SET c[$key] = $rev`
+const cypherGetClaimTags = `
+UNWIND $ids AS id
+MATCH (n:` + labelClaim + ` {id: id})
+WHERE n.type IS NOT NULL
+RETURN id AS id, properties(n) AS node`
 
-// TagBranch stamps _b_<branch>=revision across head's closure in one query,
-// pruned at tagged claims: the quantified path only extends through untagged
-// nodes (WHERE m[$key] IS NULL), so it touches just the delta — already-tagged
-// claims (and their closures, tagged too) are never revisited. A head that is
-// already tagged matches nothing and is a no-op. Call oldest→newest.
-func (u *neo4jUniverse) TagBranch(ctx context.Context, branch string, head ranke.Id, revision uint64) error {
-	if head == nil {
-		return errNilID
+// GetClaimTags returns each claim's tags positionally; a claim absent from the
+// cache (or with none) yields a nil map.
+func (u *neo4jUniverse) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
+	out := make([]map[string]string, len(claims))
+	if len(claims) == 0 {
+		return out, nil
 	}
-	_, err := u.query(ctx, cypherTagBranch, map[string]any{
-		"head": head.String(), "key": branchTagKey(branch), "rev": int64(revision),
-	})
+	idStrs := make([]string, len(claims))
+	pos := make(map[string]int, len(claims))
+	for i, id := range claims {
+		if id == nil {
+			return nil, errNilID
+		}
+		idStrs[i] = id.String()
+		pos[id.String()] = i
+	}
+	res, err := u.query(ctx, cypherGetClaimTags, map[string]any{"ids": idStrs})
 	if err != nil {
-		return fmt.Errorf("%w: tag branch: %w", errQuery, err)
+		return nil, fmt.Errorf("%w: get claim tags: %w", errQuery, err)
 	}
-	return nil
+	for _, r := range res.Records {
+		if i, ok := pos[asString(valOf(r, "id"))]; ok {
+			props, _ := valOf(r, "node").(map[string]any)
+			out[i] = tagsFrom(props)
+		}
+	}
+	return out, nil
 }
 
-const cypherSetBranchRevision = `MATCH (c:` + labelClaim + ` {id: $id}) SET c[$key] = $rev`
+const cypherSetClaimsTags = `
+UNWIND $rows AS row
+MATCH (c:` + labelClaim + ` {id: row.id})
+SET c += row.props`
 
-func (u *neo4jUniverse) SetBranchRevision(ctx context.Context, claim ranke.Id, branch string, revision uint64) error {
-	if claim == nil {
-		return errNilID
+// SetClaimsTags sets tags on claims[i] from tags[i]: for each claim it clears
+// every existing tag whose key matches a clearTags glob, then applies tags[i].
+// Both happen via SET c += props, where a null value removes a property (the
+// clear) and a string sets it.
+func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
+	if len(claims) != len(tags) {
+		return fmt.Errorf("adapter/neo4j: SetClaimsTags claims/tags length mismatch (%d vs %d)", len(claims), len(tags))
 	}
-	_, err := u.query(ctx, cypherSetBranchRevision, map[string]any{
-		"id": claim.String(), "key": branchTagKey(branch), "rev": int64(revision),
-	})
-	if err != nil {
-		return fmt.Errorf("%w: set branch revision: %w", errQuery, err)
+	if len(claims) == 0 {
+		return nil
+	}
+	// Clearing needs the current tag keys to know which to null out.
+	var current []map[string]string
+	if len(clearTags) > 0 {
+		var err error
+		if current, err = u.GetClaimTags(ctx, claims); err != nil {
+			return err
+		}
+	}
+	rows := make([]map[string]any, 0, len(claims))
+	for i, id := range claims {
+		if id == nil {
+			return errNilID
+		}
+		props := map[string]any{}
+		if current != nil {
+			for k := range current[i] {
+				for _, pat := range clearTags {
+					if ok, _ := path.Match(pat, k); ok {
+						props[k] = nil // null removes the property
+						break
+					}
+				}
+			}
+		}
+		for k, v := range tags[i] {
+			props[k] = v
+		}
+		if len(props) == 0 {
+			continue
+		}
+		rows = append(rows, map[string]any{"id": id.String(), "props": props})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	if _, err := u.query(ctx, cypherSetClaimsTags, map[string]any{"rows": rows}); err != nil {
+		return fmt.Errorf("%w: set claims tags: %w", errQuery, err)
 	}
 	return nil
-}
-
-const cypherBranchRevision = `MATCH (c:` + labelClaim + ` {id: $id}) RETURN c[$key] AS rev`
-
-func (u *neo4jUniverse) BranchRevision(ctx context.Context, claim ranke.Id, branch string) (uint64, bool, error) {
-	if claim == nil {
-		return 0, false, errNilID
-	}
-	res, err := u.query(ctx, cypherBranchRevision, map[string]any{
-		"id": claim.String(), "key": branchTagKey(branch),
-	})
-	if err != nil {
-		return 0, false, fmt.Errorf("%w: branch revision: %w", errQuery, err)
-	}
-	if len(res.Records) == 0 || valOf(res.Records[0], "rev") == nil {
-		return 0, false, nil
-	}
-	return uint64(asInt(valOf(res.Records[0], "rev"))), true, nil
 }
 
 // Capabilities: a graph DB can overwrite, delete, and enumerate, is durable,

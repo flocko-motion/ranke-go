@@ -166,7 +166,7 @@ func buildEncNode(n *node, edges []*edge) (encNode, error) {
 		TypeClass:     aliasToWire(n.typeClass, nodeClassToAlias),
 		TypeSub:       aliasToWire(NodeSubtype(n.typeSub), nodeSubtypeToAlias),
 		EncodingClass: aliasToWire(n.encodingClass, encodingClassToAlias),
-		EncodingSub:   n.encodingSub, // encoding subtypes have no aliases yet
+		EncodingSub:   aliasToWire(EncodingSubtype(n.encodingSub), encodingSubToAlias),
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 		Height:        n.height,
 		Fields:        aliasFieldKeys(n.fields),
@@ -344,7 +344,7 @@ func decodeNode(en encNode) (*node, error) {
 		typeClass:     aliasFromWire(en.TypeClass, nodeClassFromAlias),
 		typeSub:       string(aliasFromWire(en.TypeSub, nodeSubtypeFromAlias)),
 		encodingClass: aliasFromWire(en.EncodingClass, encodingClassFromAlias),
-		encodingSub:   en.EncodingSub,
+		encodingSub:   string(aliasFromWire(en.EncodingSub, encodingSubFromAlias)),
 		createdAt:     createdAt,
 		height:        en.Height,
 		fields:        unaliasFieldKeys(en.Fields),

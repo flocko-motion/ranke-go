@@ -352,6 +352,21 @@ func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]u
 // exactly the CBOR the id was signed over, so no decode (and no re-encode) is
 // involved.
 //
+// GetClaimTags is unsupported: an opaque byte store holds no mutable side-data
+// (Capabilities.Tags is false).
+//
+//deadcode:keep
+func (u *blobUniverse) GetClaimTags(_ context.Context, _ []ranke.Id) ([]map[string]string, error) {
+	return nil, ranke.ErrUnsupported
+}
+
+// SetClaimsTags is unsupported (see GetClaimTags).
+//
+//deadcode:keep
+func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ []ranke.Id, _ []map[string]string) error {
+	return ranke.ErrUnsupported
+}
+
 //deadcode:keep
 func (u *blobUniverse) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
 	out := make([][]byte, len(ids))

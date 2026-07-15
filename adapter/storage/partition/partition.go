@@ -241,8 +241,50 @@ func (p *partition) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte,
 	return out, nil
 }
 
+// GetClaimTags routes each id to its shard (a claim's tags live wherever the
+// claim does) and gathers them positionally.
+func (p *partition) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
+	out := make([]map[string]string, len(claims))
+	groups := p.groupIds(claims)
+	for s, idx := range groups {
+		if len(idx) == 0 {
+			continue
+		}
+		got, err := p.shards[s].GetClaimTags(ctx, at(claims, idx))
+		if err != nil {
+			return nil, err
+		}
+		for k, t := range got {
+			out[idx[k]] = t
+		}
+	}
+	return out, nil
+}
+
+// SetClaimsTags routes each claim (with its tags) to its shard; clearTags
+// applies on every shard touched.
+func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, claims []ranke.Id, tags []map[string]string) error {
+	if len(claims) != len(tags) {
+		return errors.New("partition.SetClaimsTags: claims and tags length mismatch")
+	}
+	groups := p.groupIds(claims)
+	for s, idx := range groups {
+		if len(idx) == 0 {
+			continue
+		}
+		sub := make([]map[string]string, len(idx))
+		for k, i := range idx {
+			sub[k] = tags[i]
+		}
+		if err := p.shards[s].SetClaimsTags(ctx, clearTags, at(claims, idx), sub); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *partition) Capabilities() ranke.Capabilities {
-	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true}
+	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true, Tags: true}
 	for _, s := range p.shards {
 		sc := s.Capabilities()
 		c.Overwrite = c.Overwrite && sc.Overwrite
@@ -250,6 +292,7 @@ func (p *partition) Capabilities() ranke.Capabilities {
 		c.Enumerate = c.Enumerate && sc.Enumerate
 		c.Persistent = c.Persistent && sc.Persistent
 		c.GQL = c.GQL && sc.GQL
+		c.Tags = c.Tags && sc.Tags
 	}
 	return c
 }

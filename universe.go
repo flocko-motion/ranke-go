@@ -140,27 +140,6 @@ type Universe interface {
 	// from it, deserialising only the misses.
 	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
 
-	// --- Tagging (Capabilities.Tags): mutable, pure-functional per-claim tags
-	// — branch membership and branch-table revisions — a runtime overlay, not
-	// part of a claim. A backend that can't hold mutable side-data (an opaque
-	// byte store) returns ErrUnsupported and reports Tags: false; TagArchive
-	// drives these on a tags-capable Universe. ---
-
-	// TagBranch stamps the branch entry revision across head's closure, pruning
-	// at already-tagged claims (the first revision to reach a claim wins). A
-	// graph-native backend does it in one query; others via defaultTagBranch.
-	TagBranch(ctx context.Context, branch string, head Id, revision uint64) error
-	// SetBranchRevision records that claim joined branch at revision.
-	SetBranchRevision(ctx context.Context, claim Id, branch string, revision uint64) error
-	// BranchRevision returns the revision claim joined branch; ok is false when
-	// claim is not a member.
-	BranchRevision(ctx context.Context, claim Id, branch string) (uint64, bool, error)
-	// SetSpineRevision records a branch-table claim's spine revision (_rev).
-	SetSpineRevision(ctx context.Context, claim Id, revision uint64) error
-	// SpineRevision returns a branch-table claim's _rev; ok is false when it is
-	// not yet processed.
-	SpineRevision(ctx context.Context, claim Id) (uint64, bool, error)
-
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:
 	//
@@ -189,15 +168,14 @@ type Universe interface {
 	// already has). WithClosure/WithContent are no-ops here; only
 	// WithProgress is honored.
 	CopyContents(ctx context.Context, src Universe, refs []ContentRef, opts ...CopyOption) error
-	// TagClaim idempotently writes tags (fields with _ prefix)
-	SetClaimTag(ctx context.Context, claim Id) error
-	GetClaimTags(ctx context.Context, claim Id) (map[string]string, error)
 
-	// SetBranchRevision records that claim joined branch at revision.
-	SetBranchRevision(ctx context.Context, claim Id, branch string, revision uint64) error
-	// BranchRevision returns the revision claim joined branch; ok is false when
-	// claim is not a member.
-	BranchRevision(ctx context.Context, claim Id, branch string) (uint64, bool, error)
+	// SetClaimsTags sets tags on claims positionally: claims[i] gets tags[i].
+	// For each claim it first clears every existing tag whose key matches a
+	// clearTags glob (globs allowed), then applies tags[i].
+	SetClaimsTags(ctx context.Context, clearTags []string, claims []Id, tags []map[string]string) error
+	// GetClaimTags returns each claim's tags positionally (nil when a claim has
+	// none), like GetClaims/GetClaimHeights.
+	GetClaimTags(ctx context.Context, claims []Id) ([]map[string]string, error)
 
 	// Capabilities reports optional backend abilities (see Capabilities).
 	// Composites (stack, partition) derive theirs from their members'.
@@ -302,22 +280,33 @@ func GetClaimHeight(ctx context.Context, u Universe, id Id) (uint64, error) {
 }
 
 // GetContent is the single-item form of Universe.GetContents.
-func GetContent(ctx context.Context, u Universe, hash Id, size uint64) ([]byte, error) {
-	bs, err := u.GetContents(ctx, []ContentRef{{Hash: hash, ContentSize: size}})
+func GetContent(ctx context.Context, u Universe, id Id, size uint64) ([]byte, error) {
+	bs, err := u.GetContents(ctx, []ContentRef{{Hash: id, ContentSize: size}})
 	if err != nil {
 		return nil, err
 	}
 	return bs[0], nil
 }
 
+// GetTag is a single-item form of Universe.GetClaimTags: it reports whether
+// tag is set on the claim at id, and its value.
+func GetTag(ctx context.Context, u Universe, id Id, tag string) (found bool, value string, err error) {
+	tags, err := u.GetClaimTags(ctx, []Id{id})
+	if err != nil {
+		return false, "", err
+	}
+	value, found = tags[0][tag]
+	return found, value, nil
+}
+
 // PutContent is the single-item form of Universe.PutContents.
-func PutContent(ctx context.Context, u Universe, hash Id, content []byte) error {
-	return u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: content}})
+func PutContent(ctx context.Context, u Universe, id Id, content []byte) error {
+	return u.PutContents(ctx, []ContentBlob{{Hash: id, Content: content}})
 }
 
 // HasContent is the single-item form of Universe.HasContents.
-func HasContent(ctx context.Context, u Universe, hash Id) (bool, error) {
-	got, err := u.HasContents(ctx, []Id{hash})
+func HasContent(ctx context.Context, u Universe, id Id) (bool, error) {
+	got, err := u.HasContents(ctx, []Id{id})
 	if err != nil {
 		return false, err
 	}

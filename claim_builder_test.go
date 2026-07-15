@@ -582,3 +582,18 @@ func TestHeightOf(t *testing.T) {
 	require.Equal(t, uint64(1), HeightOf(root), "over an initial node → 1")
 	require.Equal(t, uint64(3), HeightOf(a, b), "1 + max(1, 2)")
 }
+
+// TestClaimBuilderWithContributor covers the fluent contributor setter: a
+// claim built through it is attributed to — and signed by — that contributor,
+// equivalently to passing the contributor to NewClaim.
+func TestClaimBuilderWithContributor(t *testing.T) {
+	root := contributor(t)
+	c, err := NewClaim(TypeSource("note"), nil).
+		WithContributor(root).
+		WithInlineContent([]byte("attributed via WithContributor")).
+		WithHeight(HeightOf(root)).
+		Sign()
+	require.NoError(t, err)
+	require.NotNil(t, c.Contributor(), "claim carries a contributor")
+	require.True(t, c.Contributor().ID().Equal(root.ID()), "attributed to the given contributor")
+}
