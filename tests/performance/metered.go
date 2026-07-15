@@ -199,6 +199,20 @@ func (m *metered) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64
 	return hs, err
 }
 
+func (m *metered) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
+	t := time.Now()
+	tags, err := m.inner.GetClaimTags(ctx, claims)
+	m.rec("GetClaimTags", kindRead, len(claims), time.Since(t))
+	return tags, err
+}
+
+func (m *metered) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
+	t := time.Now()
+	err := m.inner.SetClaimsTags(ctx, clearTags, tags)
+	m.rec("SetClaimsTags", kindWrite, len(tags), time.Since(t))
+	return err
+}
+
 func (m *metered) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	t := time.Now()
 	rs, err := m.inner.Query(ctx, q, scope)

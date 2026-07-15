@@ -20,7 +20,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashContent: %v", err)
 	}
-	item, err := h.Append(ctx, id)
+	item, err := h.Append(ctx, id, 0, 0)
 	if err != nil {
 		t.Fatalf("Append: %v", err)
 	}
@@ -32,9 +32,9 @@ func TestRoundTrip(t *testing.T) {
 	if !latest.GetId().Equal(id) {
 		t.Fatalf("Latest = %v, want %v", latest.GetId(), id)
 	}
-	at0, err := h.Get(ctx, 0)
+	at0, err := h.GetAtRevision(ctx, 0)
 	if err != nil || !at0.GetId().Equal(id) {
-		t.Fatalf("Get(0) = %v (%v), want %v", at0.GetId(), err, id)
+		t.Fatalf("GetAtRevision(0) = %v (%v), want %v", at0.GetId(), err, id)
 	}
 
 	bulk, err := h.GetBulk(ctx, 0, 1)

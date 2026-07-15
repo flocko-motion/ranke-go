@@ -63,15 +63,15 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 	if err := s.u.PutClaims(ctx, []ranke.Claim{self}); err != nil {
 		return nil, fmt.Errorf("dev.NewSequencer: store contributor: %w", err)
 	}
-	// Empty branch table → archive head k₀.
-	k0, err := s.mintBranchTable(ctx, nil)
+	// Empty branch table → archive head k₀, revision 0.
+	bt0, err := s.mintBranchTable(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, k0); err != nil {
+	if _, err := s.hist.Append(ctx, bt0.ID(), int(bt0.Node().Height()), 0); err != nil {
 		return nil, fmt.Errorf("dev.NewSequencer: append history: %w", err)
 	}
-	s.head = k0
+	s.head = bt0.ID()
 	return s, nil
 }
 
@@ -152,14 +152,20 @@ func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.
 		newMain = hc.ID()
 	}
 
-	// Step 6 — merge: new branch table main → newMain, advance head, record it.
-	k, err := s.mintBranchTable(ctx, newMain)
+	// Step 6 — merge: new branch table main → newMain, advance head, record it
+	// at the next revision (the current timeline length).
+	bt, err := s.mintBranchTable(ctx, newMain)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, k); err != nil {
+	revision, err := s.hist.Len(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("dev.Sequencer: history length: %w", err)
+	}
+	if _, err := s.hist.Append(ctx, bt.ID(), int(bt.Node().Height()), revision); err != nil {
 		return nil, fmt.Errorf("dev.Sequencer: append history: %w", err)
 	}
+	k := bt.ID()
 	s.head = k
 	s.mainHead = newMain
 	return k, nil
@@ -203,9 +209,10 @@ func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ra
 // mintBranchTable builds and stores a contribution/branches claim — the
 // archive head. With a nil mainHead it is the empty table (bootstrap);
 // otherwise it names the single "main" branch pointing at mainHead. Returns
-// its id (the new archive head k). The table is restated in full each time
+// the new branch-table claim (its id is the archive head k, its height the
+// generation to record in History). The table is restated in full each time
 // (no contribution/diff overlay yet — a corner for later).
-func (s *Sequencer) mintBranchTable(ctx context.Context, mainHead ranke.Id) (ranke.Id, error) {
+func (s *Sequencer) mintBranchTable(ctx context.Context, mainHead ranke.Id) (ranke.Claim, error) {
 	b := ranke.NewClaim(ranke.NodeBranches, s.self).WithCreatedAt(s.clock.Tick())
 	if mainHead != nil {
 		e, err := ranke.NewEdge(ranke.EdgeConfig{
@@ -228,5 +235,5 @@ func (s *Sequencer) mintBranchTable(ctx context.Context, mainHead ranke.Id) (ran
 	if err := s.u.PutClaims(ctx, []ranke.Claim{table}); err != nil {
 		return nil, fmt.Errorf("dev.Sequencer: store branch table: %w", err)
 	}
-	return table.ID(), nil
+	return table, nil
 }

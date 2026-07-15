@@ -36,11 +36,12 @@ var ErrUnavailable = errors.New("backend unavailable")
 
 // Config parameterises a matrix run — the knobs cmd/test exposes as flags.
 type Config struct {
-	Size     int      // generator size (SpecForSize); ~5×Size claims
-	Seed     int64    // generator seed — fixes every id
-	Access   int      // chapter-3 random accesses
-	Backends []string // backend names to run; empty = all
-	Progress bool     // show an in-place per-chapter progress line (interactive CLI; off under go test)
+	Size      int      // generator size (SpecForSize); ~5×Size claims
+	Seed      int64    // generator seed — fixes every id
+	Access    int      // chapter-3 random accesses
+	Backends  []string // backend names to run; empty = all
+	Progress  bool     // show an in-place per-chapter progress line (interactive CLI; off under go test)
+	QueryReps int      // times each RQL query is timed in chapter 4; 0 = 10
 }
 
 // Backend is one matrix row: a named factory that spins up a FRESH, EMPTY
@@ -234,6 +235,15 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	spec := generator.SpecForSize(cfg.Seed, cfg.Size)
 	ctx := context.Background()
 
+	// The mem implementation is the standard: compute each query's reference
+	// result-set hash once, up front. Every backend's results are checked
+	// against these; a divergence is a determinism failure (reported per query
+	// in the backend's block, and surfaced as an error).
+	refHashes, err := referenceQueryHashes(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("mem reference query hashes: %w", err)
+	}
+
 	for _, be := range backends {
 		u0, cleanup, err := be.Open()
 		if errors.Is(err, ErrUnavailable) {
@@ -244,7 +254,7 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 		if err != nil {
 			return fmt.Errorf("open %s: %w", be.Name, err)
 		}
-		verified, err := runBackend(ctx, be.Name, spec, u0, cfg, w)
+		verified, err := runBackend(ctx, be.Name, spec, u0, cfg, w, refHashes)
 		cleanup()
 		if err != nil {
 			return err
@@ -260,7 +270,7 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 
 // runBackend runs the three chapters against one open backend and writes its
 // report block. Returns the number of claims verified.
-func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.Universe, cfg Config, w io.Writer) (int, error) {
+func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.Universe, cfg Config, w io.Writer, refHashes map[string]string) (int, error) {
 	u := newMetered(u0)
 	defer func() { _ = u.Close() }()
 
@@ -336,6 +346,16 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 	universeDur := time.Since(c3b)
 
+	// Chapter 4 — RQL queries: time each a few times for per-query latency, and
+	// hash each (order-sensitive) result set for the cross-backend determinism
+	// check against the mem reference.
+	progress("queries")
+	u.setPhase("4-query")
+	qstats, err := runQuerySet(ctx, u, m, cfg.QueryReps)
+	if err != nil {
+		return 0, fmt.Errorf("%s: query: %w", name, err)
+	}
+
 	r1, w1 := u.phaseIO("1-write")
 	r2, _ := u.phaseIO("2-verify")
 	r3a, _ := u.phaseIO("3a-branch")
@@ -349,7 +369,27 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
 	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r3a)
 	fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r3b)
+
+	reps := cfg.QueryReps
+	if reps <= 0 {
+		reps = 10
+	}
+	qdur := func(d time.Duration) string { return d.Round(time.Microsecond).String() }
+	fmt.Fprintf(w, "  queries (%d× each, results hashed vs mem reference)\n", reps)
+	diverged := 0
+	for _, qs := range qstats {
+		mark := ""
+		if want, ok := refHashes[qs.name]; ok && want != qs.hash {
+			mark = "   ✗ DIVERGES from mem reference"
+			diverged++
+		}
+		fmt.Fprintf(w, "    %-22s min %-9s avg %-9s max %-9s (%d results)%s\n",
+			qs.name, qdur(qs.min), qdur(qs.avg), qdur(qs.max), qs.results, mark)
+	}
 	fmt.Fprintf(w, "%s\n", u.report())
+	if diverged > 0 {
+		return run.Verified(), fmt.Errorf("%s: %d query result set(s) diverge from the mem reference — results must be deterministic", name, diverged)
+	}
 	return run.Verified(), nil
 }
 

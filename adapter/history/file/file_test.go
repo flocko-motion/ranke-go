@@ -29,7 +29,7 @@ func TestRoundTripAndReopen(t *testing.T) {
 			t.Fatalf("HashContent: %v", err)
 		}
 		ids[i] = id
-		item, err := h.Append(ctx, id)
+		item, err := h.Append(ctx, id, i, i)
 		if err != nil {
 			t.Fatalf("Append: %v", err)
 		}

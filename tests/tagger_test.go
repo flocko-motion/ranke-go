@@ -1,5 +1,5 @@
-// Tagger tests — the archive-wide branch-tagging pass (ranke.TagArchiveBranches)
-// driven over the mem backend, which is Tags-capable and its own Tagger.
+// Tagger tests — the archive-wide branch-tagging pass (ranke.TagArchive)
+// driven over the mem backend, which is Tags-capable.
 package tests
 
 import (
@@ -15,17 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTagArchiveBranches exercises the archive-wide tagging pass: after a
-// commit, tagging the head-id timeline stamps the branch's closure with the
-// revision each claim joined "main", read back via BranchRevision.
-func TestTagArchiveBranches(t *testing.T) {
+// TestTagArchive exercises the archive-wide tagging pass: after a commit,
+// TagArchive descends the branch-table spine and stamps each branch's closure
+// with a _b_<branch> membership tag, returning the head-id history it walked.
+func TestTagArchive(t *testing.T) {
 	ctx := context.Background()
 	clock := generator.NewClock(fixtureBase, time.Second)
 	self := keyedContributor(t, ctx, clock, "sequencer")
 
 	u := mem.New()
-	tagger, ok := u.(ranke.Tagger)
-	require.True(t, ok, "mem is a Tagger (Tags-capable)")
+	require.True(t, u.Capabilities().Tags, "mem is Tags-capable")
 	hist := devhist.New(clock)
 	seq, err := devseq.NewSequencer(ctx, u, hist, self, clock)
 	require.NoError(t, err, "NewSequencer")
@@ -39,24 +38,18 @@ func TestTagArchiveBranches(t *testing.T) {
 	_, err = seq.AddClaims(ctx, []ranke.Claim{em})
 	require.NoError(t, err, "AddClaims")
 
-	// The head-id timeline k₀…kₙ, oldest→newest — the authoritative spine.
-	n, err := hist.Len(ctx)
-	require.NoError(t, err, "history len")
-	items := make([]ranke.HistoryItem, 0, n)
-	for i := 0; i < n; i++ {
-		it, err := hist.Get(ctx, i)
-		require.NoError(t, err, "history get")
-		items = append(items, it)
-	}
-
-	require.NoError(t, ranke.TagArchiveBranches(ctx, u, tagger, items), "TagArchiveBranches")
-
-	// The branch head joined "main" — its membership revision is recorded.
 	arc, err := seq.GetArchive(ctx)
 	require.NoError(t, err, "GetArchive")
+
+	// History is the output of the walk, not an input.
+	history, err := ranke.TagArchive(ctx, arc)
+	require.NoError(t, err, "TagArchive")
+	require.NotEmpty(t, history, "TagArchive produces the walked head-id history")
+
+	// The branch head joined "main" — its closure carries the _b_main tag.
 	b, err := arc.GetBranch(ctx, "main")
 	require.NoError(t, err, "GetBranch main")
-	_, tagged, err := tagger.BranchRevision(ctx, b.Head(), "main")
-	require.NoError(t, err, "BranchRevision")
-	require.True(t, tagged, "the branch head is tagged as a member of main")
+	found, _, err := ranke.GetTag(ctx, u, b.Head(), "_b_main")
+	require.NoError(t, err, "GetTag")
+	require.True(t, found, "the branch head is tagged as a member of main")
 }
