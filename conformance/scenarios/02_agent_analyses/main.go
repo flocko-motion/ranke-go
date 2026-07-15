@@ -1,11 +1,13 @@
 // Conformance scenario 02 — agent analyses two emails.
 //
-// An operator (identity-Sign contributor) ingests two emails as
-// source/email claims. An extraction agent (signed by its own
-// Ed25519 key) is itself contributed by the operator; the agent
-// then derives entities and relations from the emails — a summary,
-// four entities (Alice, apples, Bob Sr, Bob Jr), and four relations
-// (likes, knows, ignores, family).
+// An operator (the Sequencer's self, an Ed25519-keyed contributor)
+// ingests two emails as source/email claims. An extraction agent
+// (its own Ed25519 key) is itself contributed by the operator — the
+// operator's key signs the agent's contributor claim, whose content
+// is the agent's public key (§5.7). The agent then derives entities
+// and relations from the emails: a summary, four entities (Alice,
+// apples, Bob Sr, Bob Jr), and four relations (likes, knows, ignores,
+// family).
 //
 // Two Bobs from two emails get distinct ids by content-addressing
 // (different derivation/source edges → different node hashes). The
@@ -13,7 +15,8 @@
 //
 // Demonstrates the multi-contributor pattern (operator + agent) and
 // the §3.5 derivation chain (every derived claim cites its source
-// via a derivation/source edge).
+// via a derivation/source edge). A referencing claim declares its
+// Height (§4.1): 1 + the max height of everything it points at.
 
 // package: main / scenario
 // type:    cmd
@@ -23,123 +26,129 @@ package main
 
 import (
 	"context"
-	"path/filepath"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
+	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
+	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "bciqd3khoouqui5q36ikpfuwgzyc674azteg6s74zvw5kkh6fhw4hhdi"
+const expectedMainHead = "b5uatgv3kb65wevvasulzfvyrqpkaicrcjlnspedy373bpbb23mdh7aasfroxcvf6lg3jujsul2lzpc77exrmfd2e6euji67airsuoz44by"
 
 func main() {
 	ctx := context.Background()
 	s := helpers.New("02 - agent analyses",
 		time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC))
 
-	// --- 1. Operator: identity-Sign root contributor. ---
+	// --- 1. Operator: an Ed25519-keyed root contributor (the Sequencer's
+	// self, stored at bootstrap, so it does not join the batch). Its key is
+	// derived deterministically from its identity so the bundle reproduces. ---
+	opSeed := sha256.Sum256([]byte("operator@example.com"))
+	opPriv := ed25519.NewKeyFromSeed(opSeed[:])
+	opPub := must(ranke.EncodePublicKey(opPriv.Public()))
 	operatorClaim := must(ranke.ClaimBuilder{
-		Type:      ranke.NodeContributor,
-		Content:   []byte("operator@example.com"),
-		CreatedAt: s.NextTimestamp(time.Second),
+		Type:          ranke.NodeContributor,
+		InlineContent: opPub,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		SigningKey:    opPriv,
 	}.Sign())
-	operator := must(operatorClaim.AsContributor())
-	g := ranke.NewGraph(operator)
+	operator := must(operatorClaim.AsContributor(ctx, nil, opPriv))
 
-	// --- 2. Extraction agent — Ed25519-signed contributor under operator. ---
-	// The agent claim itself is signed by operator (identity-Sign);
-	// agentAKey is bound to the agent for the agent's OWN contributions.
+	// --- 2. Extraction agent — an Ed25519 contributor vouched for by the
+	// operator: the operator's key signs it, its content is the agent's
+	// public key. agentAKey is then bound to the agent for its OWN claims. ---
 	agentAKey := must(ranke.LoadPrivateKey(helpers.KeyPath("agentA.pem")))
 	agentClaim := must(ranke.ClaimBuilder{
-		Type:        ranke.NodeContributor,
-		Content:     []byte("extraction-agent-v1"),
-		Pubkey:      agentAKey.Pubkey,
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.NodeContributor,
+		InlineContent: agentAKey.Pubkey,
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	agent := must(agentClaim.AsContributor(agentAKey.Private))
-	must(g.Add(agentClaim))
+	agent := must(agentClaim.AsContributor(ctx, nil, agentAKey.Private))
 
 	// --- 3. Ingest two source emails, attributed to the operator. ---
 	emailApples := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     must(helpers.LoadSource("alice_to_bob__apples.eml")),
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeSource("email"),
+		Encoding:      ranke.EncodingMessage("rfc822"),
+		InlineContent: must(helpers.LoadSource("alice_to_bob__apples.eml")),
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	must(g.Add(emailApples))
 	emailFamily := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     must(helpers.LoadSource("alice_to_bob__family.eml")),
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeSource("email"),
+		Encoding:      ranke.EncodingMessage("rfc822"),
+		InlineContent: must(helpers.LoadSource("alice_to_bob__family.eml")),
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	must(g.Add(emailFamily))
 
 	// --- 4. Agent: summary derivation of the apples email. ---
 	summary := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeDerivation("summary"),
-		Content:     []byte("Alice expresses preference for apples."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeDerivation("summary"),
+		InlineContent: []byte("Alice expresses preference for apples."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(summary))
 
 	// --- 5. Agent: extract entities (one Alice, one apples, two Bobs). ---
 	alice := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Alice"),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Alice"),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(alice))
 	apples := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("object"),
-		Content:     []byte("apples"),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("object"),
+		InlineContent: []byte("apples"),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(apples))
 	bobSr := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Bob"),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Bob"),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(bobSr))
 	bobJr := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Bob Jr."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Bob Jr."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailFamily),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailFamily.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(bobJr))
 
 	// --- 6. Agent: extract relations. ---
 	// Each relation/* edge carries an additional "conviction" field
@@ -155,46 +164,47 @@ func main() {
 	weak := map[string]string{"conviction": "0.3"}
 
 	likes := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("likes"),
-		Content:     []byte("Alice expresses preference for apples in the email."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("likes"),
+		InlineContent: []byte("Alice expresses preference for apples in the email."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples, alice, apples),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationFrom, Fields: strong})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: apples.ID(), Type: ranke.TypeRelation("likes"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
-	must(g.Add(likes))
 	knows := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("knows"),
-		Content:     []byte("Alice addresses Bob directly, implying they are acquainted."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("knows"),
+		InlineContent: []byte("Alice addresses Bob directly, implying they are acquainted."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples, alice, bobSr),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom, Fields: strong})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
-	must(g.Add(knows))
 	ignores := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("ignores"),
-		Content:     []byte("Bob does not respond to Alice (inferred from absence of reply)."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("ignores"),
+		InlineContent: []byte("Bob does not respond to Alice (inferred from absence of reply)."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailApples, bobSr, alice),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailApples.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobSr.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationFrom, Fields: weak})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("ignores"), RelationDirection: ranke.RelationTo, Fields: weak})),
 		},
 	}.Sign())
-	must(g.Add(ignores))
 	family := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("family"),
-		Content:     []byte("Bob Sr. and Bob Jr. share a surname; Alice's email implies kinship."),
-		Contributor: agent,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("family"),
+		InlineContent: []byte("Bob Sr. and Bob Jr. share a surname; Alice's email implies kinship."),
+		Contributor:   agent,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agent, emailFamily, bobSr, bobJr),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: emailFamily.ID(), Type: ranke.TypeDerivation("source")})),
 			// Symmetric: both members are RelationFrom (§4.7).
@@ -202,13 +212,18 @@ func main() {
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bobJr.ID(), Type: ranke.TypeRelation("family"), RelationDirection: ranke.RelationFrom, Fields: medium})),
 		},
 	}.Sign())
-	must(g.Add(family))
 
-	// --- 7. AddGraph — archive auto-consolidates the open heads and persists. ---
+	// --- 7. Merge one contribution carrying every claim; the dev Sequencer
+	// verifies, auto-consolidates the open heads, seeds, and mints the branch
+	// table, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	bth := must(file.New(filepath.Join(helpers.DataDir, "branches", "B_h")))
-	seq := must(ranke.NewSequencer(ctx, u, bth, operator))
-	must(seq.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
+	hist := must(histfile.New(helpers.BranchTableHeadPath))
+	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	must(seq.AddClaims(ctx, []ranke.Claim{
+		agentClaim, emailApples, emailFamily, summary,
+		alice, apples, bobSr, bobJr,
+		likes, knows, ignores, family,
+	}))
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)

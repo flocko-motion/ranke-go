@@ -1,7 +1,7 @@
 // package: tests/performance / integration
 // type:    test
 // job:     metered — a ranke.Universe decorator that records a latency sample per operation and reports exact distributions (avg/median/p90/p99/min/max), rolled up by read/write and broken down by operation
-// limits:  measures at the Universe interface, so it counts operations, not raw backend round-trips or write byte-sizes (those need instrumentation inside the adapter — the blob store or S3 transport). Samples are kept raw and percentiles computed by sorting: exact, no dependency, fine at test scale (~50k samples at size 2000).
+// limits:  measures at the Universe interface, so it counts operations, not raw backend round-trips or write byte-sizes (those need adapter-internal instrumentation). Samples are kept raw and percentiles computed by sorting: exact, no dependency, fine at test scale (~50k samples at size 2000).
 package performance
 
 import (

@@ -360,3 +360,47 @@ func TestVerifyRejectsBranchTableReference(t *testing.T) {
 	}
 	require.True(t, found, "the failure names the offending claim")
 }
+
+// TestVerifyWithSkipRules confirms a named rule can be dropped from a run: the
+// branch-table-reference violation TestVerifyRejectsBranchTableReference
+// catches passes cleanly once that rule is skipped by name.
+func TestVerifyWithSkipRules(t *testing.T) {
+	root := contributor(t)
+	g := newGraph(t, root)
+
+	bt := branchTable(t, root, []Claim{root}, branchEdge(t, "main", root.ID()))
+	require.NoError(t, g.AddClaims(context.Background(), bt))
+
+	de, err := NewEdge(EdgeConfig{Reference: bt.ID(), Type: TypeDerivation("source")})
+	require.NoError(t, err)
+	bad, err := NewClaim(TypeDerivation("summary"), root).
+		WithEdges(de).
+		WithInlineContent([]byte("illegal branch-table reference")).
+		WithHeight(HeightOf(root, bt)).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(context.Background(), bad))
+
+	// With the rule skipped, the otherwise-valid claim no longer fails.
+	run := g.Verify(WithSkipRules("branch-table reference"))
+	run.Wait()
+	require.NoError(t, run.Err())
+	for _, f := range run.Failures() {
+		require.False(t, f.ID.Equal(bad.ID()), "a skipped rule must not fire")
+	}
+}
+
+// TestVerifyRuleSet confirms the rule registry is introspectable — the names
+// and statements a caller enumerates to choose what to skip (WithSkipRules).
+func TestVerifyRuleSet(t *testing.T) {
+	rules := VerifyRuleSet()
+	require.NotEmpty(t, rules)
+	names := make(map[string]string, len(rules))
+	for _, r := range rules {
+		require.NotEmpty(t, r.Name, "rule carries a name")
+		require.NotEmpty(t, r.Rule, "rule carries a statement")
+		names[r.Name] = r.Rule
+	}
+	require.Contains(t, names, "branch-table reference")
+	require.Contains(t, names, "§5.7 signature")
+}
