@@ -8,7 +8,9 @@
 //
 // Every claim is built inline so the reader sees the exact
 // ClaimBuilder + Sign call for each one — no local helpers hiding
-// the pattern.
+// the pattern. A claim that references others declares its Height
+// (§4.1): 1 + the max height of everything it points at (the
+// contributor included).
 //
 // Run from anywhere:
 //
@@ -25,7 +27,8 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
+	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
+	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
@@ -36,83 +39,85 @@ func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
 // Expected final head of branch "main" — hardcoded so the
 // scenario itself fails loud if anything in the chain changes.
-const expectedMainHead = "b5ua3tgiyjt3tezqsng2dserleoawi6g6ymk2qj4xwi2ojxwk6mzgdi35sdapnp7i333tbisaykhmnnzokoouxqbhwvyajrymtfyrk7zhbq"
+const expectedMainHead = "b5uavhycqdpbnxuxx5q7qxhyhdsjr4pv7sprleu2ka764ptlnbwndqe5bgjbddqn5wwlj77yevmtfatwivrfn7bhuycxcx6z6iiv5ibcxai"
 
 func main() {
 	ctx := context.Background()
 	s := helpers.New("01 - personal knowledge graph",
 		time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC))
 
-	// --- 1. Alice as initial node, signed by her Ed25519 key. ---
+	// --- 1. Alice as initial node, signed by her Ed25519 key. Her content
+	// is her multikey-encoded public key (§5.7). She is the Sequencer's
+	// self, stored at bootstrap, so she does not join the contribution batch. ---
 	aliceKey := must(ranke.LoadPrivateKey(helpers.KeyPath("alice.pem")))
 	aliceClaim := must(ranke.ClaimBuilder{
-		Type:      ranke.NodeContributor,
-		Content:   []byte("alice@example.com"),
-		Pubkey:    aliceKey.Pubkey,
-		CreatedAt: s.NextTimestamp(time.Second),
-	}.Sign(aliceKey.Private))
-	alice := must(aliceClaim.AsContributor(aliceKey.Private))
-	g := ranke.NewGraph(alice)
+		Type:          ranke.NodeContributor,
+		InlineContent: aliceKey.Pubkey,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		SigningKey:    aliceKey.Private,
+	}.Sign())
+	alice := must(aliceClaim.AsContributor(ctx, nil, aliceKey.Private))
 
 	// --- 2. Ingest the two source emails. ---
 	emailApples := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     must(helpers.LoadSource("alice_to_bob__apples.eml")),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeSource("email"),
+		Encoding:      ranke.EncodingMessage("rfc822"),
+		InlineContent: must(helpers.LoadSource("alice_to_bob__apples.eml")),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice),
 	}.Sign())
-	must(g.Add(emailApples))
 	emailFamily := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     must(helpers.LoadSource("alice_to_bob__family.eml")),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeSource("email"),
+		Encoding:      ranke.EncodingMessage("rfc822"),
+		InlineContent: must(helpers.LoadSource("alice_to_bob__family.eml")),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice),
 	}.Sign())
-	must(g.Add(emailFamily))
 
 	// --- 3. A summary derivation of the apples email. ---
 	summary := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeDerivation("summary"),
-		Content:     []byte("Alice tells Bob she likes apples."),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeDerivation("summary"),
+		InlineContent: []byte("Alice tells Bob she likes apples."),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(summary))
 
 	// --- 4. "Alice likes apples" — entities + their relation, made together. ---
 	aliceEntity := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Alice"),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Alice"),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(aliceEntity))
 	applesEntity := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("object"),
-		Content:     []byte("apples"),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("object"),
+		InlineContent: []byte("apples"),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(applesEntity))
 	likes := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("likes"),
-		Content:     []byte("Alice expresses preference for apples."),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("likes"),
+		InlineContent: []byte("Alice expresses preference for apples."),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples, aliceEntity, applesEntity),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{
 				Reference: emailApples.ID(),
@@ -130,25 +135,25 @@ func main() {
 			})),
 		},
 	}.Sign())
-	must(g.Add(likes))
 
-	// --- 5. "Alice knows Bob" — Alice already in the graph; add Bob and the relation. ---
+	// --- 5. "Alice knows Bob" — Alice already built; add Bob and the relation. ---
 	bobSr := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Bob"),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Bob"),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailApples.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(bobSr))
 	knows := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("knows"),
-		Content:     []byte("Alice addresses Bob directly."),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("knows"),
+		InlineContent: []byte("Alice addresses Bob directly."),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailApples, aliceEntity, bobSr),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{
 				Reference: emailApples.ID(),
@@ -166,25 +171,25 @@ func main() {
 			})),
 		},
 	}.Sign())
-	must(g.Add(knows))
 
-	// --- 6. "Bob and Bob Jr are family" (symmetric) — Bob already in the graph. ---
+	// --- 6. "Bob and Bob Jr are family" (symmetric) — Bob already built. ---
 	bobJr := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Bob Jr."),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Bob Jr."),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailFamily),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: emailFamily.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(bobJr))
 	familyRel := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("family"),
-		Content:     []byte("Bob and Bob Jr. share kinship per Alice's reference."),
-		Contributor: alice,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("family"),
+		InlineContent: []byte("Bob and Bob Jr. share kinship per Alice's reference."),
+		Contributor:   alice,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(alice, emailFamily, bobSr, bobJr),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{
 				Reference: emailFamily.ID(),
@@ -203,18 +208,23 @@ func main() {
 			})),
 		},
 	}.Sign())
-	must(g.Add(familyRel))
 
-	// --- 7. Consolidate, then compose an Archive from its parts ---
-	// (filesystem Universe under data/universe/, B_h file under
-	// data/branches/) and persist as branch "main". Real deployments
-	// would stack a MemUniverse on top, or swap S3Universe in below —
-	// this scenario keeps it flat so the bundle is just a directory.
-	must(g.Consolidate(alice, s.NextTimestamp(time.Second)))
+	// --- 7. Compose the bundle (filesystem Universe under data/universe/,
+	// head-id timeline under data/branches/B_h) and merge one contribution
+	// carrying every claim. The dev Sequencer runs the paper's six steps —
+	// verify, auto-consolidate the open heads, seed, and mint the branch
+	// table — advancing branch "main". Real deployments would stack a mem
+	// cache on top, or swap S3 in below; this keeps it flat so the bundle
+	// is just a directory. ---
 	u := must(fs.New(helpers.UniverseDir))
-	bth := must(file.New(helpers.BranchTableHeadPath))
-	seq := must(ranke.NewSequencer(ctx, u, bth, alice))
-	must(seq.AddGraph(ctx, "main", g, alice, s.NextTimestamp(time.Second)))
+	hist := must(histfile.New(helpers.BranchTableHeadPath))
+	seq := must(devseq.NewSequencer(ctx, u, hist, alice, s))
+	head := must(seq.AddClaims(ctx, []ranke.Claim{
+		emailApples, emailFamily, summary,
+		aliceEntity, applesEntity, likes,
+		bobSr, knows, bobJr, familyRel,
+	}))
+	_ = head
 
 	// --- 8. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)

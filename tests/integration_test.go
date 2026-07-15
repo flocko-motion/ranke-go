@@ -1,31 +1,27 @@
-// Integration tests — drive IntegrationTest against every Archive
-// shape the library supports, composed explicitly from Universe +
-// BranchTableHead.
+// Integration tests — drive IntegrationTest against every storage backend
+// the library bundles (in-memory and on-disk), each through the reference
+// dev Sequencer.
 package tests
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
-	seqfile "github.com/flocko-motion/ranke-go/adapter/sequencer/file"
-	seqmem "github.com/flocko-motion/ranke-go/adapter/sequencer/mem"
+	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
+	"github.com/flocko-motion/ranke-go/generator"
 	"github.com/stretchr/testify/require"
 )
 
-// fsTestDir is the on-disk location used by TestIntegrationFs.
-// Same path every run (default: /tmp/ranke-go-test) so the layout
-// is always at a predictable spot for inspection. The dir is
-// emptied before the run so prior state can't bleed in.
-//
-// $RANKE_FS_DIR overrides the default; the Makefile sets it so the
-// Makefile can echo it after `go test` finishes (test stdout is
-// otherwise hidden without `-v`).
+// fsTestDir is the on-disk root for the fs-backed scenarios. Same path every
+// run (default /tmp/ranke-go-test) so the layout is at a predictable spot for
+// inspection; TestMain wipes and recreates it, and each scenario gets an
+// isolated subdirectory under it. $RANKE_FS_DIR overrides the default (the
+// Makefile sets it, then echoes it after the run).
 const defaultFsTestDir = "/tmp/ranke-go-test"
 
 var fsTestDir string
@@ -35,7 +31,6 @@ func TestMain(m *testing.M) {
 	if fsTestDir == "" {
 		fsTestDir = defaultFsTestDir
 	}
-	// Empty + recreate so each run starts clean.
 	if err := os.RemoveAll(fsTestDir); err != nil {
 		fmt.Fprintln(os.Stderr, "tests/TestMain: RemoveAll:", err)
 		os.Exit(1)
@@ -49,30 +44,45 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// seqSelf is the server contributor the test Sequencer attests branch
-// advances with. Identity-Sign (no key), deterministic id, so re-opening
-// across a Reset yields the same self.
-func seqSelf() ranke.Contributor {
-	c := must(ranke.ClaimBuilder{Type: ranke.NodeContributor, Content: []byte("sequencer")}.Sign())
-	return must(c.AsContributor())
-}
-
 func TestIntegrationMem(t *testing.T) {
 	ctx := context.Background()
-	s, err := ranke.NewSequencer(ctx, mem.New(), seqmem.New(), seqSelf())
-	require.NoError(t, err)
-	IntegrationTest(t, ctx, func() ranke.Sequencer { return s })
+	IntegrationTest(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
+		return mem.New(), devhist.New(clk), nil
+	})
 }
 
 func TestIntegrationFs(t *testing.T) {
 	ctx := context.Background()
-	IntegrationTest(t, ctx, func() ranke.Sequencer {
-		u, err := fs.New(fsTestDir)
-		require.NoError(t, err)
-		bth, err := seqfile.New(filepath.Join(fsTestDir, "B_h"))
-		require.NoError(t, err)
-		s, err := ranke.NewSequencer(ctx, u, bth, seqSelf())
-		require.NoError(t, err)
-		return s
+	IntegrationTest(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
+		dir, err := os.MkdirTemp(fsTestDir, "scenario-")
+		if err != nil {
+			return nil, nil, err
+		}
+		u, err := fs.New(dir)
+		return u, devhist.New(clk), err
 	})
+}
+
+// TestFsDurability proves the write path is durable: after committing through
+// one fs handle, a COLD handle over the same directory reads the archive back
+// — the on-disk bytes stand alone, no in-memory state required.
+func TestFsDurability(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp(fsTestDir, "durability-")
+	require.NoError(t, err, "temp dir")
+
+	f := newFixture(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
+		u, err := fs.New(dir)
+		return u, devhist.New(clk), err
+	})
+	em := f.email(t, f.self, "alice@example.com", "bob@example.com", "durable\r\n")
+	head := f.write(t, em)
+
+	cold, err := fs.New(dir)
+	require.NoError(t, err, "cold fs handle")
+	arc, err := ranke.NewArchive(ctx, cold, head)
+	require.NoError(t, err, "open archive from cold handle")
+	ok, err := arc.HasClaim(ctx, em.ID())
+	require.NoError(t, err, "HasClaim from cold handle")
+	require.True(t, ok, "email durably readable through a cold fs handle")
 }

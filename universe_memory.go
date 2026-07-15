@@ -19,13 +19,15 @@ func NewMemoryUniverse() Universe {
 	return &memoryUniverse{
 		claims:  make(map[string][]byte),
 		content: make(map[string][]byte),
+		tags:    make(map[string]map[string]uint64),
 	}
 }
 
 type memoryUniverse struct {
 	mu      sync.RWMutex
-	claims  map[string][]byte // canonical CBOR by id
-	content map[string][]byte // content by hash
+	claims  map[string][]byte            // canonical CBOR by id
+	content map[string][]byte            // content by hash
+	tags    map[string]map[string]uint64 // id → branch → entry revision (a side-map; see Tagger)
 }
 
 func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
@@ -104,6 +106,36 @@ func (u *memoryUniverse) GetClaimHeights(ctx context.Context, ids []Id) ([]uint6
 	return DefaultGetClaimHeights(ctx, u, ids)
 }
 
+// TagBranch uses the reference walk (mem has no native pass).
+func (u *memoryUniverse) TagBranch(ctx context.Context, branch string, head Id, revision uint64) error {
+	return DefaultTagBranch(ctx, u, u, branch, head, revision)
+}
+
+func (u *memoryUniverse) SetBranchRevision(_ context.Context, claim Id, branch string, revision uint64) error {
+	if claim == nil {
+		return errNilID
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	m := u.tags[claim.String()]
+	if m == nil {
+		m = make(map[string]uint64)
+		u.tags[claim.String()] = m
+	}
+	m[branch] = revision
+	return nil
+}
+
+func (u *memoryUniverse) BranchRevision(_ context.Context, claim Id, branch string) (uint64, bool, error) {
+	if claim == nil {
+		return 0, false, errNilID
+	}
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	r, ok := u.tags[claim.String()][branch]
+	return r, ok, nil
+}
+
 func (u *memoryUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {
 	out := make([][]byte, len(refs))
 	u.mu.RLock()
@@ -173,7 +205,7 @@ func (u *memoryUniverse) CopyContents(ctx context.Context, src Universe, refs []
 // Capabilities: a map can overwrite, delete, and enumerate, and serves raw
 // claim CBOR and content blobs; it is not persistent (lost on process exit).
 func (u *memoryUniverse) Capabilities() Capabilities {
-	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true}
+	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true}
 }
 
 func (u *memoryUniverse) Close() error { return nil }

@@ -64,6 +64,9 @@ type Capabilities struct {
 	// stack knows a blob larger than the cap cannot be here and descends
 	// without asking. Set from the backend's option (e.g. WithContentCap).
 	ContentCap uint64
+	// Tags: holds mutable, pure-functional per-claim tags (branch membership
+	// etc.) and implements Tagger; opaque byte stores report false.
+	Tags bool
 }
 
 // Universe is 𝒰 from spec §4.5 — a content-addressed bag of claims
