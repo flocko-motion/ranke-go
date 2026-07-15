@@ -14,11 +14,15 @@ import (
 	"path/filepath"
 	"time"
 
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
+	neo4jstore "github.com/flocko-motion/ranke-go/adapter/storage/neo4j"
 	"github.com/flocko-motion/ranke-go/adapter/storage/s3"
 	"github.com/flocko-motion/ranke-go/adapter/storage/sqlite"
+	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
 	"github.com/flocko-motion/ranke-go/generator"
 )
 
@@ -83,6 +87,37 @@ func AllBackends() []Backend {
 			if err != nil {
 				cleanup()
 				return nil, nil, err
+			}
+			return u, cleanup, nil
+		}},
+		{"neo4j", func() (ranke.Universe, func(), error) {
+			// Neo4j is a graph-native CACHE: it stores structure id-faithfully
+			// but drops content over its cap and holds no external bytes, so it
+			// CANNOT pass a full verification alone. Its real deployment — and
+			// the only one that verifies — is stacked as a lazy cache over a
+			// durable tier that holds the bytes and serves content misses.
+			conn, connCleanup, err := neo4jConn()
+			if err != nil {
+				return nil, nil, err
+			}
+			driver, err := neo4jdriver.NewDriverWithContext(
+				conn.BoltURI, neo4jdriver.BasicAuth(conn.User, conn.Password, ""))
+			if err != nil {
+				connCleanup()
+				return nil, nil, err
+			}
+			u, err := stack.NewStack(
+				stack.Lazy(neo4jstore.New(driver)), // graph cache on top
+				stack.Eager(mem.New()),             // durable authoritative bytes below
+			)
+			if err != nil {
+				_ = driver.Close(context.Background())
+				connCleanup()
+				return nil, nil, err
+			}
+			cleanup := func() {
+				_ = driver.Close(context.Background())
+				connCleanup()
 			}
 			return u, cleanup, nil
 		}},

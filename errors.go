@@ -92,6 +92,7 @@ var (
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errEncodeClaim           = errors.New("ranke: encode claim")
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")
+	errAssemble              = errors.New("ranke.AssembleClaim")
 	errID                    = errors.New("ranke.Id")
 	errEncodePubkey          = errors.New("ranke: unsupported public key type")
 	errDecodePubkey          = errors.New("ranke.DecodePublicKey")
