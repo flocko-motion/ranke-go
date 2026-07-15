@@ -1,3 +1,7 @@
+// package: ranke / taxonomy
+// type:    logic
+// job:     the closed edge-type vocabulary (§4.8) — classes, subtypes, and their compact aliases — with enumeration/validation helpers
+// limits:  vocabulary only; edge construction and matching live elsewhere (-> edge, filter)
 package ranke
 
 // EdgeClass is the closed top-level vocabulary for edge types.

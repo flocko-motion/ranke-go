@@ -73,4 +73,5 @@ func (h *History) GetBulk(_ context.Context, from, to int) ([]ranke.HistoryItem,
 // Len returns the number of entries (n+1).
 func (h *History) Len(_ context.Context) (int, error) { return len(h.items), nil }
 
+// Close releases the store; the in-memory timeline holds nothing to release.
 func (h *History) Close() error { return nil }

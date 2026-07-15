@@ -1,3 +1,7 @@
+// package: ranke / history
+// type:    logic
+// job:     HistoryItem — one immutable entry in the head-id timeline (head id, height, append time) plus its constructor and getters
+// limits:  a value type; the timeline it belongs to is History (-> history)
 package ranke
 
 import (
@@ -21,8 +25,11 @@ func NewHistoryItem(id Id, height int, timestamp time.Time) HistoryItem {
 	return HistoryItem{id: id, height: height, timestamp: timestamp}
 }
 
+// GetId returns the head id this entry records.
 func (h HistoryItem) GetId() Id { return h.id }
 
+// GetHeight returns the entry's position in the timeline (0 is the oldest).
 func (h HistoryItem) GetHeight() int { return h.height }
 
+// GetTimestamp returns the time the head was appended.
 func (h HistoryItem) GetTimestamp() time.Time { return h.timestamp }

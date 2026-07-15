@@ -1,3 +1,7 @@
+// package: ranke / taxonomy
+// type:    logic
+// job:     the closed node-type vocabulary (§4.8) — classes, subtypes, and their compact aliases — with enumeration/validation helpers
+// limits:  vocabulary only; node construction and content live elsewhere (-> node)
 package ranke
 
 // --- Node type vocabulary (spec §4.8) ---
@@ -56,6 +60,7 @@ func nodeClassFromAlias(c NodeClass) NodeClass {
 	}
 }
 
+// NodeSubtype is the second-level node-type vocabulary (the "/sub" part).
 type NodeSubtype string
 
 const (

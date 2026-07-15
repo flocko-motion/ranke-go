@@ -1,3 +1,7 @@
+// package: ranke / history
+// type:    logic
+// job:     the History contract — persists the archive head-id timeline k₀…kₙ (append + read-back)
+// limits:  interface only; concrete timeline stores live in adapters (-> adapter/history)
 package ranke
 
 import (

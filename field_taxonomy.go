@@ -1,3 +1,7 @@
+// package: ranke / taxonomy
+// type:    logic
+// job:     field-name/value size caps and the well-known field-name constants, enforced at claim/edge construction
+// limits:  reference-impl caps (the paper leaves them open); the codec/verifier never reject an already-stored record (-> claim_builder)
 package ranke
 
 import (

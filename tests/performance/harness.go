@@ -106,7 +106,7 @@ func openS3() (ranke.Universe, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	u, err := s3.New(client, bucket)
+	u, err := s3.New(client, bucket, s3.WithConcurrency(8))
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -120,7 +120,13 @@ func openRedis() (ranke.Universe, func(), error) {
 		return nil, nil, err
 	}
 	client := goredis.NewClient(&goredis.Options{Addr: addr, Password: pass})
-	u, err := redisstore.New(client)
+	// A key prefix isolates a perf run's keys from any other tenant of the
+	// same redis; a generous TTL lets a run's keys expire on their own; the
+	// bulk ops fan out at moderate concurrency.
+	u, err := redisstore.New(client,
+		redisstore.WithKeyPrefix("rankeperf"),
+		redisstore.WithTTL(time.Hour),
+		redisstore.WithConcurrency(8))
 	if err != nil {
 		_ = client.Close()
 		cleanup()
@@ -140,7 +146,13 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		connCleanup()
 		return nil, nil, err
 	}
-	return neo4jstore.New(driver), func() {
+	// Target the default database explicitly, and declare neo4j's inline
+	// content cap (~4 KiB) so a stack over it can descend to a durable tier
+	// for anything larger — the cap-aware read path the stack relies on.
+	u := neo4jstore.New(driver,
+		neo4jstore.WithDatabase("neo4j"),
+		neo4jstore.WithContentCap(4096))
+	return u, func() {
 		_ = driver.Close(context.Background())
 		connCleanup()
 	}, nil

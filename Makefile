@@ -1,10 +1,10 @@
 # Makefile — ranke-go
 #
-# Library-only for now: `go build ./...` verifies compilation but
-# produces no binary. The bin/ directory is reserved for future
-# tools (e.g. a conformance-suite runner) and currently empty.
+# `make build` compiles the repo's binaries into bin/: the ranke CLI
+# (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
+# generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/performance test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -44,10 +44,13 @@ SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 # assert the scenarios are byte-deterministic + docs are in sync.
 all: build test verify-scenarios verify-docs
 
-# Build the ranke CLI into bin/ranke.
+# Build all binaries into bin/: the ranke CLI, the ranke-test harness,
+# and the scenariodoc generator.
 build:
 	@mkdir -p bin
 	go build -o bin/ranke ./cmd/ranke
+	go build -o bin/ranke-test ./cmd/test
+	go build -o bin/scenariodoc ./cmd/scenariodoc
 
 # Copy the built CLI to $(BINDIR)/ranke (default: ~/.local/bin).
 # No sudo needed; just make sure $(BINDIR) is on your PATH.
@@ -238,6 +241,10 @@ docs-clean:
 # deadcode (with --test), and the line-count limit.
 lint:
 	brokkr lint
+
+# Quick quality gate: build the binaries and run the lint gate — the fast
+# "does it compile and pass lint" without vet or the full test suite (-> check).
+verify: build lint
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance

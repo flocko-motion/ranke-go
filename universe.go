@@ -168,6 +168,15 @@ type Universe interface {
 	// already has). WithClosure/WithContent are no-ops here; only
 	// WithProgress is honored.
 	CopyContents(ctx context.Context, src Universe, refs []ContentRef, opts ...CopyOption) error
+	// TagClaim idempotently writes tags (fields with _ prefix)
+	SetClaimTag(ctx context.Context, claim Id) error
+	GetClaimTags(ctx context.Context, claim Id) (map[string]string, error)
+
+	// SetBranchRevision records that claim joined branch at revision.
+	SetBranchRevision(ctx context.Context, claim Id, branch string, revision uint64) error
+	// BranchRevision returns the revision claim joined branch; ok is false when
+	// claim is not a member.
+	BranchRevision(ctx context.Context, claim Id, branch string) (uint64, bool, error)
 
 	// Capabilities reports optional backend abilities (see Capabilities).
 	// Composites (stack, partition) derive theirs from their members'.
