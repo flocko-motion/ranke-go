@@ -34,5 +34,4 @@ docs/papers/
 .worktrees/
 .todos/
 
-
-test
+/test

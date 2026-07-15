@@ -40,6 +40,7 @@ type Config struct {
 	Seed     int64    // generator seed — fixes every id
 	Access   int      // chapter-3 random accesses
 	Backends []string // backend names to run; empty = all
+	Progress bool     // show an in-place per-chapter progress line (interactive CLI; off under go test)
 }
 
 // Backend is one matrix row: a named factory that spins up a FRESH, EMPTY
@@ -251,7 +252,22 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	u := newMetered(u0)
 	defer func() { _ = u.Close() }()
 
+	// Banner up front, so a slow backend announces what it is working on before
+	// the work starts.
+	rule := strings.Repeat("═", 88)
+	fmt.Fprintf(w, "\n%s\n  %-14s  size=%d\n%s\n", rule, name, cfg.Size, rule)
+	// progress overwrites a single line in place while a chapter runs
+	// (interactive only — piped/NO_COLOR output stays clean); it is cleared and
+	// replaced by the results when the backend is done.
+	showProgress := cfg.Progress && useColor
+	progress := func(stage string) {
+		if showProgress {
+			fmt.Fprintf(w, "\r  \033[90m⏳ %-16s\033[0m\033[K", stage)
+		}
+	}
+
 	// Chapter 1 — write.
+	progress("write")
 	u.setPhase("1-write")
 	c1 := time.Now()
 	m, err := generator.Generate(ctx, u, spec)
@@ -266,6 +282,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 
 	// Chapter 2 — verify.
+	progress("verify")
 	u.setPhase("2-verify")
 	c2 := time.Now()
 	run, err := arc.Verify(ctx, ranke.WithExternalContent())
@@ -287,6 +304,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	if err != nil {
 		return 0, fmt.Errorf("%s: get branch: %w", name, err)
 	}
+	progress("access:branch")
 	u.setPhase("3a-branch")
 	c3a := time.Now()
 	for _, id := range ids {
@@ -296,6 +314,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 	branchDur := time.Since(c3a)
 
+	progress("access:universe")
 	u.setPhase("3b-universe")
 	c3b := time.Now()
 	for _, id := range ids {
@@ -309,10 +328,11 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	r2, _ := u.phaseIO("2-verify")
 	r3a, _ := u.phaseIO("3a-branch")
 	r3b, _ := u.phaseIO("3b-universe")
-	rule := strings.Repeat("═", 88)
+	if showProgress {
+		fmt.Fprint(w, "\r\033[K") // clear the progress line; results replace it
+	}
 	ms := func(d time.Duration) string { return d.Round(time.Millisecond).String() }
-	fmt.Fprintf(w, "\n%s\n  %-14s  size=%d  claims=%d  verified=%d  accesses=%d\n%s\n",
-		rule, name, cfg.Size, m.ClaimCount, run.Verified(), len(ids), rule)
+	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, run.Verified(), len(ids))
 	fmt.Fprintf(w, "  write            %-9s (%dw %dr)\n", ms(writeDur), w1, r1)
 	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
 	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r3a)

@@ -50,6 +50,7 @@ func performanceCmd() *cobra.Command {
 				Seed:     seed,
 				Access:   access,
 				Backends: backends,
+				Progress: true, // interactive CLI: show the in-place progress line
 			}
 			return performance.RunMatrix(cfg, cmd.OutOrStdout(), nil)
 		},
