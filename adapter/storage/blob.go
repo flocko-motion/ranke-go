@@ -348,6 +348,12 @@ func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]u
 	return u.heights.GetClaimHeights(ctx, u, ids)
 }
 
+// Query answers an RQL read via the reference executor over this byte store; a
+// forward-only store, so uses/connections steps are refused (ReverseWalk false).
+func (u *blobUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, u, q, scope)
+}
+
 // GetClaimsRaw returns each claim's stored bytes verbatim — a byte store holds
 // exactly the CBOR the id was signed over, so no decode (and no re-encode) is
 // involved.

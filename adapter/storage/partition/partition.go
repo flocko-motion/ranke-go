@@ -222,6 +222,12 @@ func (p *partition) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint
 	return ranke.DefaultGetClaimHeights(ctx, p, ids)
 }
 
+// Query resolves an RQL read through the partition's own read path (GetClaims,
+// which routes each id to its shard) via the reference executor.
+func (p *partition) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, p, q, scope)
+}
+
 // GetClaimsRaw routes each id to its shard and gathers the stored CBOR.
 func (p *partition) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
 	out := make([][]byte, len(ids))
@@ -284,7 +290,7 @@ func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, claim
 }
 
 func (p *partition) Capabilities() ranke.Capabilities {
-	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true, Tags: true}
+	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true, ReverseWalk: true, Tags: true}
 	for _, s := range p.shards {
 		sc := s.Capabilities()
 		c.Overwrite = c.Overwrite && sc.Overwrite
@@ -292,6 +298,7 @@ func (p *partition) Capabilities() ranke.Capabilities {
 		c.Enumerate = c.Enumerate && sc.Enumerate
 		c.Persistent = c.Persistent && sc.Persistent
 		c.GQL = c.GQL && sc.GQL
+		c.ReverseWalk = c.ReverseWalk && sc.ReverseWalk
 		c.Tags = c.Tags && sc.Tags
 	}
 	return c

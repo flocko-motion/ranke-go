@@ -325,6 +325,14 @@ func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]
 	return out, nil
 }
 
+// Query answers an RQL read. For now it delegates to the reference executor
+// over this Universe's own reads (forward-only, uses/connections refused); a
+// future native lowering to Cypher — and ReverseWalk support, since neo4j holds
+// edges both directions — would override this.
+func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, u, q, scope)
+}
+
 // GetClaimsRaw always misses: a structure/query cache stores no CBOR. The
 // ErrNotFound lets a stack route the request to the authoritative byte layer.
 func (u *neo4jUniverse) GetClaimsRaw(_ context.Context, ids []ranke.Id) ([][]byte, error) {

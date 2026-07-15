@@ -169,6 +169,10 @@ func (u *memoryUniverse) SetClaimsTags(_ context.Context, clearTags []string, cl
 	return nil
 }
 
+func (u *memoryUniverse) Query(ctx context.Context, q Query, scope Scope) (ResultStream, error) {
+	return DefaultQuery(ctx, u, q, scope)
+}
+
 func (u *memoryUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {
 	out := make([][]byte, len(refs))
 	u.mu.RLock()

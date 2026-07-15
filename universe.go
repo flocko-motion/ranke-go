@@ -47,6 +47,15 @@ type Capabilities struct {
 	// the optional graph-query language, NOT the native filtered query — that
 	// is a separate, always-available read.
 	GQL bool
+	// ReverseWalk: the backend can follow edges backward (find the claims that
+	// reference a given one) without sweeping a whole closure — it holds edges
+	// indexed both directions (a graph-native store), or maintains a reverse
+	// index. Forward-only byte stores report false, and a uses/connections
+	// query step against them is refused rather than answered by an O(closure)
+	// sweep. Composed per-primitive: a stack ORs over its layers (like GQL — any
+	// capable layer can answer), a partition ANDs over its shards (a referrer
+	// can live in any shard, so all must support it).
+	ReverseWalk bool
 	// RawClaims: the backend stores and serves each claim's verbatim canonical
 	// bytes via GetClaimsRaw. A structure-only cache that reconstructs claims
 	// from parts (neo4j) holds no canonical CBOR and reports false — a stack
@@ -139,6 +148,15 @@ type Universe interface {
 	// field); a backend that maintains an id→height cache (HeightCache) answers
 	// from it, deserialising only the misses.
 	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
+
+	// Query answers a declarative RQL read (the paper's §Filtered Reads) — the
+	// primary read endpoint. scope is an injected visibility predicate (nil =
+	// unrestricted): mechanism applies it, policy supplies it. A byte store
+	// delegates to DefaultQuery (the reference forward-closure walk, which
+	// refuses uses/connections steps unless Capabilities.ReverseWalk); a
+	// graph-native backend overrides with a native lowering (e.g. Cypher). A
+	// query's meaning is unchanged by which layer answers it.
+	Query(ctx context.Context, q Query, scope Scope) (ResultStream, error)
 
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:
