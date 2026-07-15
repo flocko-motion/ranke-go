@@ -1,0 +1,191 @@
+package ranke
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// Tests for the RQL reference executor (DefaultQuery over a Universe): forward
+// traversal, filtering, ordering, limiting, output shaping, scope injection,
+// and the reverse-walk refusal.
+
+// queryFixture builds root(0) ← a:source(1) ← b:entity(2) in a memory
+// Universe and returns it with the three claims.
+func queryFixture(t *testing.T) (Universe, Contributor, Claim, Claim) {
+	t.Helper()
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	a := srcClaim(t, root, "aardvark")
+	b := entityClaim(t, root, "person", "b", a)
+	for _, c := range []Claim{root, a, b} {
+		require.NoError(t, PutClaim(ctx, u, c))
+	}
+	return u, root, a, b
+}
+
+func drain(t *testing.T, rs ResultStream) []QueryResult {
+	t.Helper()
+	var out []QueryResult
+	for rs.Next() {
+		out = append(out, rs.Result())
+	}
+	require.NoError(t, rs.Err())
+	require.NoError(t, rs.Close())
+	return out
+}
+
+func idSet(rs []QueryResult) map[string]bool {
+	m := map[string]bool{}
+	for _, r := range rs {
+		m[r.Claim.ID().String()] = true
+	}
+	return m
+}
+
+// TestQueryFullClosure: an empty Path walks the full forward closure from the
+// root — here b reaches a (derivation) and root (contributor), and a reaches root.
+func TestQueryFullClosure(t *testing.T) {
+	u, root, a, b := queryFixture(t)
+	rs, err := u.Query(context.Background(), Query{Select: Select{Claim: b.ID()}}, nil)
+	require.NoError(t, err)
+	got := idSet(drain(t, rs))
+	require.Equal(t, map[string]bool{
+		b.ID().String(): true, a.ID().String(): true, root.ID().String(): true,
+	}, got, "full closure reaches b, a, root")
+}
+
+// TestQueryPathTypedDepth: a derivation/* step of depth 1 from b, landing on
+// source/* nodes, reaches only a — root (a contributor edge) is off-path.
+func TestQueryPathTypedDepth(t *testing.T) {
+	u, _, a, b := queryFixture(t)
+	q := Query{Select: Select{
+		Claim: b.ID(),
+		Path:  []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}},
+	}}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := idSet(drain(t, rs))
+	require.Equal(t, map[string]bool{a.ID().String(): true}, got)
+}
+
+// TestQueryWhereType: a Where on type filters the closure to source claims.
+func TestQueryWhereType(t *testing.T) {
+	u, _, a, b := queryFixture(t)
+	q := Query{
+		Select: Select{Claim: b.ID()},
+		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
+	}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := idSet(drain(t, rs))
+	require.Equal(t, map[string]bool{a.ID().String(): true}, got)
+}
+
+// TestQueryWhereHeight: height is a first-class queryable field — ge 1 drops
+// the height-0 root, keeping a(1) and b(2).
+func TestQueryWhereHeight(t *testing.T) {
+	u, root, a, b := queryFixture(t)
+	q := Query{
+		Select: Select{Claim: b.ID()},
+		Where:  &Where{Field: "height", Test: &Comparison{Ge: 1}},
+	}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := idSet(drain(t, rs))
+	require.Equal(t, map[string]bool{a.ID().String(): true, b.ID().String(): true}, got)
+	require.False(t, got[root.ID().String()], "height-0 root excluded")
+}
+
+// TestQueryOrderLimit: order by height desc and cap to one → the deepest claim.
+func TestQueryOrderLimit(t *testing.T) {
+	u, _, _, b := queryFixture(t)
+	q := Query{
+		Select: Select{Claim: b.ID()},
+		Order:  &Order{Field: "height", Desc: true},
+		Limit:  Limit{Results: 1},
+	}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := drain(t, rs)
+	require.Len(t, got, 1)
+	require.True(t, got[0].Claim.ID().Equal(b.ID()), "highest-height claim first")
+}
+
+// TestQueryOutputContent: content is inlined up to the cap, truncated per the
+// overflow policy.
+func TestQueryOutputContent(t *testing.T) {
+	u, _, a, _ := queryFixture(t)
+	q := Query{
+		Select: Select{Claim: a.ID()},
+		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
+		Output: Output{Content: 4, Overflow: OverflowCutoff},
+	}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := drain(t, rs)
+	require.Len(t, got, 1)
+	require.Equal(t, []byte("aard"), got[0].Content, "content cut off at the cap")
+}
+
+// TestQueryOutputPath: DetailPath returns the route root→claim.
+func TestQueryOutputPath(t *testing.T) {
+	u, _, a, b := queryFixture(t)
+	q := Query{
+		Select: Select{Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
+		Output: Output{Detail: DetailPath},
+	}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err)
+	got := drain(t, rs)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Path, 2, "route is b → a")
+	require.True(t, got[0].Path[0].ID().Equal(b.ID()))
+	require.True(t, got[0].Path[1].ID().Equal(a.ID()))
+}
+
+// TestQueryScope: an injected scope predicate filters results — mechanism
+// applying what policy would decide.
+func TestQueryScope(t *testing.T) {
+	u, root, a, b := queryFixture(t)
+	scope := func(c Claim) bool { return !c.ID().Equal(root.ID()) }
+	rs, err := u.Query(context.Background(), Query{Select: Select{Claim: b.ID()}}, scope)
+	require.NoError(t, err)
+	got := idSet(drain(t, rs))
+	require.Equal(t, map[string]bool{a.ID().String(): true, b.ID().String(): true}, got)
+	require.False(t, got[root.ID().String()], "scoped out")
+}
+
+// TestQueryReverseRefused: a byte store cannot walk backward, so a uses step is
+// refused with errReverseWalkUnsupported rather than sweeping the closure.
+func TestQueryReverseRefused(t *testing.T) {
+	u, _, _, b := queryFixture(t)
+	q := Query{Select: Select{Claim: b.ID(), Path: []PathStep{{Dir: DirUses}}}}
+	_, err := u.Query(context.Background(), q, nil)
+	require.ErrorIs(t, err, errReverseWalkUnsupported)
+}
+
+// TestQueryNoRoot: a Universe query needs a claim root (branch resolution is
+// upstream).
+func TestQueryNoRoot(t *testing.T) {
+	u := NewMemoryUniverse()
+	_, err := u.Query(context.Background(), Query{Select: Select{Branch: "main"}}, nil)
+	require.ErrorIs(t, err, errQueryNoRoot)
+}
+
+// TestQueryReport: Execution.Report appends a report after the stream drains.
+func TestQueryReport(t *testing.T) {
+	u, _, _, b := queryFixture(t)
+	rs, err := u.Query(context.Background(), Query{
+		Select:    Select{Claim: b.ID()},
+		Execution: Execution{Report: true},
+	}, nil)
+	require.NoError(t, err)
+	got := drain(t, rs)
+	rep := rs.Report()
+	require.NotNil(t, rep)
+	require.Equal(t, "native", rep.Engine)
+	require.Equal(t, len(got), rep.Results)
+}
