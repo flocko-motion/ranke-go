@@ -32,24 +32,25 @@ type Neo4jConn struct {
 	Password string
 }
 
-// neo4jConn obtains a Neo4j to test against. If RANKE_NEO4J_BOLT is set it uses
-// that already-running instance (e.g. one on the host, reached from this pod at
-// host.containers.internal) and never tears it down. Otherwise it spawns an
+// neo4jConn obtains a Neo4j to test against. It uses an already-running
+// instance — the --native host install (forceNativeServices) or one named by
+// RANKE_NEO4J_BOLT/HTTP — and never tears it down; otherwise it spawns an
 // ephemeral pod (needs podman). Returns ErrUnavailable when neither is possible.
 func neo4jConn() (*Neo4jConn, func(), error) {
-	if os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != "" {
+	if forceNativeServices || os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != "" {
 		return neo4jExternal()
 	}
 	return neo4jPod()
 }
 
-// neo4jExternal points at a Neo4j running outside this pod — a host instance
-// reached via host.containers.internal by default, overridable per env. Cleanup
-// is a no-op: we don't own it. Verifies it is serving before returning.
+// neo4jExternal points at an already-running Neo4j — the host-native install on
+// localhost by default (--native), or wherever RANKE_NEO4J_BOLT/HTTP name.
+// Cleanup is a no-op: we don't own it, so its graph persists after the run
+// (browsable). Verifies it is serving before returning.
 func neo4jExternal() (*Neo4jConn, func(), error) {
 	conn := &Neo4jConn{
-		BoltURI:  envOr("RANKE_NEO4J_BOLT", "bolt://host.containers.internal:7687"),
-		HTTPURI:  envOr("RANKE_NEO4J_HTTP", "http://host.containers.internal:7474"),
+		BoltURI:  envOr("RANKE_NEO4J_BOLT", "bolt://127.0.0.1:7687"),
+		HTTPURI:  envOr("RANKE_NEO4J_HTTP", "http://127.0.0.1:7474"),
 		User:     envOr("RANKE_NEO4J_USER", neo4jUser),
 		Password: envOr("RANKE_NEO4J_PASS", neo4jPass),
 	}

@@ -32,6 +32,10 @@ func redisConn() (addr, pass string, cleanup func(), err error) {
 		}
 		return a, p, func() {}, nil
 	}
+	// --native: the host redis on localhost, left in place (no teardown).
+	if forceNativeServices {
+		return "127.0.0.1:6379", envOr("RANKE_REDIS_PASS", redisPass), func() {}, nil
+	}
 	return redisPod()
 }
 

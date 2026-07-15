@@ -42,7 +42,13 @@ type Config struct {
 	Backends  []string // backend names to run; empty = all
 	Progress  bool     // show an in-place per-chapter progress line (interactive CLI; off under go test)
 	QueryReps int      // times each RQL query is timed in chapter 4; 0 = 10
+	Native    bool     // connect neo4j/redis to a host-native instance (localhost) instead of spawning podman pods
 }
+
+// forceNativeServices, set by RunMatrix from Config.Native, routes the
+// pod-based services (neo4j, redis) to a host-native instance on localhost
+// instead of an ephemeral podman pod. A run under go test leaves it false.
+var forceNativeServices bool
 
 // Backend is one matrix row: a named factory that spins up a FRESH, EMPTY
 // local instance and returns it plus a cleanup func. Open returns
@@ -147,6 +153,16 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		connCleanup()
 		return nil, nil, err
 	}
+	// Flush at the START, not teardown: each run wants a clean slate, but the
+	// graph is left in place afterwards so it stays browsable (Neo4j Browser,
+	// http://127.0.0.1:7474). This also clears any data a prior kept run left.
+	if _, err := neo4jdriver.ExecuteQuery(context.Background(), driver,
+		"MATCH (n) DETACH DELETE n", nil,
+		neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase("neo4j")); err != nil {
+		_ = driver.Close(context.Background())
+		connCleanup()
+		return nil, nil, fmt.Errorf("flush neo4j: %w", err)
+	}
 	// Target the default database explicitly, and declare neo4j's inline
 	// content cap (~4 KiB) so a stack over it can descend to a durable tier
 	// for anything larger — the cap-aware read path the stack relies on.
@@ -228,6 +244,7 @@ func selectBackends(names []string) ([]Backend, error) {
 // failed. onResult, if set, is called once per completed backend (used by the
 // test to assert; the CLI leaves it nil).
 func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified int) error) error {
+	forceNativeServices = cfg.Native
 	backends, err := selectBackends(cfg.Backends)
 	if err != nil {
 		return err
