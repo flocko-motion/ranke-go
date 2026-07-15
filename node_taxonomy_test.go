@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Foundation unit tests for the node/encoding wire aliases (§5.1). To
+// Foundation unit tests for the node wire aliases (§5.1). To
 // optimise encoding size the reserved vocabulary has one-character short
 // forms, and "an alias is semantically identical to its long form." That
 // holds only if the mapping is a bijection, aliases don't collide (a
@@ -61,29 +61,13 @@ func TestNodeSubtypeAliases(t *testing.T) {
 	}, nodeSubtypeToAlias, nodeSubtypeFromAlias, NodeSubtype("email")) // open vocabulary
 }
 
-func TestEncodingClassAliases(t *testing.T) {
-	checkAliasRoundTrip(t, map[EncodingClass]EncodingClass{
-		encApplication: encApplicationAlias,
-		encAudio:       encAudioAlias,
-		encExample:     encExampleAlias,
-		encFont:        encFontAlias,
-		encImage:       encImageAlias,
-		encMessage:     encMessageAlias,
-		encModel:       encModelAlias,
-		encMultipart:   encMultipartAlias,
-		encText:        encTextAlias,
-		encVideo:       encVideoAlias,
-	}, encodingClassToAlias, encodingClassFromAlias, EncodingClass("chemical"))
-}
-
-// TestNodeAliasesAreSingleCharacter: node/encoding aliases are one character
-// — the size optimisation §5.1 promises.
+// TestNodeAliasesAreSingleCharacter: node aliases are one character — the size
+// optimisation §5.1 promises. (Encoding aliases: encoding_taxonomy_test.go.)
 func TestNodeAliasesAreSingleCharacter(t *testing.T) {
 	for long, short := range map[string]string{
 		string(NodeClassContribution): string(nodeClassToAlias(NodeClassContribution)),
 		string(NodeClassSource):       string(nodeClassToAlias(NodeClassSource)),
 		string(NodeSubtypeBranches):   string(nodeSubtypeToAlias(NodeSubtypeBranches)),
-		string(encMultipart):          string(encodingClassToAlias(encMultipart)),
 	} {
 		require.Len(t, short, 1, "alias for %q must be one character", long)
 	}
