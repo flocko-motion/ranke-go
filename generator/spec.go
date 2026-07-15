@@ -60,8 +60,9 @@ type Spec struct {
 	// archive holds both a tiny-blob and a large-blob corner.
 	TinyBlobBytes  int
 	LargeBlobBytes int
-	// OversizedFieldBytes is the length of an oversized field value placed on
-	// at least one claim (0 disables the corner).
+	// OversizedFieldBytes is the length of a large field value placed on one
+	// claim (0 disables the corner). Kept under the ADT's field-value cap
+	// (64 KiB) — a big-but-valid field, not an over-limit one.
 	OversizedFieldBytes int
 	// MaxEdgeDegree is the fan-out of the highest-degree derivation: it cites
 	// up to this many sources at once (the high-degree corner); most nodes
@@ -110,7 +111,7 @@ func SpecForSize(seed int64, size int) Spec {
 		ExternalBlobs:       clampMin(size/5, 1),
 		TinyBlobBytes:       8,
 		LargeBlobBytes:      clampMin(size*64, 4096),
-		OversizedFieldBytes: 100 * 1024,
+		OversizedFieldBytes: 60 * 1024, // large, under the 64 KiB field cap
 		MaxEdgeDegree:       clampMin(ilog2(size)+2, 3),
 
 		KeyExpiries: clampMin(size/20, 1),

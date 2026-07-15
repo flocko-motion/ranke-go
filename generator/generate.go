@@ -6,6 +6,7 @@ package generator
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"time"
@@ -91,11 +92,12 @@ type builder struct {
 	spec  Spec
 	clock *Clock
 
-	contribs  []ranke.Contributor
-	srcClaims []ranke.Claim // sources available as derivation inputs
-	batch     []ranke.Claim
-	manifest  Manifest
-	err       error
+	contribs      []ranke.Contributor
+	srcClaims     []ranke.Claim // sources available as derivation inputs
+	batch         []ranke.Claim
+	manifest      Manifest
+	oversizedDone bool // the oversized-field corner is applied once
+	err           error
 }
 
 // fail records the first error; subsequent build steps become no-ops.
@@ -153,9 +155,13 @@ func (b *builder) sources() {
 		case i < b.spec.ExternalBlobs:
 			c = b.externalSource(who, i)
 		case i%2 == 0:
-			c = b.inlineSource(who, i, b.spec.TinyBlobBytes, i == 0)
+			c = b.inlineSource(who, i, b.spec.TinyBlobBytes)
 		default:
-			c = b.inlineSource(who, i, b.spec.LargeBlobBytes, false)
+			// Large data goes in EXTERNAL content (content-addressed), never
+			// inline: inline bytes are bundled in the claim record and cannot be
+			// served from a lower tier, so a caching backend (neo4j) can't
+			// round-trip them. "Put large data in content" — the ADT convention.
+			c = b.externalSource(who, i)
 		}
 		if c != nil {
 			b.srcClaims = append(b.srcClaims, c)
@@ -164,15 +170,20 @@ func (b *builder) sources() {
 	}
 }
 
-// inlineSource builds a source/* claim with n bytes of inline content; when
-// oversized, it also carries an oversized field value (that corner).
-func (b *builder) inlineSource(who ranke.Contributor, i, n int, oversized bool) ranke.Claim {
+// inlineSource builds a source/* claim with n bytes of inline content. The
+// first inline source also carries the oversized field value (that corner,
+// applied once) — a large-but-valid field, kept under the ADT's field cap.
+func (b *builder) inlineSource(who ranke.Contributor, i, n int) ranke.Claim {
 	cb := ranke.NewClaim(ranke.TypeSource("note"), who).
 		WithInlineContent(fill(b.spec.Seed, "src", i, n)).
 		WithCreatedAt(b.clock.Tick())
-	if oversized && b.spec.OversizedFieldBytes > 0 {
-		big := fill(b.spec.Seed, "field", i, b.spec.OversizedFieldBytes)
-		cb = cb.WithField("note", string(big))
+	if !b.oversizedDone && b.spec.OversizedFieldBytes > 0 {
+		// A field value is text, not bytes — hex-encode so it is valid UTF-8
+		// (a caching backend stores field values as string properties; raw
+		// binary would not round-trip). Content, by contrast, may be binary.
+		big := hex.EncodeToString(fill(b.spec.Seed, "field", i, b.spec.OversizedFieldBytes/2))
+		cb = cb.WithField("note", big)
+		b.oversizedDone = true
 	}
 	return b.add(cb.Sign())
 }
