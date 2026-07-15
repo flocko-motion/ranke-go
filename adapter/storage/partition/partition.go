@@ -198,7 +198,6 @@ func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs [
 	return ranke.DefaultCopyContents(ctx, p, src, refs, opts...)
 }
 
-
 // GetClaimHeights resolves heights through the partition's own GetClaims (which
 // routes each id to its shard), then reads each committed height. Delegating to
 // DefaultGetClaimHeights avoids reimplementing the shard routing here.

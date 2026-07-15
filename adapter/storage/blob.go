@@ -326,7 +326,6 @@ func (u *blobUniverse) Capabilities() ranke.Capabilities {
 	return c
 }
 
-
 // GetClaimHeights answers from the id→height cache, decoding only the ids it
 // has not seen (and caching those). With normal get/put traffic warming the
 // cache, a repeat lookup almost never touches the store.

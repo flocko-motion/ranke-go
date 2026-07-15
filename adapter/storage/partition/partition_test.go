@@ -142,7 +142,7 @@ func TestCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true} // mem: not persistent
+	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Tags: true} // mem: not persistent, but tag-capable (routed per shard)
 	if got := p.Capabilities(); got != want {
 		t.Fatalf("all-mem partition caps = %+v, want %+v", got, want)
 	}

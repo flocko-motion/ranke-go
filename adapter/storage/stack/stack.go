@@ -336,7 +336,6 @@ func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ran
 	return ranke.DefaultCopyContents(ctx, s, src, refs, opts...)
 }
 
-
 // GetClaimHeights resolves heights through the stack's own GetClaims — the one
 // place the layer traversal (fall-through + read-fill) lives — then reads each
 // committed height. Delegating to DefaultGetClaimHeights keeps that traversal

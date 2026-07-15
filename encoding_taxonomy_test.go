@@ -71,6 +71,24 @@ func TestEncodingSubtypeAliases(t *testing.T) {
 		EncodingSubtype("rfc822")) // open vocabulary — not aliased
 }
 
+// TestIsTextEncoding covers the text-vs-binary media-type split used to decide
+// whether content is legible enough to inline (e.g. in the neo4j graph).
+func TestIsTextEncoding(t *testing.T) {
+	for _, enc := range []string{
+		EncodingPlain, EncodingHTML, EncodingCSS, EncodingJavaScript, EncodingMarkdown,
+		EncodingJSON, EncodingJSONLD, EncodingXML, EncodingXHTML, EncodingWebManifest,
+		EncodingMessage("rfc822"), EncodingApplication("vnd.custom+xml"),
+	} {
+		require.Truef(t, IsTextEncoding(enc), "%q is a text media type", enc)
+	}
+	for _, enc := range []string{
+		"", EncodingPNG, EncodingJPEG, EncodingMP4, EncodingMP3, EncodingPDF,
+		EncodingZIP, EncodingOctetStream, EncodingWOFF2,
+	} {
+		require.Falsef(t, IsTextEncoding(enc), "%q is not a text media type", enc)
+	}
+}
+
 // TestEncodingSubtypeAliasesAreSingleCharacter: subtype aliases are one
 // character (§5.1), like the class aliases — a "."-prefixed single char is the
 // most compact wire form, and it caps the table at the 62 [a-zA-Z0-9] codes.
