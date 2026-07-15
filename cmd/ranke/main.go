@@ -25,7 +25,7 @@ import (
 	"strings"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
+	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 )
 
@@ -74,16 +74,28 @@ func exit(err error) {
 	}
 }
 
-func openArchive(ctx context.Context, dir string) (ranke.Archive, error) {
+// openArchive opens the bundle at dir: the fs Universe under universe/ plus
+// the head-id timeline in branches/B_h, resolved to an Archive at the latest
+// head. It returns the Universe too, since closure walks (validate) open a
+// graph over it directly.
+func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive, error) {
 	u, err := fs.New(filepath.Join(dir, "universe"))
 	if err != nil {
-		return nil, fmt.Errorf("open universe in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("open universe in %s: %w", dir, err)
 	}
-	bth, err := file.New(filepath.Join(dir, "branches", "B_h"))
+	hist, err := histfile.New(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
-		return nil, fmt.Errorf("open branch table head in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("open head timeline in %s: %w", dir, err)
 	}
-	return ranke.NewArchive(ctx, u, bth)
+	head, err := hist.Latest(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read latest head in %s: %w", dir, err)
+	}
+	arc, err := ranke.NewArchive(ctx, u, head.GetId())
+	if err != nil {
+		return nil, nil, err
+	}
+	return u, arc, nil
 }
 
 // --- info ---
@@ -92,15 +104,18 @@ func cmdInfo(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("info: usage: ranke info <dir>")
 	}
-	a, err := openArchive(ctx, args[0])
+	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	branches := a.Branches(ctx)
+	branches, err := a.GetBranches(ctx)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("archive %s\n", args[0])
 	fmt.Printf("  branches: %d\n", len(branches))
 	for _, b := range branches {
-		fmt.Printf("    %s → %s\n", b.Name(), shortId(b.Latest().Head()))
+		fmt.Printf("    %s → %s\n", b.Name(), shortId(b.Head()))
 	}
 	return nil
 }
@@ -111,22 +126,20 @@ func cmdBranches(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("branches: usage: ranke branches <dir>")
 	}
-	a, err := openArchive(ctx, args[0])
+	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	bs := a.Branches(ctx)
+	bs, err := a.GetBranches(ctx)
+	if err != nil {
+		return err
+	}
 	if len(bs) == 0 {
 		fmt.Println("(no branches)")
 		return nil
 	}
 	for _, b := range bs {
-		fmt.Printf("%-20s %s\n", b.Name(), b.Latest().Head().String())
-		if prov := b.Provenance(); len(prov) > 0 {
-			for _, e := range prov {
-				fmt.Printf("  ← %s  (%s)\n", shortId(e.Head()), e.Time().Format("2006-01-02T15:04:05Z"))
-			}
-		}
+		fmt.Printf("%-20s %s\n", b.Name(), b.Head().String())
 	}
 	return nil
 }
@@ -168,7 +181,7 @@ func showFile(path string) error {
 }
 
 func showInArchive(ctx context.Context, dir, idStr string) error {
-	a, err := openArchive(ctx, dir)
+	_, a, err := openArchive(ctx, dir)
 	if err != nil {
 		return err
 	}
@@ -190,45 +203,38 @@ func cmdValidate(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("validate: usage: ranke validate <dir>")
 	}
-	a, err := openArchive(ctx, args[0])
+	u, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
 	}
-	branches := a.Branches(ctx)
+	branches, err := a.GetBranches(ctx)
+	if err != nil {
+		return err
+	}
 	if len(branches) == 0 {
 		return fmt.Errorf("validate: archive has no branches")
 	}
 	totalFailed := 0
 	for _, b := range branches {
-		fmt.Printf("branch %s → %s\n", b.Name(), b.Latest().Head().String())
-		head, err := a.GetClaim(ctx, b.Latest().Head())
+		fmt.Printf("branch %s → %s\n", b.Name(), b.Head().String())
+		g, err := ranke.NewGraphFromClosure(ctx, b.Head(), u)
 		if err != nil {
-			fmt.Printf("  ✗ load head: %v\n", err)
+			fmt.Printf("  ✗ open closure: %v\n", err)
 			totalFailed++
 			continue
 		}
-		g, err := head.Graph(ctx)
-		if err != nil {
-			fmt.Printf("  ✗ materialize: %v\n", err)
-			totalFailed++
-			continue
+		run := g.Verify()
+		run.Wait()
+		failByID := map[string]error{}
+		for _, f := range run.Failures() {
+			failByID[f.ID.String()] = f.Err
 		}
-		count, failed := 0, 0
-		err = g.Validate(func(c ranke.Claim, depth int, e error) {
-			count++
-			indent := strings.Repeat("  ", depth+1)
-			mark := "✓"
-			if e != nil {
-				mark = "✗"
-				failed++
-			}
-			fmt.Printf("%s%s %s  %s\n", indent, mark, c.Node().Type(), shortId(c.ID()))
-			if e != nil {
-				fmt.Printf("%s     %v\n", indent, e)
-			}
-		})
-		fmt.Printf("  %d/%d claims valid\n", count-failed, count)
-		if err != nil {
+		count := printClosure(ctx, g, failByID)
+		fmt.Printf("  %d/%d claims valid\n", count-len(failByID), count)
+		if run.Err() != nil {
+			fmt.Printf("  ✗ walk: %v\n", run.Err())
+			totalFailed++
+		} else if len(failByID) > 0 {
 			totalFailed++
 		}
 	}
@@ -236,6 +242,48 @@ func cmdValidate(ctx context.Context, args []string) error {
 		return fmt.Errorf("validate: %d branch(es) failed", totalFailed)
 	}
 	return nil
+}
+
+// printClosure walks the closure from its open heads breadth-first, printing
+// each claim once (✓, or ✗ with its error when it is in failByID) indented by
+// depth, and returns the claim count. The per-claim visitor Graph.Validate
+// once offered is gone; a closure walk plus Verify's failure set rebuilds the
+// same tree.
+func printClosure(ctx context.Context, g ranke.Graph, failByID map[string]error) int {
+	type node struct {
+		id    ranke.Id
+		depth int
+	}
+	seen := map[string]bool{}
+	queue := make([]node, 0)
+	for _, h := range g.Heads() {
+		queue = append(queue, node{h, 0})
+	}
+	count := 0
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		key := n.id.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		c, err := g.GetClaim(ctx, n.id)
+		if err != nil {
+			continue
+		}
+		count++
+		indent := strings.Repeat("  ", n.depth+1)
+		if e, bad := failByID[key]; bad {
+			fmt.Printf("%s✗ %s  %s\n%s     %v\n", indent, c.Node().Type(), shortId(n.id), indent, e)
+		} else {
+			fmt.Printf("%s✓ %s  %s\n", indent, c.Node().Type(), shortId(n.id))
+		}
+		for _, e := range c.Edges() {
+			queue = append(queue, node{e.Reference(), n.depth + 1})
+		}
+	}
+	return count
 }
 
 // --- helpers ---
@@ -257,9 +305,12 @@ func printClaim(c ranke.Claim) {
 	fmt.Printf("type:         %s\n", n.Type())
 	fmt.Printf("encoding:     %s\n", n.Encoding())
 	fmt.Printf("created_at:   %s\n", n.CreatedAt().Format("2006-01-02T15:04:05.000000000Z"))
-	if n.ContentHash() != nil {
-		fmt.Printf("content_hash: %s\n", n.ContentHash().String())
-		if b, err := n.Content(); err == nil && b != nil {
+	if h := n.GetContentHash(); h != nil {
+		fmt.Printf("content_hash: %s\n", h.String())
+		fmt.Printf("content_size: %d\n", n.GetContentSize())
+		if n.IsContentExternal() {
+			fmt.Printf("content:      (external, %d bytes)\n", n.GetContentSize())
+		} else if b, err := n.GetInlineContent(); err == nil && b != nil {
 			fmt.Printf("content:      %s\n", previewBytes(b))
 		}
 	}
@@ -273,7 +324,7 @@ func printClaim(c ranke.Claim) {
 			fmt.Printf("  [%d] %s\n", i, e.Type())
 			fmt.Printf("      reference: %s\n", e.ID().String())
 			fmt.Printf("      → %s\n", e.Reference().String())
-			if eb := e.Content(); len(eb) > 0 {
+			if eb, err := e.GetInlineContent(); err == nil && len(eb) > 0 {
 				fmt.Printf("      content:   %s\n", previewBytes(eb))
 			}
 			if e.RelationDirection() != 0 {
