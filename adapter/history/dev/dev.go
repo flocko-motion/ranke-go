@@ -35,13 +35,13 @@ func New(clock Clock) *History {
 	return &History{clock: clock}
 }
 
-// Append records id as the new head at the next height, stamping it with the
-// clock (which it advances by one tick).
-func (h *History) Append(_ context.Context, id ranke.Id) (ranke.HistoryItem, error) {
+// Append records id as the new head at the given height and revision, stamping
+// the append time from the clock (which it advances by one tick).
+func (h *History) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
 		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: nil id")
 	}
-	item := ranke.NewHistoryItem(id, len(h.items), h.clock.Tick())
+	item := ranke.NewHistoryItem(id, revision, height, h.clock.Tick())
 	h.items = append(h.items, item)
 	return item, nil
 }
@@ -54,20 +54,20 @@ func (h *History) Latest(_ context.Context) (ranke.HistoryItem, error) {
 	return h.items[len(h.items)-1], nil
 }
 
-// Get returns kᵢ; an out-of-range i is an error.
-func (h *History) Get(_ context.Context, i int) (ranke.HistoryItem, error) {
-	if i < 0 || i >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: index %d out of range [0,%d)", i, len(h.items))
+// GetAtRevision returns kᵢ; an out-of-range revision is an error.
+func (h *History) GetAtRevision(_ context.Context, revision int) (ranke.HistoryItem, error) {
+	if revision < 0 || revision >= len(h.items) {
+		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: revision %d out of range [0,%d)", revision, len(h.items))
 	}
-	return h.items[i], nil
+	return h.items[revision], nil
 }
 
-// GetBulk returns the half-open range [from, to).
-func (h *History) GetBulk(_ context.Context, from, to int) ([]ranke.HistoryItem, error) {
-	if from < 0 || to > len(h.items) || from > to {
-		return nil, fmt.Errorf("adapter/history/dev: range [%d,%d) out of bounds [0,%d)", from, to, len(h.items))
+// GetBulk returns the half-open revision range [fromRevision, toExcludingRevision).
+func (h *History) GetBulk(_ context.Context, fromRevision, toExcludingRevision int) ([]ranke.HistoryItem, error) {
+	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
+		return nil, fmt.Errorf("adapter/history/dev: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
 	}
-	return append([]ranke.HistoryItem(nil), h.items[from:to]...), nil
+	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }
 
 // Len returns the number of entries (n+1).

@@ -26,13 +26,13 @@ type history struct {
 	items []ranke.HistoryItem
 }
 
-func (h *history) Append(_ context.Context, id ranke.Id) (ranke.HistoryItem, error) {
+func (h *history) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
 		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/mem: nil id")
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	item := ranke.NewHistoryItem(id, len(h.items), time.Now().UTC())
+	item := ranke.NewHistoryItem(id, revision, height, time.Now().UTC())
 	h.items = append(h.items, item)
 	return item, nil
 }
@@ -46,23 +46,23 @@ func (h *history) Latest(_ context.Context) (ranke.HistoryItem, error) {
 	return h.items[len(h.items)-1], nil
 }
 
-func (h *history) Get(_ context.Context, i int) (ranke.HistoryItem, error) {
+func (h *history) GetAtRevision(_ context.Context, revision int) (ranke.HistoryItem, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if i < 0 || i >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/mem: index %d out of range [0,%d)", i, len(h.items))
+	if revision < 0 || revision >= len(h.items) {
+		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/mem: revision %d out of range [0,%d)", revision, len(h.items))
 	}
-	return h.items[i], nil
+	return h.items[revision], nil
 }
 
-// GetBulk returns the half-open range [from, to).
-func (h *history) GetBulk(_ context.Context, from, to int) ([]ranke.HistoryItem, error) {
+// GetBulk returns the half-open revision range [fromRevision, toExcludingRevision).
+func (h *history) GetBulk(_ context.Context, fromRevision, toExcludingRevision int) ([]ranke.HistoryItem, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if from < 0 || to > len(h.items) || from > to {
-		return nil, fmt.Errorf("adapter/history/mem: range [%d,%d) out of bounds [0,%d)", from, to, len(h.items))
+	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
+		return nil, fmt.Errorf("adapter/history/mem: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
 	}
-	return append([]ranke.HistoryItem(nil), h.items[from:to]...), nil
+	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }
 
 func (h *history) Len(_ context.Context) (int, error) {

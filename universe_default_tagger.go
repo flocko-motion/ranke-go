@@ -1,6 +1,7 @@
 // package: ranke / tagger
 // type:    logic
-// job:     TagArchive — descend an archive's branch-table spine and stamp every branch's closure with each member claim's .Height()
+// job:     TagArchive — descend an archive's branch-table spine and stamp every
+// branch's closure with each member claim's .node.Height()
 // limits:  optional (gated by Capabilities.Tags); tags are read off the claims (GetClaims injects them) and written through the Universe's bulk SetClaimsTags — this file holds no backend I/O of its own
 package ranke
 

@@ -4,9 +4,9 @@
 // limits:  single-node only (-> a db timeline for distributed); stores ids only (-> ranke)
 //
 // Package file is a filesystem head-id timeline: it persists the sequence
-// k₀…kₙ as a text file, one line per entry ("<id> <rfc3339nano>"), the
-// line's position being its height. The timeline is loaded into memory at
-// New and the whole file is rewritten atomically (temp + rename) on each
+// k₀…kₙ as a text file, one line per entry ("<id> <height> <rfc3339nano>"),
+// the line's position being its revision. The timeline is loaded into memory
+// at New and the whole file is rewritten atomically (temp + rename) on each
 // Append, so a reader never sees a partial write.
 package file
 
@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,13 +46,13 @@ type history struct {
 	items []ranke.HistoryItem
 }
 
-func (h *history) Append(_ context.Context, id ranke.Id) (ranke.HistoryItem, error) {
+func (h *history) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
 		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/file: nil id")
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	item := ranke.NewHistoryItem(id, len(h.items), time.Now().UTC())
+	item := ranke.NewHistoryItem(id, revision, height, time.Now().UTC())
 	next := append(append([]ranke.HistoryItem(nil), h.items...), item)
 	if err := h.persist(next); err != nil {
 		return ranke.HistoryItem{}, err
@@ -69,23 +70,23 @@ func (h *history) Latest(_ context.Context) (ranke.HistoryItem, error) {
 	return h.items[len(h.items)-1], nil
 }
 
-func (h *history) Get(_ context.Context, i int) (ranke.HistoryItem, error) {
+func (h *history) GetAtRevision(_ context.Context, revision int) (ranke.HistoryItem, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if i < 0 || i >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/file: index %d out of range [0,%d)", i, len(h.items))
+	if revision < 0 || revision >= len(h.items) {
+		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/file: revision %d out of range [0,%d)", revision, len(h.items))
 	}
-	return h.items[i], nil
+	return h.items[revision], nil
 }
 
-// GetBulk returns the half-open range [from, to).
-func (h *history) GetBulk(_ context.Context, from, to int) ([]ranke.HistoryItem, error) {
+// GetBulk returns the half-open revision range [fromRevision, toExcludingRevision).
+func (h *history) GetBulk(_ context.Context, fromRevision, toExcludingRevision int) ([]ranke.HistoryItem, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if from < 0 || to > len(h.items) || from > to {
-		return nil, fmt.Errorf("adapter/history/file: range [%d,%d) out of bounds [0,%d)", from, to, len(h.items))
+	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
+		return nil, fmt.Errorf("adapter/history/file: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
 	}
-	return append([]ranke.HistoryItem(nil), h.items[from:to]...), nil
+	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }
 
 func (h *history) Len(_ context.Context) (int, error) {
@@ -112,7 +113,11 @@ func (h *history) load() error {
 		if line == "" {
 			continue
 		}
-		idStr, tsStr, ok := strings.Cut(line, " ")
+		idStr, rest, ok := strings.Cut(line, " ")
+		if !ok {
+			return fmt.Errorf("adapter/history/file: malformed line %d: %q", len(items), line)
+		}
+		heightStr, tsStr, ok := strings.Cut(rest, " ")
 		if !ok {
 			return fmt.Errorf("adapter/history/file: malformed line %d: %q", len(items), line)
 		}
@@ -120,13 +125,17 @@ func (h *history) load() error {
 		if err != nil {
 			return fmt.Errorf("adapter/history/file: parse id on line %d: %w", len(items), err)
 		}
+		height, err := strconv.Atoi(heightStr)
+		if err != nil {
+			return fmt.Errorf("adapter/history/file: parse height on line %d: %w", len(items), err)
+		}
 		ts, err := time.Parse(time.RFC3339Nano, tsStr)
 		if err != nil {
 			return fmt.Errorf("adapter/history/file: parse time on line %d: %w", len(items), err)
 		}
-		// Height is the entry's position in the file, which equals the
-		// height Append assigned (entries are written in order).
-		items = append(items, ranke.NewHistoryItem(id, len(items), ts))
+		// Revision is the entry's position in the file (entries are written in
+		// order); height is stored per line.
+		items = append(items, ranke.NewHistoryItem(id, len(items), height, ts))
 	}
 	h.items = items
 	return nil
@@ -137,6 +146,8 @@ func (h *history) persist(items []ranke.HistoryItem) error {
 	var b strings.Builder
 	for _, it := range items {
 		b.WriteString(it.GetId().String())
+		b.WriteByte(' ')
+		b.WriteString(strconv.Itoa(it.GetHeight()))
 		b.WriteByte(' ')
 		b.WriteString(it.GetTimestamp().UTC().Format(time.RFC3339Nano))
 		b.WriteByte('\n')
