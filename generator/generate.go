@@ -93,6 +93,7 @@ type builder struct {
 
 	contribs  []ranke.Contributor
 	srcClaims []ranke.Claim // sources available as derivation inputs
+	entClaims []ranke.Claim // entity claims, kept as objects so relations can read their heights
 	batch     []ranke.Claim
 	manifest  Manifest
 	err       error
@@ -174,7 +175,7 @@ func (b *builder) inlineSource(who ranke.Contributor, i, n int, oversized bool) 
 		big := fill(b.spec.Seed, "field", i, b.spec.OversizedFieldBytes)
 		cb = cb.WithField("note", string(big))
 	}
-	return b.add(cb.Sign())
+	return b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
 }
 
 // externalSource builds a source/* claim whose content lives in the Universe
@@ -193,6 +194,7 @@ func (b *builder) externalSource(who ranke.Contributor, i int) ranke.Claim {
 	c := b.add(ranke.NewClaim(ranke.TypeSource("blob"), who).
 		WithExternalContent(hash, uint64(len(blob))).
 		WithCreatedAt(b.clock.Tick()).
+		WithHeight(ranke.HeightOf(who)).
 		Sign())
 	if c != nil {
 		b.manifest.ExternalBlobs = append(b.manifest.ExternalBlobs, c.ID())
@@ -209,6 +211,7 @@ func (b *builder) diffChain() {
 	base := b.add(ranke.NewClaim(ranke.TypeSource("note"), b.who(0)).
 		WithInlineContent(fill(b.spec.Seed, "diff", 0, b.spec.TinyBlobBytes)).
 		WithCreatedAt(b.clock.Tick()).
+		WithHeight(ranke.HeightOf(b.who(0))).
 		Sign())
 	prev := base
 	for r := 1; r <= b.spec.DiffChainLen && prev != nil && b.err == nil; r++ {
@@ -216,6 +219,7 @@ func (b *builder) diffChain() {
 			WithDiff(prev.ID()).
 			WithField("rev", strconv.Itoa(r)).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.who(r), prev)).
 			Sign())
 	}
 	if prev != nil {
@@ -233,6 +237,7 @@ func (b *builder) derivations() {
 			degree = min(b.spec.MaxEdgeDegree, len(b.srcClaims))
 		}
 		edges := make([]ranke.Edge, 0, degree)
+		refs := []ranke.Claim{b.who(i)}
 		for d := 0; d < degree; d++ {
 			src := b.srcClaims[(i+d)%len(b.srcClaims)]
 			e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: src.ID(), Type: ranke.TypeDerivation("source")})
@@ -241,11 +246,13 @@ func (b *builder) derivations() {
 				return
 			}
 			edges = append(edges, e)
+			refs = append(refs, src)
 		}
 		c := b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(i)).
 			WithInlineContent(fill(b.spec.Seed, "deriv", i, b.spec.TinyBlobBytes)).
 			WithEdges(edges...).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(refs...)).
 			Sign())
 		if c != nil {
 			b.manifest.Derivations = append(b.manifest.Derivations, c.ID())
@@ -270,9 +277,11 @@ func (b *builder) entities() {
 			WithInlineContent(fill(b.spec.Seed, "ent", i, b.spec.TinyBlobBytes)).
 			WithEdges(de).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.who(i), src)).
 			Sign())
 		if c != nil {
 			b.manifest.Entities = append(b.manifest.Entities, c.ID())
+			b.entClaims = append(b.entClaims, c)
 		}
 	}
 }
@@ -286,6 +295,8 @@ func (b *builder) relations() {
 		return
 	}
 	for i := 0; i < b.spec.Relations && b.err == nil; i++ {
+		fromClaim := b.entClaims[(2*i)%len(b.entClaims)]
+		toClaim := b.entClaims[(2*i+1)%len(b.entClaims)]
 		from := ents[(2*i)%len(ents)]
 		to := ents[(2*i+1)%len(ents)]
 		src := b.srcClaims[i%len(b.srcClaims)]
@@ -299,6 +310,7 @@ func (b *builder) relations() {
 		c := b.add(ranke.NewClaim(ranke.TypeRelation("knows"), b.who(i)).
 			WithEdges(de, fromE, toE).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.who(i), src, fromClaim, toClaim)).
 			Sign())
 		if c != nil {
 			b.manifest.Relations = append(b.manifest.Relations, c.ID())
@@ -329,6 +341,7 @@ func (b *builder) expiries() {
 			WithEdges(e).
 			WithField("pubkey_expires_after", expiresAt).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.contribs[0], target)).
 			Sign())
 		if c != nil {
 			b.manifest.Expiries = append(b.manifest.Expiries, c.ID())
@@ -353,6 +366,7 @@ func (b *builder) deletes() {
 		c := b.add(ranke.NewClaim("contribution/delete", b.contribs[0]).
 			WithEdges(e).
 			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.contribs[0], target)).
 			Sign())
 		if c != nil {
 			b.manifest.Deletes = append(b.manifest.Deletes, c.ID())

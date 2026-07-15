@@ -124,6 +124,29 @@ func isTypedNil(i any) bool {
 	return false
 }
 
+// HeightOf returns the generation number a new claim referencing refs must
+// carry: 1 + max(refs' heights), or 0 when refs is empty (an initial node).
+// It is the trivial reference computation for ClaimBuilder.Height /
+// WithHeight — callers must pass every claim the new one references,
+// including its contributor and (for a diff) its predecessor, since those
+// edges count toward height too. Tooling at scale caches id→height instead of
+// re-walking; this is the uncached, in-memory equivalent.
+func HeightOf(refs ...Claim) uint64 {
+	var max uint64
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		if h := r.Node().Height(); h > max {
+			max = h
+		}
+	}
+	if len(refs) == 0 {
+		return 0
+	}
+	return max + 1
+}
+
 // requiresProvenance reports whether claims of this class need at least
 // one derivation/* edge (§3.5).
 func requiresProvenance(c NodeClass) bool {

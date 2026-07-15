@@ -7,6 +7,7 @@ package ranke
 import (
 	"context"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -265,6 +266,9 @@ func verifyClaim(ctx context.Context, c Claim, cfg *verifyConfig, u Universe) er
 	if err := c.verifyID(pubkey); err != nil {
 		return wrapDetail(errVerify, "§5.7", err)
 	}
+	if err := verifyHeight(ctx, c, u); err != nil {
+		return wrapDetail(errVerify, "§4.1 height", err)
+	}
 	// Content integrity: node, then each edge.
 	if err := verifyContentRef(ctx, c.Node(), cfg, u); err != nil {
 		return wrapDetail(errVerify, "node content", err)
@@ -291,6 +295,39 @@ func (c *claim) verifyID(pubkey []byte) error {
 		return wrapDetail(errVerify, "hash", err)
 	}
 	return verifySignature(pubkey, recomputed.raw, idBytes(c.node.id))
+}
+
+// verifyHeight re-derives the claim's generation number from its committed
+// references and enforces the §4.1 invariant: height == 1 + max(reference
+// heights), and == 0 for an initial node (no edges). Because the closure walk
+// verifies every claim, this single-level check at each node transitively
+// proves the recursive property over the whole graph — and rejects any height
+// a builder committed that does not match the structure. It re-derives, never
+// trusting the stored value it is checking.
+func verifyHeight(ctx context.Context, c Claim, u Universe) error {
+	edges := c.Edges()
+	var want uint64
+	if len(edges) > 0 {
+		ids := make([]Id, len(edges))
+		for i, e := range edges {
+			ids[i] = e.Reference()
+		}
+		heights, err := u.GetClaimHeights(ctx, ids)
+		if err != nil {
+			return wrapDetail(errVerify, "resolve reference heights", err)
+		}
+		var max uint64
+		for _, h := range heights {
+			if h > max {
+				max = h
+			}
+		}
+		want = max + 1
+	}
+	if got := c.Node().Height(); got != want {
+		return withDetail(errHeightMismatch, "got "+strconv.FormatUint(got, 10)+", want "+strconv.FormatUint(want, 10))
+	}
+	return nil
 }
 
 // resolveClaimPubkey returns the pubkey whose private key signed this claim's

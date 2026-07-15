@@ -142,7 +142,7 @@ func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.
 	// successive adds. The folding head is added through the graph (one write).
 	newMain := batchHead
 	if s.mainHead != nil {
-		hc, err := s.consolidateHeads(s.mainHead, batchHead)
+		hc, err := s.consolidateHeads(ctx, s.mainHead, batchHead)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (s *Sequencer) consolidateGraph(ctx context.Context, g ranke.Graph) (ranke.
 // consolidateHeads builds a contribution/head claim wrapping the given heads —
 // the same construction Graph.Consolidate performs, but over heads that live
 // in 𝒰 rather than in one in-memory graph.
-func (s *Sequencer) consolidateHeads(heads ...ranke.Id) (ranke.Claim, error) {
+func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ranke.Claim, error) {
 	edges := make([]ranke.Edge, 0, len(heads))
 	for _, h := range heads {
 		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: h, Type: ranke.EdgeTypeHead})
@@ -191,9 +191,12 @@ func (s *Sequencer) consolidateHeads(heads ...ranke.Id) (ranke.Claim, error) {
 		}
 		edges = append(edges, e)
 	}
+	// The heads and the self contributor all live in 𝒰, so WithAutoHeight
+	// resolves the new head's height (§4.1) from their committed heights.
 	return ranke.NewClaim(ranke.NodeHead, s.self).
 		WithEdges(edges...).
 		WithCreatedAt(s.clock.Tick()).
+		WithAutoHeight(ctx, s.u).
 		Sign()
 }
 
@@ -215,6 +218,9 @@ func (s *Sequencer) mintBranchTable(ctx context.Context, mainHead ranke.Id) (ran
 		}
 		b = b.WithEdges(e)
 	}
+	// The self contributor and any branch head are in 𝒰; resolve height
+	// from them (§4.1).
+	b = b.WithAutoHeight(ctx, s.u)
 	table, err := b.Sign()
 	if err != nil {
 		return nil, fmt.Errorf("dev.Sequencer: mint branch table: %w", err)

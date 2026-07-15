@@ -46,6 +46,7 @@ func TestVerifySignedGraph(t *testing.T) {
 	g := newGraph(t, alice)
 	src, err := NewClaim(TypeSource("email"), alice).
 		WithInlineContent([]byte("From: alice\r\n\r\nhi")).
+		WithHeight(HeightOf(alice)).
 		Sign(alicePriv)
 	require.NoError(t, err)
 	require.NoError(t, g.AddClaims(context.Background(), src))
@@ -156,6 +157,7 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 	em, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("recent")).
 		WithCreatedAt(recent).
+		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)
 	require.NoError(t, g.AddClaims(context.Background(), em))
@@ -233,9 +235,10 @@ func TestVerifyExternalContentToggle(t *testing.T) {
 	require.NoError(t, err)
 	ext, err := NewClaim(TypeSource("blob"), root).
 		WithExternalContent(hash, uint64(len(realBlob))).
+		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)
-	bth := branchTable(t, root, branchEdge(t, "main", ext.ID()))
+	bth := branchTable(t, root, []Claim{ext}, branchEdge(t, "main", ext.ID()))
 	putClaims(t, u, root, ext, bth)
 
 	// Store a CORRUPT blob under the hash — same length, one byte flipped.
@@ -268,7 +271,7 @@ func TestVerifyBranch(t *testing.T) {
 	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
-	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
 	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
@@ -281,4 +284,33 @@ func TestVerifyBranch(t *testing.T) {
 	run.Wait()
 	require.NoError(t, run.Err())
 	require.Empty(t, run.Failures(), "the branch subgraph verifies from its head")
+}
+
+// --- height invariant (§4.1) -------------------------------------------
+
+// TestVerifyRejectsWrongHeight: the verifier re-derives height == 1 + max(refs)
+// and rejects a claim whose stored height disagrees — even though its id is
+// internally consistent (Sign accepts any nonzero height on a referencing
+// claim). The gate lives in the verifier, not the builder.
+func TestVerifyRejectsWrongHeight(t *testing.T) {
+	root := contributor(t)
+	g := newGraph(t, root)
+	bad, err := NewClaim(TypeSource("note"), root).
+		WithInlineContent([]byte("body")).
+		WithHeight(99). // correct is 1 — the only reference is the height-0 contributor
+		Sign()
+	require.NoError(t, err, "Sign does not itself check height against refs")
+	require.NoError(t, g.AddClaims(context.Background(), bad))
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	var found bool
+	for _, f := range run.Failures() {
+		if f.ID.Equal(bad.ID()) {
+			require.ErrorIs(t, f.Err, errHeightMismatch)
+			found = true
+		}
+	}
+	require.True(t, found, "the wrong-height claim is reported")
 }

@@ -103,6 +103,16 @@ type Universe interface {
 	// DefaultGetFromClosure.
 	GetFromClosure(ctx context.Context, heads []Id, id Id) (Claim, error)
 
+	// GetClaimHeights returns the committed heights (§4.1) of the claims at
+	// ids, positionally. Bulk like the other reads so a backend can serve
+	// many from one cache sweep or one batched query. Height is the hot field
+	// for caching and scoping: computing it from scratch over a large closure
+	// is expensive, so it is fixed at creation and read back cheaply here. A
+	// byte-store backend delegates to DefaultGetClaimHeights (load + read the
+	// field); a backend that maintains an id→height cache (HeightCache) answers
+	// from it, deserialising only the misses.
+	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
+
 	// CopyClaims copies the claim records at ids from src into the
 	// receiver. Two orthogonal axes tune what comes along, both opt-in:
 	//
@@ -223,6 +233,15 @@ func HasClaim(ctx context.Context, u Universe, id Id) (bool, error) {
 		return false, err
 	}
 	return got[0], nil
+}
+
+// GetClaimHeight is the single-item form of Universe.GetClaimHeights.
+func GetClaimHeight(ctx context.Context, u Universe, id Id) (uint64, error) {
+	hs, err := u.GetClaimHeights(ctx, []Id{id})
+	if err != nil {
+		return 0, err
+	}
+	return hs[0], nil
 }
 
 // GetContent is the single-item form of Universe.GetContents.

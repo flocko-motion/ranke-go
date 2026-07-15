@@ -40,6 +40,8 @@ const (
 	FieldContentSizeAlias = "s"
 	FieldContentHash      = "content_hash"
 	FieldContentHashAlias = "h"
+	FieldHeight           = "height"
+	FieldHeightAlias      = "H"
 	// FieldEdgesDiffOmit, on a diff claim, lists the ids of inherited edges
 	// to drop when materialising the diff, one id per line (newline-
 	// separated — ids never contain a newline). This is the "omit" half of
@@ -171,6 +173,8 @@ func fieldNameToAlias(n Field) Field {
 		return FieldContentSizeAlias
 	case FieldContentHash:
 		return FieldContentHashAlias
+	case FieldHeight:
+		return FieldHeightAlias
 	default:
 		return n
 	}
@@ -190,6 +194,8 @@ func fieldNameFromAlias(c Field) Field {
 		return FieldContentSize
 	case FieldContentHashAlias:
 		return FieldContentHash
+	case FieldHeightAlias:
+		return FieldHeight
 	default:
 		return c
 	}

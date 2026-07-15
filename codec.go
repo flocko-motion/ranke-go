@@ -57,6 +57,11 @@ type encNode struct {
 	// can know the size without loading the bytes. Emitted iff
 	// ContentHash is present (see buildEncNode).
 	ContentSize uint64 `cbor:"11,keyasint,omitempty"`
+	// Height is the claim's generation number (§4.1): 0 for an initial
+	// node, else 1 + max(reference heights). omitempty drops height 0, so
+	// an initial node encodes no height field — height 0 and absent are the
+	// same on decode, matching the semantics (only initial nodes are 0).
+	Height uint64 `cbor:"12,keyasint,omitempty"`
 }
 
 // encEdge is the canonical record of an edge (§4.2), the shape the edge
@@ -152,6 +157,7 @@ func buildEncNode(n *node) (encNode, error) {
 		EncodingClass: aliasToWire(n.encodingClass, encodingClassToAlias),
 		EncodingSub:   n.encodingSub, // encoding subtypes have no aliases yet
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
+		Height:        n.height,
 		Fields:        aliasFieldKeys(n.fields),
 	}
 	if n.contentHash != nil {
@@ -298,6 +304,7 @@ func decodeNode(en encNode) (*node, error) {
 		encodingClass: aliasFromWire(en.EncodingClass, encodingClassFromAlias),
 		encodingSub:   en.EncodingSub,
 		createdAt:     createdAt,
+		height:        en.Height,
 		fields:        unaliasFieldKeys(en.Fields),
 	}
 	if len(en.ContentHash) > 0 {

@@ -42,7 +42,7 @@ func TestClaimTypeParsing(t *testing.T) {
 		"source/", // empty sub
 		"bogus/x", // unknown class
 	} {
-		_, err := NewClaim(typ, alice).WithInlineContent([]byte("x")).Sign()
+		_, err := NewClaim(typ, alice).WithInlineContent([]byte("x")).WithHeight(HeightOf(alice)).Sign()
 		require.Error(t, err, "type %q must be rejected", typ)
 	}
 }
@@ -54,6 +54,7 @@ func TestEncodingRequiresContent(t *testing.T) {
 	_, err := NewClaim(TypeSource("note"), alice).
 		WithEncoding("text/plain").
 		// no content
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.Error(t, err, "encoding without content must be rejected")
 }
@@ -65,14 +66,28 @@ func TestEncodingRequiresContent(t *testing.T) {
 func TestEncodingOptional(t *testing.T) {
 	alice := contributor(t)
 
-	none, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).Sign()
+	none, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 	require.Equal(t, "", none.Node().Encoding(), "no encoding by default")
 
 	typed, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("x")).
 		WithEncoding("text/plain").
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
 	require.Equal(t, "text/plain", typed.Node().Encoding(), "an explicit encoding is kept")
+}
+
+// TestClaimHeightRoundTrip: height is part of the canonical node encoding, so
+// it survives Encode/DecodeClaim (and, being in S(node), the id commits to it).
+func TestClaimHeightRoundTrip(t *testing.T) {
+	alice := contributor(t)
+	src, err := NewClaim(TypeSource("note"), alice).
+		WithInlineContent([]byte("body")).
+		WithHeight(HeightOf(alice)).
+		Sign()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), src.Node().Height())
+	require.Equal(t, uint64(1), roundTrip(t, src).Node().Height(), "height survives the codec")
 }

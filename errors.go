@@ -48,6 +48,9 @@ var (
 	errDiffEdgeDupName          = errors.New("ranke.NewClaim: duplicate edge name in a diff claim")
 	errTwoContributors          = errors.New("ranke.NewClaim: a claim may carry only one contribution/contributor edge")
 	errTwoDiffEdges             = errors.New("ranke.NewClaim: a claim may carry only one contribution/diff edge")
+	errHeightRequired           = errors.New("ranke.NewClaim: a claim with references must declare its height (use WithHeight or WithAutoHeight)")
+	errHeightOnInitial          = errors.New("ranke.NewClaim: an initial node (no references) must have height 0")
+	errHeightWithAuto           = errors.New("ranke.NewClaim: WithHeight and WithAutoHeight are mutually exclusive")
 
 	// --- Graph ---
 	errNilClaim          = errors.New("ranke: nil claim")
@@ -89,6 +92,8 @@ var (
 	errCopyContents          = errors.New("ranke.CopyContents")
 	errVerify                = errors.New("ranke.verify")
 	errContributorUnresolved = errors.New("ranke.verify: contributor claim unresolved")
+	errHeightResolve         = errors.New("ranke.NewClaim: resolve reference height for WithAutoHeight")
+	errHeightMismatch        = errors.New("ranke.verify: claim height ≠ 1 + max(reference heights)")
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errEncodeClaim           = errors.New("ranke: encode claim")
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")

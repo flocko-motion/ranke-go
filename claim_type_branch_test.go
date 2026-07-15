@@ -29,6 +29,7 @@ func revision(t *testing.T, root Contributor, name string) (v1, v2 Claim) {
 	v2, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte(name + " v2")).
 		WithDiff(v1.ID()).
+		WithHeight(HeightOf(root, v1)).
 		Sign()
 	require.NoError(t, err)
 	return v1, v2
@@ -41,7 +42,7 @@ func newBranchFixture(t *testing.T) branchFixture {
 	root := contributor(t)
 	mainV1, mainV2 := revision(t, root, "main")
 	devV1, devV2 := revision(t, root, "dev")
-	bth := branchTable(t, root,
+	bth := branchTable(t, root, []Claim{mainV2, devV2},
 		branchEdge(t, "main", mainV2.ID()),
 		branchEdge(t, "dev", devV2.ID()),
 	)

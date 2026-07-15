@@ -215,6 +215,13 @@ func (p *partition) GetFromClosure(ctx context.Context, heads []ranke.Id, id ran
 	return ranke.DefaultGetFromClosure(ctx, p, heads, id)
 }
 
+// GetClaimHeights resolves heights through the partition's own GetClaims (which
+// routes each id to its shard), then reads each committed height. Delegating to
+// DefaultGetClaimHeights avoids reimplementing the shard routing here.
+func (p *partition) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	return ranke.DefaultGetClaimHeights(ctx, p, ids)
+}
+
 func (p *partition) Capabilities() ranke.Capabilities {
 	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true}
 	for _, s := range p.shards {

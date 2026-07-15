@@ -38,7 +38,10 @@ func contains(t *testing.T, g Graph, id Id) bool {
 
 func srcClaim(t *testing.T, ctr Contributor, body string) Claim {
 	t.Helper()
-	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte(body)).Sign()
+	c, err := NewClaim(TypeSource("note"), ctr).
+		WithInlineContent([]byte(body)).
+		WithHeight(HeightOf(ctr)).
+		Sign()
 	require.NoError(t, err)
 	return c
 }
@@ -48,6 +51,7 @@ func entityClaim(t *testing.T, ctr Contributor, sub, label string, source Claim)
 	c, err := NewClaim(TypeEntity(sub), ctr).
 		WithInlineContent([]byte(label)).
 		WithEdges(mustDerivEdge(t, source)).
+		WithHeight(HeightOf(ctr, source)).
 		Sign()
 	require.NoError(t, err)
 	return c

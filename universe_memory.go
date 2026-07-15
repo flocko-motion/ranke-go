@@ -136,6 +136,27 @@ func (u *memoryUniverse) GetFromClosure(ctx context.Context, heads []Id, id Id) 
 	return DefaultGetFromClosure(ctx, u, heads, id)
 }
 
+// GetClaimHeights reads heights straight from the live claim map — the map is
+// already the memo, so no separate HeightCache is warranted here (unlike a
+// byte store, which would re-decode). Height is the node's own field, so no
+// materialisation is needed.
+func (u *memoryUniverse) GetClaimHeights(_ context.Context, ids []Id) ([]uint64, error) {
+	out := make([]uint64, len(ids))
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	for i, id := range ids {
+		if id == nil {
+			return nil, errNilID
+		}
+		c, ok := u.claims[id.String()]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		out[i] = c.Node().Height()
+	}
+	return out, nil
+}
+
 func (u *memoryUniverse) CopyClaims(ctx context.Context, src Universe, ids []Id, opts ...CopyOption) error {
 	return DefaultCopyClaims(ctx, u, src, ids, opts...)
 }

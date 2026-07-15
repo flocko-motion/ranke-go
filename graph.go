@@ -130,18 +130,29 @@ func (g *graph) Consolidate(ctx context.Context, contributor Contributor, create
 		return GetClaim(ctx, g.u, heads[0])
 	}
 	edges := make([]Edge, 0, len(heads))
+	// refs collects the claims the new head references, for its height
+	// (§4.1): the consolidated open heads plus the contributor. The heads
+	// live in the Universe; the contributor is in hand.
+	refs := make([]Claim, 0, len(heads)+1)
+	refs = append(refs, contributor)
 	for _, h := range heads {
 		e, err := NewEdge(EdgeConfig{Reference: h, Type: EdgeTypeHead})
 		if err != nil {
 			return nil, wrapDetail(errConsolidate, "build head edge", err)
 		}
 		edges = append(edges, e)
+		hc, err := GetClaim(ctx, g.u, h)
+		if err != nil {
+			return nil, wrapDetail(errConsolidate, "load head for height", err)
+		}
+		refs = append(refs, hc)
 	}
 	head, err := ClaimBuilder{
 		Type:        NodeHead,
 		Contributor: contributor,
 		Edges:       edges,
 		CreatedAt:   firstNonZero(createdAt),
+		Height:      HeightOf(refs...),
 	}.Sign()
 	if err != nil {
 		return nil, err

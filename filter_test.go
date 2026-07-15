@@ -62,6 +62,7 @@ func richClaim(t *testing.T) Claim {
 				RelationDirection: RelationTo,
 			}),
 		).
+		WithHeight(HeightOf(root, src, alice, apples)).
 		Sign()
 	require.NoError(t, err)
 	return rel
