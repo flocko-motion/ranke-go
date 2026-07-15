@@ -124,21 +124,6 @@ type Universe interface {
 	// of GetContents for large content. Inherently singular.
 	StreamContent(ctx context.Context, hash Id, size uint64) (io.ReadCloser, error)
 
-	// InClosure reports whether id is in the closure of any of heads — the
-	// heads and every claim reachable from them by following edges. Multiple
-	// heads answer a multi-headed graph's membership in one call. Closure
-	// traversal is engine-dependent (a graph-native backend answers with one
-	// query over all heads; a plain byte store walks the edges from every
-	// head, sharing one visited set), so it lives on the Universe port —
-	// exactly the kind of thing a backend optimises. Byte-store backends
-	// delegate to DefaultInClosure.
-	InClosure(ctx context.Context, heads []Id, id Id) (bool, error)
-	// GetFromClosure returns the claim at id, but only if it is in the
-	// closure of any of heads; ErrNotFound otherwise. Multi-headed like
-	// InClosure. Engine-dependent — byte stores delegate to
-	// DefaultGetFromClosure.
-	GetFromClosure(ctx context.Context, heads []Id, id Id) (Claim, error)
-
 	// GetClaimHeights returns the committed heights (§4.1) of the claims at
 	// ids, positionally. Bulk like the other reads so a backend can serve
 	// many from one cache sweep or one batched query. Height is the hot field

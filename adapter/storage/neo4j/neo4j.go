@@ -452,54 +452,6 @@ func (u *neo4jUniverse) StreamContent(ctx context.Context, hash ranke.Id, size u
 	return ranke.NewVerifyingReader(io.NopCloser(bytes.NewReader(b)), hash, size)
 }
 
-const cypherInClosure = `
-RETURN EXISTS {
-  MATCH (h:` + labelClaim + `)-[:` + relReferences + `*0..]->(t:` + labelClaim + ` {id: $id})
-  WHERE h.id IN $heads
-} AS inClosure`
-
-// InClosure reports whether id is reachable from any head — answered natively
-// by a variable-length path over :REFERENCES, the reason this cache exists.
-func (u *neo4jUniverse) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	if id == nil {
-		return false, errNilID
-	}
-	headStrs := make([]string, 0, len(heads))
-	for _, h := range heads {
-		if h != nil {
-			headStrs = append(headStrs, h.String())
-		}
-	}
-	if len(headStrs) == 0 {
-		return false, nil
-	}
-	res, err := u.query(ctx, cypherInClosure, map[string]any{"heads": headStrs, "id": id.String()})
-	if err != nil {
-		return false, fmt.Errorf("%w: in closure: %w", errQuery, err)
-	}
-	if len(res.Records) == 0 {
-		return false, nil
-	}
-	in, _ := valOf(res.Records[0], "inClosure").(bool)
-	return in, nil
-}
-
-// GetFromClosure returns the claim at id if it is reachable from any head,
-// else ranke.ErrNotFound.
-func (u *neo4jUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	in, err := u.InClosure(ctx, heads, id)
-	if err != nil {
-		return nil, err
-	}
-	if !in {
-		return nil, fmt.Errorf("claim %s: %w", id, ranke.ErrNotFound)
-	}
-	cs, err := u.GetClaims(ctx, []ranke.Id{id})
-	if err != nil {
-		return nil, err
-	}
-	return cs[0], nil
-}
 
 // CopyClaims uses the ADT default walker; a native batched MERGE could
 // override later.

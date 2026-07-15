@@ -198,22 +198,6 @@ func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs [
 	return ranke.DefaultCopyContents(ctx, p, src, refs, opts...)
 }
 
-// Capabilities reports an ability only if every shard has it: a key may land on
-// any shard, so the partition can promise a capability only when all shards can
-// (Enumerate and a GQL query likewise span every shard).
-// InClosure reports whether id is reachable from any of heads. A closure can
-// span shards, so it delegates to the ADT walk — which resolves each
-// referenced claim through the partition's own GetClaims (routing each id to
-// its shard) as the traversal proceeds.
-func (p *partition) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	return ranke.DefaultInClosure(ctx, p, heads, id)
-}
-
-// GetFromClosure returns the claim at id if it is reachable from any of
-// heads, else ErrNotFound. Delegates to the ADT default over the partition.
-func (p *partition) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	return ranke.DefaultGetFromClosure(ctx, p, heads, id)
-}
 
 // GetClaimHeights resolves heights through the partition's own GetClaims (which
 // routes each id to its shard), then reads each committed height. Delegating to

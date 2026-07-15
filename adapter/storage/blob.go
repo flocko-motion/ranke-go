@@ -326,20 +326,6 @@ func (u *blobUniverse) Capabilities() ranke.Capabilities {
 	return c
 }
 
-// InClosure reports whether id is reachable from any of heads. A byte store
-// has no graph engine, so it delegates to the ADT's reference-edge walk
-// (which reads claims back through this Universe); a graph-native backend
-// would override with a query.
-func (u *blobUniverse) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	return ranke.DefaultInClosure(ctx, u, heads, id)
-}
-
-// GetFromClosure returns the claim at id if it is reachable from any of
-// heads, else ErrNotFound. Delegates to the ADT default (membership walk +
-// load).
-func (u *blobUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	return ranke.DefaultGetFromClosure(ctx, u, heads, id)
-}
 
 // GetClaimHeights answers from the id→height cache, decoding only the ids it
 // has not seen (and caching those). With normal get/put traffic warming the

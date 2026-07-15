@@ -192,6 +192,39 @@ func TestQueryOrderHeightAscending(t *testing.T) {
 	}
 }
 
+// TestQueryClosureExcludesUnrelated expresses closure membership as an RQL
+// query (the replacement for the removed InClosure): claims reachable from the
+// head are returned, an unrelated claim is not.
+func TestQueryClosureExcludesUnrelated(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	em := srcClaim(t, root, "seed")
+	ent := entityClaim(t, root, "person", "Alice", em) // → em (derivation), root (contributor)
+	other := srcClaim(t, root, "unrelated")
+	putClaims(t, u, root, em, ent, other)
+
+	got := idSet(drain(t, mustQuery(t, u, Query{Select: Select{Claim: ent.ID()}})))
+	require.True(t, got[ent.ID().String()] && got[em.ID().String()] && got[root.ID().String()],
+		"ent, em, root are reachable from the head")
+	require.False(t, got[other.ID().String()], "an unrelated claim is not in the closure")
+}
+
+// TestQueryClosureGapIsError: a dangling reference (a claim the walk needs but
+// the store lacks) aborts the query — the ADT guarantee that a gap is a real
+// error, not a silent omission (previously covered against DefaultInClosure).
+func TestQueryClosureGapIsError(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	em := srcClaim(t, root, "seed")
+	ent := entityClaim(t, root, "person", "Alice", em)
+	putClaims(t, u, root, ent) // em deliberately NOT stored — a gap under ent
+
+	_, err := u.Query(ctx, Query{Select: Select{Claim: ent.ID()}}, nil)
+	require.Error(t, err, "a missing referenced claim aborts the closure walk")
+}
+
 // mustQuery runs q (no scope) and fails on error.
 func mustQuery(t *testing.T, u Universe, q Query) ResultStream {
 	t.Helper()

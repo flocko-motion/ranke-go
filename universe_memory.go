@@ -217,14 +217,6 @@ func (u *memoryUniverse) StreamContent(ctx context.Context, hash Id, size uint64
 	return io.NopCloser(bytes.NewReader(bs[0])), nil
 }
 
-func (u *memoryUniverse) InClosure(ctx context.Context, heads []Id, id Id) (bool, error) {
-	return DefaultInClosure(ctx, u, heads, id)
-}
-
-func (u *memoryUniverse) GetFromClosure(ctx context.Context, heads []Id, id Id) (Claim, error) {
-	return DefaultGetFromClosure(ctx, u, heads, id)
-}
-
 func (u *memoryUniverse) CopyClaims(ctx context.Context, src Universe, ids []Id, opts ...CopyOption) error {
 	return DefaultCopyClaims(ctx, u, src, ids, opts...)
 }

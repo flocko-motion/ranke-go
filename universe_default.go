@@ -82,64 +82,6 @@ func materializeOne(ctx context.Context, u Universe, c *claim) error {
 	return nil
 }
 
-// DefaultInClosure reports whether id is in the closure of any of heads — the
-// heads and every claim reachable from them by following edge references — by
-// walking the graph. It is the fallback a byte-store Universe uses for
-// InClosure; a graph-native backend answers with a single query instead. All
-// heads seed one walk sharing a single visited set, so extra heads only add
-// starting points, never re-traversal. Claims are loaded in delta form
-// (WithNotDiffMaterialized) since only their edge references are needed, and
-// the delta edges (including a contribution/diff edge) reach the full closure.
-func DefaultInClosure(ctx context.Context, u Universe, heads []Id, id Id) (bool, error) {
-	if id == nil {
-		return false, errNilID
-	}
-	seen := map[string]struct{}{}
-	queue := make([]Id, 0, len(heads))
-	for _, h := range heads {
-		if h != nil {
-			queue = append(queue, h)
-		}
-	}
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		cur := queue[0]
-		queue = queue[1:]
-		k := cur.String()
-		if _, ok := seen[k]; ok {
-			continue
-		}
-		seen[k] = struct{}{}
-		if cur.Equal(id) {
-			return true, nil
-		}
-		c, err := GetClaim(ctx, u, cur, WithNotDiffMaterialized())
-		if err != nil {
-			return false, err // a gap in the closure is a real error here
-		}
-		for _, e := range c.Edges() {
-			queue = append(queue, e.Reference())
-		}
-	}
-	return false, nil
-}
-
-// DefaultGetFromClosure returns the claim at id when it is in the closure of
-// any of heads (materialised, like any read), else ErrNotFound. The fallback
-// a byte-store Universe uses for GetFromClosure.
-func DefaultGetFromClosure(ctx context.Context, u Universe, heads []Id, id Id) (Claim, error) {
-	in, err := DefaultInClosure(ctx, u, heads, id)
-	if err != nil {
-		return nil, err
-	}
-	if !in {
-		return nil, ErrNotFound
-	}
-	return GetClaim(ctx, u, id)
-}
-
 // DefaultGetClaimHeights is the fallback GetClaimHeights for a Universe with no
 // height index: it loads the claims (in delta form — height is the claim's own
 // field, never inherited, so materialising the diff chain is unnecessary) and

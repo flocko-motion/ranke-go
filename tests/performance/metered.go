@@ -178,20 +178,6 @@ func (c *countingReadCloser) Close() error {
 	return c.r.Close()
 }
 
-func (m *metered) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	t := time.Now()
-	b, err := m.inner.InClosure(ctx, heads, id)
-	m.rec("InClosure*", kindRead, 1, time.Since(t))
-	return b, err
-}
-
-func (m *metered) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	t := time.Now()
-	c, err := m.inner.GetFromClosure(ctx, heads, id)
-	m.rec("GetFromClosure*", kindRead, 1, time.Since(t))
-	return c, err
-}
-
 func (m *metered) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
 	t := time.Now()
 	hs, err := m.inner.GetClaimHeights(ctx, ids)

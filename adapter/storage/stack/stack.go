@@ -336,20 +336,6 @@ func (s *stack) CopyContents(ctx context.Context, src ranke.Universe, refs []ran
 	return ranke.DefaultCopyContents(ctx, s, src, refs, opts...)
 }
 
-// InClosure reports whether id is reachable from any of heads. The stack has
-// no graph engine of its own, so it delegates to the ADT walk — which reads
-// claims back through the stack's own GetClaims, falling through the layers
-// like any read. A graph-native layer would let a future override answer
-// natively.
-func (s *stack) InClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (bool, error) {
-	return ranke.DefaultInClosure(ctx, s, heads, id)
-}
-
-// GetFromClosure returns the claim at id if it is reachable from any of
-// heads, else ErrNotFound. Delegates to the ADT default over the stack.
-func (s *stack) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
-	return ranke.DefaultGetFromClosure(ctx, s, heads, id)
-}
 
 // GetClaimHeights resolves heights through the stack's own GetClaims — the one
 // place the layer traversal (fall-through + read-fill) lives — then reads each
