@@ -23,6 +23,7 @@ type ClaimParts struct {
 	Type          string            // "class/sub"
 	Encoding      string            // "class/sub", or "" when there is no content
 	CreatedAt     time.Time         // must retain nanosecond precision to re-encode identically
+	Height        uint64            // §4.1 generation number (0 for an initial node); part of the id-preimage
 	ContentHash   Id                // nil when the claim carries no content
 	ContentSize   uint64            //
 	InlineContent []byte            // optional — omit for external/large content
@@ -60,6 +61,7 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	n := &node{
 		typeClass:   NodeClass(nClass),
 		typeSub:     nSub,
+		height:      parts.Height,
 		contentHash: parts.ContentHash,
 		contentSize: parts.ContentSize,
 		content:     parts.InlineContent,

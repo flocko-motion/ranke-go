@@ -21,21 +21,13 @@ package adaptertest
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
 )
-
-// memHead is a throwaway in-memory BranchTableHead for the copy test. The
-// contract suite depends only on ranke's interfaces — never on a concrete
-// adapter — so it carries its own instead of importing adapter/mem (which
-// would cycle: adapter/mem's test imports this package).
-type memHead struct{ id ranke.Id }
-
-func (h *memHead) Load(context.Context) (ranke.Id, error)    { return h.id, nil }
-func (h *memHead) Save(_ context.Context, id ranke.Id) error { h.id = id; return nil }
-func (h *memHead) Close() error                              { return nil }
 
 // Factory returns a fresh, empty Universe. Run calls it more than once
 // (e.g. a source and a destination for copy tests), so each call must
@@ -63,38 +55,63 @@ func testCapabilities(t *testing.T, newU Factory) {
 	}
 }
 
-// sample builds a tiny signed graph: a contributor op and an email claim
-// em attributed to it. Returned via the public builder API only.
-func sample(t *testing.T) (op ranke.Contributor, em ranke.Claim) {
+// sample builds a tiny signed graph via the public builder: a contributor op,
+// an inline source em attributed to it, and blob — a source whose content is
+// external (returned with its hash + bytes so a copy test can move the
+// content). It touches only ranke's public API, never a concrete adapter.
+func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash ranke.Id, blobBytes []byte) {
 	t.Helper()
-	operator, err := ranke.ClaimBuilder{
-		Type:    ranke.NodeContributor,
-		Content: []byte("op@example.com"),
-	}.Sign()
+	ctx := context.Background()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pubkey, err := ranke.EncodePublicKey(priv.Public())
+	if err != nil {
+		t.Fatalf("encode pubkey: %v", err)
+	}
+	// A contributor's pubkey is its content (§5.7); it carries the key so
+	// claims attributed to it sign automatically.
+	opClaim, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
 	if err != nil {
 		t.Fatalf("contributor: %v", err)
 	}
-	op, err = operator.AsContributor()
+	op, err = opClaim.AsContributor(ctx, nil, priv) // inline pubkey → no Universe needed
 	if err != nil {
 		t.Fatalf("AsContributor: %v", err)
 	}
-	em, err = ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     []byte("From: a\r\nTo: b\r\n\r\nhi\r\n"),
-		Contributor: op,
-	}.Sign()
+
+	// A claim with references must declare its height (topological depth over
+	// its provenance); HeightOf derives it from the referenced claims.
+	em, err = ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("hi")).
+		WithHeight(ranke.HeightOf(op)).
+		Sign()
 	if err != nil {
-		t.Fatalf("email: %v", err)
+		t.Fatalf("inline source: %v", err)
 	}
-	return op, em
+
+	blobBytes = []byte("external blob payload")
+	blobHash, err = ranke.HashContent(blobBytes)
+	if err != nil {
+		t.Fatalf("hash content: %v", err)
+	}
+	blob, err = ranke.NewClaim(ranke.TypeSource("blob"), op).
+		WithExternalContent(blobHash, uint64(len(blobBytes))).
+		WithHeight(ranke.HeightOf(op)).
+		Sign()
+	if err != nil {
+		t.Fatalf("external source: %v", err)
+	}
+	return op, em, blob, blobHash, blobBytes
 }
 
 func testClaimsRoundTrip(t *testing.T, newU Factory) {
 	ctx := context.Background()
 	u := newU(t)
 	defer u.Close()
-	op, em := sample(t)
+	op, em, _, _, _ := sample(t)
 
 	if err := u.PutClaims(ctx, []ranke.Claim{op, em}); err != nil {
 		t.Fatalf("PutClaims: %v", err)
@@ -171,7 +188,7 @@ func testAbsentLookups(t *testing.T, newU Factory) {
 	ctx := context.Background()
 	u := newU(t)
 	defer u.Close()
-	_, em := sample(t)
+	_, em, _, _, _ := sample(t)
 
 	has, err := u.HasClaims(ctx, []ranke.Id{em.ID()})
 	if err != nil {
@@ -194,6 +211,11 @@ func testAbsentLookups(t *testing.T, newU Factory) {
 	}
 }
 
+// testCopyClosure copies a claim's provenance closure (and its content) from
+// one Universe to another and checks the destination ends up with the whole
+// closure — the referenced contributor pulled in, and the external content
+// blob moved. No Sequencer/Archive needed: CopyClaims with WithClosure walks
+// the edges itself.
 func testCopyClosure(t *testing.T, newU Factory) {
 	ctx := context.Background()
 	src := newU(t)
@@ -201,70 +223,53 @@ func testCopyClosure(t *testing.T, newU Factory) {
 	dst := newU(t)
 	defer dst.Close()
 
-	op, em := sample(t)
+	op, em, blob, blobHash, blobBytes := sample(t)
 
-	srcSeq, err := ranke.NewSequencer(ctx, src, &memHead{}, op)
-	if err != nil {
-		t.Fatalf("NewSequencer(src): %v", err)
+	if err := src.PutClaims(ctx, []ranke.Claim{op, em, blob}); err != nil {
+		t.Fatalf("src PutClaims: %v", err)
+	}
+	if err := src.PutContents(ctx, []ranke.ContentBlob{{Hash: blobHash, Content: blobBytes}}); err != nil {
+		t.Fatalf("src PutContents: %v", err)
 	}
 
-	g := ranke.NewGraph(op)
-	if err := g.Add(em); err != nil {
-		t.Fatalf("g.Add: %v", err)
-	}
-	if err := srcSeq.AddGraph(ctx, "main", g, op); err != nil {
-		t.Fatalf("AddGraph: %v", err)
-	}
-	srcArc, _, err := srcSeq.GetArchive(ctx)
-	if err != nil {
-		t.Fatalf("GetArchive(src): %v", err)
-	}
-	srcBranch, err := srcArc.GetBranch(ctx, "main")
-	if err != nil {
-		t.Fatalf("GetBranch: %v", err)
-	}
-	head := srcBranch.Latest().Head()
-
-	if err := dst.CopyClaims(ctx, src, []ranke.Id{head}, ranke.WithClosure(), ranke.WithContent()); err != nil {
+	// Copy the closure of em and blob — each references its contributor op via
+	// a contribution/contributor edge, so op must come along — plus content.
+	heads := []ranke.Id{em.ID(), blob.ID()}
+	if err := dst.CopyClaims(ctx, src, heads, ranke.WithClosure(), ranke.WithContent()); err != nil {
 		t.Fatalf("CopyClaims: %v", err)
 	}
 
-	dstArc, err := ranke.NewArchive(ctx, dst, &memHead{})
+	has, err := dst.HasClaims(ctx, []ranke.Id{op.ID(), em.ID(), blob.ID()})
 	if err != nil {
-		t.Fatalf("NewArchive(dst): %v", err)
+		t.Fatalf("dst HasClaims: %v", err)
 	}
-	mergedClaim, err := dstArc.GetClaim(ctx, head)
-	if err != nil {
-		t.Fatalf("dst GetClaim: %v", err)
-	}
-	merged, err := mergedClaim.Graph(ctx)
-	if err != nil {
-		t.Fatalf("merged.Graph: %v", err)
-	}
-	for _, want := range []ranke.Id{head, em.ID(), op.ID()} {
-		if !merged.Contains(want) {
-			t.Errorf("dst closure missing %s", want.String())
+	for i, id := range []ranke.Id{op.ID(), em.ID(), blob.ID()} {
+		if !has[i] {
+			t.Errorf("dst closure missing %s", id.String())
 		}
 	}
-	if err := merged.Validate(); err != nil {
-		t.Errorf("merged closure does not validate: %v", err)
+	cHas, err := dst.HasContents(ctx, []ranke.Id{blobHash})
+	if err != nil {
+		t.Fatalf("dst HasContents: %v", err)
+	}
+	if !cHas[0] {
+		t.Errorf("dst missing the copied external content")
 	}
 
 	// Idempotent re-copy.
-	if err := dst.CopyClaims(ctx, src, []ranke.Id{head}, ranke.WithClosure(), ranke.WithContent()); err != nil {
+	if err := dst.CopyClaims(ctx, src, heads, ranke.WithClosure(), ranke.WithContent()); err != nil {
 		t.Fatalf("CopyClaims (rerun): %v", err)
 	}
 
 	// A head absent from src must surface an error.
-	orphan, err := ranke.ClaimBuilder{
-		Type:    ranke.NodeContributor,
-		Content: []byte("never-saved"),
-	}.Sign()
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pubkey, _ := ranke.EncodePublicKey(priv.Public())
+	orphan, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
 	if err != nil {
 		t.Fatalf("synthesize orphan: %v", err)
 	}
 	if err := dst.CopyClaims(ctx, src, []ranke.Id{orphan.ID()}, ranke.WithClosure(), ranke.WithContent()); err == nil {
-		t.Errorf("CopyClaims with missing head should error")
+		t.Errorf("CopyClaims with a head missing from src should error")
 	}
 }
 

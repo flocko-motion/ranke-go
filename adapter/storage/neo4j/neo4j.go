@@ -19,9 +19,11 @@
 // connection/credential concerns: production wires a real driver, tests point
 // one at a container.
 //
-// Height and branch-membership metadata (for cheap branch-scoped closures)
-// are deliberately not modelled yet — they arrive with the membership-cache
-// work; today closure is a variable-length path over :REFERENCES.
+// Each claim's committed height (§4.1) is stored as a node property — an
+// engrained property like content_hash — and served natively by
+// GetClaimHeights, the field that later unlocks cheap branch-scoped closures
+// (a membership cache keyed by height). Branch-membership metadata itself is
+// the next step; today closure is a variable-length path over :REFERENCES.
 package neo4j
 
 import (
@@ -107,6 +109,7 @@ const cypherPutClaims = `
 UNWIND $claims AS c
 MERGE (n:` + labelClaim + ` {id: c.id})
 SET n.type = c.type, n.encoding = c.encoding, n.created_at = c.created_at,
+    n.height = c.height,
     n.content_hash = c.content_hash, n.content_size = c.content_size,
     n.field_keys = c.field_keys, n.field_vals = c.field_vals
 WITH n, c
@@ -277,6 +280,46 @@ func (u *neo4jUniverse) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, 
 		if i, ok := pos[asString(valOf(r, "id"))]; ok {
 			out[i], _ = valOf(r, "has").(bool)
 		}
+	}
+	return out, nil
+}
+
+const cypherGetClaimHeights = `
+UNWIND $ids AS id
+MATCH (n:` + labelClaim + ` {id: id})
+WHERE n.type IS NOT NULL
+RETURN id AS id, n.height AS height`
+
+// GetClaimHeights returns each claim's committed height (§4.1) natively from
+// the stored node property — no reconstruction, the reason height is engrained
+// like content_hash. A requested id absent from the cache is a miss
+// (ranke.ErrNotFound) so a stack falls through to the durable layer.
+func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	out := make([]uint64, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	idStrs := make([]string, len(ids))
+	for i, id := range ids {
+		if id == nil {
+			return nil, errNilID
+		}
+		idStrs[i] = id.String()
+	}
+	res, err := u.query(ctx, cypherGetClaimHeights, map[string]any{"ids": idStrs})
+	if err != nil {
+		return nil, fmt.Errorf("%w: get claim heights: %w", errQuery, err)
+	}
+	seen := make(map[string]uint64, len(res.Records))
+	for _, r := range res.Records {
+		seen[asString(valOf(r, "id"))] = uint64(asInt(valOf(r, "height")))
+	}
+	for i, id := range ids {
+		h, ok := seen[id.String()]
+		if !ok {
+			return nil, fmt.Errorf("claim %s: %w", id, ranke.ErrNotFound)
+		}
+		out[i] = h
 	}
 	return out, nil
 }

@@ -40,13 +40,15 @@ type Claim interface {
 	// superset of the id preimage S(node) (which is node fields + edge ids
 	// only), so it is not itself what the id is signed over.
 	Encode() ([]byte, error)
-	// verifyID recomputes H(S(node)) and checks that the claim's id is a
-	// valid signature over it by pubkey (§5.2 integrity + §5.7
-	// authenticity). It is unexported on purpose: recomputing the id needs
-	// the node's canonical id-preimage encoding, a core-type crypto step no
-	// caller should hand-roll — and its presence seals Claim, so only this
-	// package's claims can be Claims.
-	verifyID(pubkey []byte) error
+	// verifyID checks that the claim's id is a valid signature by pubkey over
+	// H(S(node)) — the node preimage taken from the claim's stored raw CBOR,
+	// NOT re-encoded (re-encoding drifts as the alias taxonomy grows, wrongly
+	// failing a valid claim). The caller supplies that CBOR (from the Universe
+	// via GetClaimsRaw); the claim extracts the preimage and checks the
+	// signature. Unexported: a core-type crypto step no caller should
+	// hand-roll, and its presence seals Claim, so only this package's claims
+	// can be Claims.
+	verifyID(pubkey, raw []byte) error
 	// unwrap returns the underlying concrete *claim, peeling any wrapper
 	// (e.g. *signedContributor). Unexported — it seals Claim alongside
 	// verifyID, and lets in-package machinery that builds or materialises

@@ -55,6 +55,7 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) (map[string]any, []map[string]
 		"type":         n.Type(),
 		"encoding":     n.Encoding(),
 		"created_at":   n.CreatedAt().UTC().UnixNano(),
+		"height":       int64(n.Height()),
 		"content_hash": idStr(n.GetContentHash()),
 		"content_size": int64(n.GetContentSize()),
 		"edges":        edges,
@@ -90,6 +91,7 @@ func partsFromNode(id ranke.Id, props map[string]any, edgeRecs []any, content ma
 		Type:      asString(props["type"]),
 		Encoding:  asString(props["encoding"]),
 		CreatedAt: time.Unix(0, asInt(props["created_at"])).UTC(),
+		Height:    uint64(asInt(props["height"])),
 	}
 	ch, err := parseOptID(props["content_hash"])
 	if err != nil {

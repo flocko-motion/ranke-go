@@ -98,6 +98,7 @@ var (
 	errEncodeClaim           = errors.New("ranke: encode claim")
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")
 	errAssemble              = errors.New("ranke.AssembleClaim")
+	errNodePreimage          = errors.New("ranke: claim CBOR has no node preimage")
 	errID                    = errors.New("ranke.Id")
 	errEncodePubkey          = errors.New("ranke: unsupported public key type")
 	errDecodePubkey          = errors.New("ranke.DecodePublicKey")

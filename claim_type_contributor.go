@@ -73,6 +73,8 @@ func (s *signedContributor) AsContributor(ctx context.Context, u Universe, key .
 }
 func (s *signedContributor) ID() Id                       { return s.contributor.ID() }
 func (s *signedContributor) unwrap() *claim               { return s.contributor.unwrap() }
-func (s *signedContributor) verifyID(pubkey []byte) error { return s.contributor.verifyID(pubkey) }
+func (s *signedContributor) verifyID(pubkey, raw []byte) error {
+	return s.contributor.verifyID(pubkey, raw)
+}
 func (s *signedContributor) Encode() ([]byte, error)      { return s.contributor.Encode() }
 func (s *signedContributor) SigningKey() crypto.Signer    { return s.key }

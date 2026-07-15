@@ -293,6 +293,26 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 	return &claim{node: n, edges: edges}, nil
 }
 
+// nodePreimage extracts S(node) — the id-preimage bytes — from a claim's
+// stored CBOR WITHOUT re-encoding it: it captures the node record as raw CBOR
+// exactly as stored, so the bytes hashed (and their alias choices) are the
+// ones the id was signed over. Re-deriving via buildEncNode would instead
+// drift as the alias taxonomy grows — a newer encoder emits fewer bytes for
+// the same claim, changing H(S(node)) and wrongly failing a valid claim.
+// Verification hashes this; it never re-encodes.
+func nodePreimage(raw []byte) ([]byte, error) {
+	var rf struct {
+		Node cbor.RawMessage `cbor:"1,keyasint"`
+	}
+	if err := cbor.Unmarshal(raw, &rf); err != nil {
+		return nil, wrap(errDecodeClaim, err)
+	}
+	if len(rf.Node) == 0 {
+		return nil, wrap(errDecodeClaim, errNodePreimage)
+	}
+	return rf.Node, nil
+}
+
 func decodeNode(en encNode) (*node, error) {
 	createdAt, err := parseRFC3339Nano(en.CreatedAt)
 	if err != nil {

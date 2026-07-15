@@ -307,17 +307,21 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 		}
 		prog.ClaimsCopied++
 
-		if cfg.Content {
-			if ch := c.Node().GetContentHash(); ch != nil {
-				b, err := GetContent(ctx, src, ch, c.Node().GetContentSize())
-				if err != nil {
-					return wrapDetail(errCopyClaims, "src.GetContent "+ch.String(), err)
-				}
-				if err := PutContent(ctx, dst, ch, b); err != nil {
-					return wrapDetail(errCopyClaims, "dst.PutContent "+ch.String(), err)
-				}
-				prog.BytesCopied += uint64(len(b))
+		// Copy content only when it is EXTERNAL: inline bytes travel inside the
+		// claim record (already copied by PutClaim above) and are not in the
+		// content keyspace, though the id-preimage still carries a content_hash
+		// for them — so keying off the hash alone would wrongly try to fetch
+		// inline content and fail with not-found.
+		if cfg.Content && c.Node().IsContentExternal() {
+			ch := c.Node().GetContentHash()
+			b, err := GetContent(ctx, src, ch, c.Node().GetContentSize())
+			if err != nil {
+				return wrapDetail(errCopyClaims, "src.GetContent "+ch.String(), err)
 			}
+			if err := PutContent(ctx, dst, ch, b); err != nil {
+				return wrapDetail(errCopyClaims, "dst.PutContent "+ch.String(), err)
+			}
+			prog.BytesCopied += uint64(len(b))
 		}
 
 		if cfg.Closure {
