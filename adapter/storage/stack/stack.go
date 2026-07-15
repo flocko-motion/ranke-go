@@ -84,6 +84,19 @@ type stack struct {
 	layers []Layer
 }
 
+// couldHoldContent reports whether a layer with caps could hold a content blob
+// of the given size: an external-content store holds any size; a capped cache
+// holds it only up to its cap.
+func couldHoldContent(c ranke.Capabilities, size uint64) bool {
+	return c.ExternalContent || (c.ContentCap > 0 && size <= c.ContentCap)
+}
+
+// holdsSomeContent reports whether a layer holds any content at all (used where
+// the blob size is unknown, e.g. HasContents).
+func holdsSomeContent(c ranke.Capabilities) bool {
+	return c.ExternalContent || c.ContentCap > 0
+}
+
 // NewStack composes layers into one Universe, ordered top (first, cache) to
 // bottom (last, authoritative). At least one eager (write-through) layer is
 // required — otherwise a write would persist nowhere.
@@ -192,14 +205,30 @@ func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]b
 		if len(pending) == 0 {
 			break
 		}
-		has, err := s.layers[li].u.HasContents(ctx, pickHashes(refs, pending))
+		caps := s.layers[li].u.Capabilities()
+		// Cap-aware descent: only ask this layer about refs it could hold given
+		// its content cap; larger blobs (and all refs, if it holds no content)
+		// stay pending for a lower layer — no wasted query.
+		var ask, defer_ []int
+		for _, orig := range pending {
+			if couldHoldContent(caps, refs[orig].ContentSize) {
+				ask = append(ask, orig)
+			} else {
+				defer_ = append(defer_, orig)
+			}
+		}
+		if len(ask) == 0 {
+			pending = defer_
+			continue
+		}
+		has, err := s.layers[li].u.HasContents(ctx, pickHashes(refs, ask))
 		if err != nil {
 			return nil, err
 		}
 		var hitRefs []ranke.ContentRef
 		var hitAt []int
 		var still []int
-		for k, orig := range pending {
+		for k, orig := range ask {
 			if has[k] {
 				hitRefs = append(hitRefs, refs[orig])
 				hitAt = append(hitAt, orig)
@@ -210,9 +239,10 @@ func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]b
 		if len(hitRefs) > 0 {
 			got, err := s.layers[li].u.GetContents(ctx, hitRefs)
 			switch {
-			case errors.Is(err, ranke.ErrIntegrity):
-				// Corrupt bytes at this layer — a storage failure. Descend to a
-				// good copy and repair on the way back; keep these pending.
+			case errors.Is(err, ranke.ErrIntegrity), errors.Is(err, ranke.ErrContentCapped):
+				// Corrupt or capped bytes at this layer (the latter e.g. a cache
+				// filled under a smaller cap): descend to a full copy, keep
+				// these pending (integrity repairs on the way back).
 				still = append(still, hitAt...)
 			case err != nil:
 				return nil, err
@@ -223,7 +253,7 @@ func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]b
 				s.fillContents(ctx, li, hitRefs, got)
 			}
 		}
-		pending = still
+		pending = append(defer_, still...) // cap-exceeded + misses go to the next layer
 	}
 	if len(pending) > 0 {
 		return nil, ranke.ErrNotFound
@@ -262,6 +292,9 @@ func (s *stack) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, err
 		if len(pending) == 0 {
 			break
 		}
+		if !holdsSomeContent(s.layers[li].u.Capabilities()) {
+			continue // no content store at all — skip (HasContents lacks sizes to cap-filter)
+		}
 		has, err := s.layers[li].u.HasContents(ctx, pickIds(hashes, pending))
 		if err != nil {
 			return nil, err
@@ -281,6 +314,9 @@ func (s *stack) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, err
 
 func (s *stack) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	for li := range s.layers {
+		if !couldHoldContent(s.layers[li].u.Capabilities(), size) {
+			continue // cap-aware: this layer can't hold a blob this large — skip
+		}
 		ok, err := ranke.HasContent(ctx, s.layers[li].u, hash)
 		if err != nil {
 			return nil, err
@@ -324,15 +360,45 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 	return ranke.DefaultGetClaimHeights(ctx, s, ids)
 }
 
+// GetClaimsRaw returns the stored CBOR, tried layer by layer top-down: the
+// first layer holding the bytes wins; a layer that lacks them (a structure-only
+// cache like neo4j returns ErrNotFound) is skipped, so the request falls
+// through to the authoritative byte layer. Verification and replication use
+// this — not the hot read path — so it fetches, it does not read-fill.
+func (s *stack) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	var lastErr error = ranke.ErrNotFound
+	for li := range s.layers {
+		// Capability-aware descent: a layer that keeps no verbatim canonical
+		// bytes (a structure-only cache like neo4j) can never serve raw claims,
+		// so skip it rather than spending a round-trip to be told ErrNotFound.
+		if !s.layers[li].u.Capabilities().RawClaims {
+			continue
+		}
+		raw, err := s.layers[li].u.GetClaimsRaw(ctx, ids)
+		if err == nil {
+			return raw, nil
+		}
+		if !errors.Is(err, ranke.ErrNotFound) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 // Capabilities derives the stack's from its layers, per capability:
 //   - Overwrite: every eager layer can (repair must reach the durable tier);
 //   - Delete: every layer can (else a deleted key lingers in some layer);
 //   - Enumerate: some eager layer can (an eager layer holds the whole keyset);
 //   - Persistent: some eager layer is (the durable tier survives);
-//   - GQL: some layer offers it (a query routes to that layer).
+//   - GQL: some layer offers it (a query routes to that layer);
+//   - RawClaims: some layer keeps verbatim bytes (raw reads route to it);
+//   - ExternalContent: some layer holds unbounded content (the stack does too);
+//   - ContentCap: 0 if some layer is unbounded, else the largest layer cap.
 func (s *stack) Capabilities() ranke.Capabilities {
 	overwrite, del := true, true
-	var enumerate, persistent, gql bool
+	var enumerate, persistent, gql, rawClaims, externalContent bool
+	var contentCap uint64
 	for _, l := range s.layers {
 		c := l.u.Capabilities()
 		if !c.Delete {
@@ -340,6 +406,15 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		}
 		if c.GQL {
 			gql = true
+		}
+		if c.RawClaims {
+			rawClaims = true
+		}
+		if c.ExternalContent {
+			externalContent = true
+		}
+		if c.ContentCap > contentCap {
+			contentCap = c.ContentCap
 		}
 		if l.mode == eager {
 			if !c.Overwrite {
@@ -353,12 +428,18 @@ func (s *stack) Capabilities() ranke.Capabilities {
 			}
 		}
 	}
+	if externalContent {
+		contentCap = 0 // an unbounded layer means the stack holds any size
+	}
 	return ranke.Capabilities{
-		Overwrite:  overwrite,
-		Delete:     del,
-		Enumerate:  enumerate,
-		Persistent: persistent,
-		GQL:        gql,
+		Overwrite:       overwrite,
+		Delete:          del,
+		Enumerate:       enumerate,
+		Persistent:      persistent,
+		GQL:             gql,
+		RawClaims:       rawClaims,
+		ExternalContent: externalContent,
+		ContentCap:      contentCap,
 	}
 }
 

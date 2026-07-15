@@ -1,7 +1,7 @@
 // package: ranke / universe_memory
 // type:    io
-// job:     NewMemoryUniverse — a naive in-process Universe (live claims + content in maps): the fallback store a Graph uses when given no Universe, and the reference Universe for tests
-// limits:  ephemeral (nothing survives a restart); no native fast paths — closure and copy delegate to the Default* helpers; persistent/graph-native backends live under adapter/
+// job:     NewMemoryUniverse — a naive in-process Universe storing canonical CBOR in maps, decoded on read: the Graph's nil-Universe fallback and the reference Universe for tests
+// limits:  ephemeral; correctness over speed (decodes per read, no caching); closure/copy via the Default* helpers; persistent/graph-native backends live under adapter/
 package ranke
 
 import (
@@ -11,26 +11,21 @@ import (
 	"sync"
 )
 
-// NewMemoryUniverse returns an ephemeral in-process Universe backed by maps —
-// live claims keyed by id, content keyed by hash. It is the fallback a Graph
-// uses when constructed with a nil Universe, and the reference Universe for
-// tests. Persistent and graph-native backends live under adapter/.
-//
-// It holds live claim objects, so diff materialisation (applied on the
-// default read) mutates the stored instance in place and is therefore sticky
-// — a caching-store trait, harmless for build/verify where it only saves
-// recomputation.
+// NewMemoryUniverse returns an ephemeral in-process Universe: canonical claim
+// CBOR keyed by id, content keyed by hash. It stores the exact bytes like any
+// byte store and decodes on read, so it is stable and drift-free — the right
+// reference behaviour, with no live-claim aliasing.
 func NewMemoryUniverse() Universe {
 	return &memoryUniverse{
-		claims:  make(map[string]Claim),
+		claims:  make(map[string][]byte),
 		content: make(map[string][]byte),
 	}
 }
 
 type memoryUniverse struct {
 	mu      sync.RWMutex
-	claims  map[string]Claim
-	content map[string][]byte
+	claims  map[string][]byte // canonical CBOR by id
+	content map[string][]byte // content by hash
 }
 
 func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
@@ -41,15 +36,19 @@ func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOpt
 			u.mu.RUnlock()
 			return nil, errNilID
 		}
-		c, ok := u.claims[id.String()]
+		b, ok := u.claims[id.String()]
 		if !ok {
 			u.mu.RUnlock()
 			return nil, ErrNotFound
 		}
+		c, err := DecodeClaim(id, b)
+		if err != nil {
+			u.mu.RUnlock()
+			return nil, err
+		}
 		out[i] = c
 	}
 	u.mu.RUnlock()
-	// Diff-materialised by default; honours WithNotDiffMaterialized.
 	return DefaultMaterialize(ctx, u, out, opts...)
 }
 
@@ -60,7 +59,11 @@ func (u *memoryUniverse) PutClaims(_ context.Context, cs []Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		u.claims[c.ID().String()] = c
+		b, err := c.Encode()
+		if err != nil {
+			return err
+		}
+		u.claims[c.ID().String()] = b
 	}
 	return nil
 }
@@ -78,6 +81,29 @@ func (u *memoryUniverse) HasClaims(_ context.Context, ids []Id) ([]bool, error) 
 	return out, nil
 }
 
+func (u *memoryUniverse) GetClaimsRaw(_ context.Context, ids []Id) ([][]byte, error) {
+	out := make([][]byte, len(ids))
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	for i, id := range ids {
+		if id == nil {
+			return nil, errNilID
+		}
+		b, ok := u.claims[id.String()]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		out[i] = append([]byte(nil), b...) // stored bytes, verbatim
+	}
+	return out, nil
+}
+
+// GetClaimHeights decodes and reads the height (via the closure default) — no
+// cache; correctness over speed.
+func (u *memoryUniverse) GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error) {
+	return DefaultGetClaimHeights(ctx, u, ids)
+}
+
 func (u *memoryUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]byte, error) {
 	out := make([][]byte, len(refs))
 	u.mu.RLock()
@@ -90,7 +116,7 @@ func (u *memoryUniverse) GetContents(_ context.Context, refs []ContentRef) ([][]
 		if !ok {
 			return nil, ErrNotFound
 		}
-		out[i] = append([]byte(nil), b...) // defensive copy
+		out[i] = append([]byte(nil), b...)
 	}
 	return out, nil
 }
@@ -136,27 +162,6 @@ func (u *memoryUniverse) GetFromClosure(ctx context.Context, heads []Id, id Id) 
 	return DefaultGetFromClosure(ctx, u, heads, id)
 }
 
-// GetClaimHeights reads heights straight from the live claim map — the map is
-// already the memo, so no separate HeightCache is warranted here (unlike a
-// byte store, which would re-decode). Height is the node's own field, so no
-// materialisation is needed.
-func (u *memoryUniverse) GetClaimHeights(_ context.Context, ids []Id) ([]uint64, error) {
-	out := make([]uint64, len(ids))
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-	for i, id := range ids {
-		if id == nil {
-			return nil, errNilID
-		}
-		c, ok := u.claims[id.String()]
-		if !ok {
-			return nil, ErrNotFound
-		}
-		out[i] = c.Node().Height()
-	}
-	return out, nil
-}
-
 func (u *memoryUniverse) CopyClaims(ctx context.Context, src Universe, ids []Id, opts ...CopyOption) error {
 	return DefaultCopyClaims(ctx, u, src, ids, opts...)
 }
@@ -165,10 +170,10 @@ func (u *memoryUniverse) CopyContents(ctx context.Context, src Universe, refs []
 	return DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
-// Capabilities: a map can overwrite, delete, and enumerate; it is not
-// persistent (lost on process exit).
+// Capabilities: a map can overwrite, delete, and enumerate, and serves raw
+// claim CBOR and content blobs; it is not persistent (lost on process exit).
 func (u *memoryUniverse) Capabilities() Capabilities {
-	return Capabilities{Overwrite: true, Delete: true, Enumerate: true}
+	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true}
 }
 
 func (u *memoryUniverse) Close() error { return nil }

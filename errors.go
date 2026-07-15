@@ -11,6 +11,11 @@ var (
 	ErrNotFound  = errors.New("ranke: not found")
 	ErrIntegrity = errors.New("ranke: integrity check failed")
 	ErrClosed    = errors.New("ranke: closed")
+	// ErrContentCapped: a layer holds a claim/reference but its stored content
+	// is shorter than the expected content_size — capped or truncated (e.g. a
+	// cache filled under a smaller cap in a previous run). A stack treats it
+	// like a miss and descends to a layer that holds the full bytes.
+	ErrContentCapped = errors.New("ranke: content capped (stored shorter than content_size)")
 
 	// --- Id ---
 	errInvalidId     = errors.New("ranke: invalid id")

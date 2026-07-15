@@ -225,7 +225,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	}
 	n.height = height
 
-	if err := signNode(n, &cfg, isRootContributor); err != nil {
+	if err := signNode(n, edges, &cfg, isRootContributor); err != nil {
 		return nil, err
 	}
 
@@ -490,14 +490,14 @@ func normalizeCreatedAt(t time.Time) time.Time {
 // bare contributor returns nil → identity Sign), rejects a key/pubkey
 // mismatch before signing (§5.7), then signs. Identity-Sign (no key, no
 // pubkey) leaves the hash unchanged, so the id is just the multihash.
-func signNode(n *node, cfg *ClaimBuilder, isRootContributor bool) error {
+func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool) error {
 	if cfg.SigningKey == nil && cfg.Contributor != nil {
 		cfg.SigningKey = cfg.Contributor.SigningKey()
 	}
 	if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
 		return wrap(errNewClaim, err)
 	}
-	encoded, err := encodeNode(n)
+	encoded, err := encodeNode(n, edges)
 	if err != nil {
 		return wrapDetail(errNewClaim, "canonical encode", err)
 	}

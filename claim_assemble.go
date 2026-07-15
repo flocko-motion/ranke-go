@@ -31,9 +31,11 @@ type ClaimParts struct {
 	Edges         []EdgeParts       //
 }
 
-// EdgeParts is the parsed structure of one edge. Its id is recomputed
-// (id = H(S(edge))), so it is not stored or supplied.
+// EdgeParts is the parsed structure of one edge. ID (the derived edge id) is
+// required: a field-oriented cache must store it, since recomputing it means
+// re-serializing S(e) from the claim CBOR the cache does not hold.
 type EdgeParts struct {
+	ID                Id // required — the cached edge id
 	Reference         Id
 	Type              string // "class/sub"
 	RelationDirection RelationDirection
@@ -43,10 +45,11 @@ type EdgeParts struct {
 	Fields            map[string]string
 }
 
-// AssembleClaim rebuilds a Claim from parsed parts and a known id, without
-// CBOR and without signing. The node id is taken as given (a signature can't
-// be recomputed without the key); edge ids are recomputed from their bodies
-// (id = H(S(edge))) and the edges ordered canonically — so, if the parts are
+// AssembleClaim rebuilds a Claim from parsed parts and known ids, without CBOR
+// and without signing. The node id and each edge id are taken as given (the
+// node id is a signature; edge ids are cached by the field-oriented store — a
+// requirement, since recomputing them would need the claim CBOR the store
+// lacks), and the edges are ordered canonically — so, if the parts are
 // faithful, the result re-encodes to identical bytes and verifies against the
 // id. It performs no verification itself: a cache built from AssembleClaim is
 // checked by the closure verifier over the authoritative Universe.
@@ -96,15 +99,10 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 			relationDirection: ep.RelationDirection,
 			fields:            cloneFields(ep.Fields),
 		}
-		b, err := encodeEdge(e)
-		if err != nil {
-			return nil, wrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" encode", err)
+		if ep.ID == nil {
+			return nil, withDetail(errAssemble, "edge "+strconv.Itoa(i)+": id required")
 		}
-		eid, err := hashContent(b)
-		if err != nil {
-			return nil, wrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" hash", err)
-		}
-		e.id = eid
+		e.id = ep.ID
 		edges[i] = e
 	}
 	// Canonical edge order (by raw multihash), matching construction, so

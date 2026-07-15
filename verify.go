@@ -201,10 +201,23 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				continue // pruned: already trusted/committed
 			}
 
-			// Load the stored (delta) form: verification checks the exact
-			// bytes each claim was signed over and walks its stored edge
-			// references, so materialising the diff would be misleading here.
-			c, err := GetClaim(ctx, u, cur.id, WithNotDiffMaterialized())
+			// Fetch the stored raw CBOR — the exact bytes the id was signed
+			// over — and decode it. Verification hashes this CBOR's node
+			// preimage (never a re-encode, which would drift as the alias
+			// taxonomy grows) and walks the stored (delta) edges, so we work
+			// from the raw claim, not a materialised one. In a stack the
+			// request routes to the byte layer that holds the CBOR; a
+			// structure-only cache (neo4j) misses and falls through.
+			raws, err := u.GetClaimsRaw(ctx, []Id{cur.id})
+			if err != nil {
+				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
+				if stop() {
+					return
+				}
+				continue
+			}
+			raw := raws[0]
+			c, err := DecodeClaim(cur.id, raw)
 			if err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
@@ -226,7 +239,7 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				}
 			}
 
-			if err := verifyClaim(ctx, c, cfg, u); err != nil {
+			if err := verifyClaim(ctx, c, raw, cfg, u); err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
 					return
@@ -253,17 +266,16 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 	return run
 }
 
-// verifyClaim runs the §5.10 check on one claim, entirely through the public
-// interface: recompute-and-check the signature against id(v) (the claim does
-// that itself via verifyID — the one step needing the id-preimage encoding),
-// resolve the signing pubkey, then verify content integrity (inline always;
-// external only when configured).
-func verifyClaim(ctx context.Context, c Claim, cfg *verifyConfig, u Universe) error {
+// verifyClaim runs the §5.10 check on one claim: resolve the signing pubkey,
+// check the id signature over the node preimage taken from the stored raw CBOR
+// (c.verifyID — hashes stored bytes, never re-encodes), re-derive height, then
+// verify content integrity (inline always; external only when configured).
+func verifyClaim(ctx context.Context, c Claim, raw []byte, cfg *verifyConfig, u Universe) error {
 	pubkey, err := resolveClaimPubkey(ctx, c, u)
 	if err != nil {
 		return wrapDetail(errVerify, "resolve pubkey", err)
 	}
-	if err := c.verifyID(pubkey); err != nil {
+	if err := c.verifyID(pubkey, raw); err != nil {
 		return wrapDetail(errVerify, "§5.7", err)
 	}
 	if err := verifyHeight(ctx, c, u); err != nil {
@@ -281,16 +293,19 @@ func verifyClaim(ctx context.Context, c Claim, cfg *verifyConfig, u Universe) er
 	return nil
 }
 
-// verifyID recomputes H(S(node)) and checks that this claim's id is a valid
-// signature over it by pubkey (§5.2 + §5.7). It is the single verification
-// step that needs the node's canonical id-preimage encoding and the raw id
-// bytes, so the claim does it itself rather than exposing either.
-func (c *claim) verifyID(pubkey []byte) error {
-	encoded, err := encodeNode(c.node)
+// verifyID checks that this claim's id is a valid signature by pubkey over
+// H(S(node)) — the node preimage extracted from the claim's stored raw CBOR,
+// NOT re-encoded. Hashing the stored bytes (rather than re-running the encoder)
+// keeps verification stable as the alias taxonomy grows: a newer encoder would
+// emit the same claim more compactly, so re-encoding would change the hash and
+// wrongly reject a valid claim. The claim does this itself (sealed) since it is
+// a core-type crypto step no caller should hand-roll.
+func (c *claim) verifyID(pubkey, raw []byte) error {
+	preimage, err := nodePreimage(raw)
 	if err != nil {
-		return wrapDetail(errVerify, "encode", err)
+		return wrapDetail(errVerify, "preimage", err)
 	}
-	recomputed, err := hashContent(encoded)
+	recomputed, err := hashContent(preimage)
 	if err != nil {
 		return wrapDetail(errVerify, "hash", err)
 	}

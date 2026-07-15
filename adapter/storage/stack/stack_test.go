@@ -218,12 +218,13 @@ func (c capsUniverse) Capabilities() ranke.Capabilities { return c.caps }
 func TestCapabilitiesDerivation(t *testing.T) {
 	full := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true}
 
-	// All-mem: every field but Persistent (mem is ephemeral).
+	// All-mem: every field but Persistent (mem is ephemeral). mem keeps verbatim
+	// claim bytes, so RawClaims holds.
 	st, err := stack.NewStack(stack.Eager(mem.New()), stack.Eager(mem.New()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true}
+	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true}
 	if got := st.Capabilities(); got != want {
 		t.Fatalf("all-mem stack caps = %+v, want %+v", got, want)
 	}

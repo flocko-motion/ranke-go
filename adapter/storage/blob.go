@@ -320,7 +320,10 @@ func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, ref
 //
 //deadcode:keep
 func (u *blobUniverse) Capabilities() ranke.Capabilities {
-	return u.store.Capabilities()
+	c := u.store.Capabilities()
+	c.RawClaims = true       // a blob store keeps each claim's verbatim canonical bytes
+	c.ExternalContent = true // and holds externalized content of any size (no cap)
+	return c
 }
 
 // InClosure reports whether id is reachable from any of heads. A byte store
@@ -343,4 +346,29 @@ func (u *blobUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id 
 // cache, a repeat lookup almost never touches the store.
 func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
 	return u.heights.GetClaimHeights(ctx, u, ids)
+}
+
+// GetClaimsRaw returns each claim's stored bytes verbatim — a byte store holds
+// exactly the CBOR the id was signed over, so no decode (and no re-encode) is
+// involved.
+//
+//deadcode:keep
+func (u *blobUniverse) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	out := make([][]byte, len(ids))
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
+		if id == nil {
+			return errors.New("adapter.GetClaimsRaw: nil id")
+		}
+		data, err := u.store.Get(ctx, id.String())
+		if err != nil {
+			return err
+		}
+		out[i] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

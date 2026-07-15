@@ -47,6 +47,23 @@ type Capabilities struct {
 	// the optional graph-query language, NOT the native filtered query — that
 	// is a separate, always-available read.
 	GQL bool
+	// RawClaims: the backend stores and serves each claim's verbatim canonical
+	// bytes via GetClaimsRaw. A structure-only cache that reconstructs claims
+	// from parts (neo4j) holds no canonical CBOR and reports false — a stack
+	// skips such a layer for raw reads instead of querying it for bytes it can
+	// never have.
+	RawClaims bool
+	// ExternalContent: the backend holds externalized content of ANY size —
+	// a content store (durable byte stores). A structure/query cache that never
+	// keeps externalized content (neo4j) reports false; a stack then asks it
+	// for content only up to ContentCap, and the next lower layer beyond.
+	ExternalContent bool
+	// ContentCap is the largest content blob (bytes) this backend may hold; 0
+	// means no cap (holds any size — implied by ExternalContent). A cache that
+	// keeps only small content reports its threshold (e.g. neo4j's 4 KiB), so a
+	// stack knows a blob larger than the cap cannot be here and descends
+	// without asking. Set from the backend's option (e.g. WithContentCap).
+	ContentCap uint64
 }
 
 // Universe is 𝒰 from spec §4.5 — a content-addressed bag of claims
@@ -76,6 +93,13 @@ type Universe interface {
 	PutClaims(ctx context.Context, cs []Claim) error
 	// HasClaims reports, positionally per id, whether each is present.
 	HasClaims(ctx context.Context, ids []Id) ([]bool, error)
+	// GetClaimsRaw returns each claim's stored canonical CBOR verbatim (never a
+	// re-encode), positionally; a missing claim fails with ErrNotFound. The
+	// verify/replicate counterpart of GetClaims — verification hashes these
+	// bytes, replication copies them. Byte stores return the blob; a
+	// structure-only cache (neo4j) holds no CBOR (Capabilities.RawClaims false)
+	// and misses, so a stack routes to the byte layer below.
+	GetClaimsRaw(ctx context.Context, ids []Id) ([][]byte, error)
 
 	// GetContents returns the bytes for each ref, positionally. A
 	// missing blob fails the whole call with ErrNotFound.
