@@ -199,6 +199,13 @@ func (m *metered) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64
 	return hs, err
 }
 
+func (m *metered) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	t := time.Now()
+	rs, err := m.inner.Query(ctx, q, scope)
+	m.rec("Query", kindRead, 1, time.Since(t))
+	return rs, err
+}
+
 func (m *metered) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
 	return m.inner.CopyClaims(ctx, src, ids, opts...)
 }

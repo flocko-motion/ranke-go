@@ -360,6 +360,13 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 	return ranke.DefaultGetClaimHeights(ctx, s, ids)
 }
 
+// Query resolves an RQL read through the stack's own read path (GetClaims,
+// which falls through the layers) via the reference executor. A reverse step
+// is refused unless the stack advertises ReverseWalk.
+func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, s, q, scope)
+}
+
 // GetClaimsRaw returns the stored CBOR, tried layer by layer top-down: the
 // first layer holding the bytes wins; a layer that lacks them (a structure-only
 // cache like neo4j returns ErrNotFound) is skipped, so the request falls
@@ -429,7 +436,7 @@ func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, claims []
 //   - ContentCap: 0 if some layer is unbounded, else the largest layer cap.
 func (s *stack) Capabilities() ranke.Capabilities {
 	overwrite, del := true, true
-	var enumerate, persistent, gql, rawClaims, externalContent bool
+	var enumerate, persistent, gql, reverseWalk, rawClaims, externalContent bool
 	var contentCap uint64
 	for _, l := range s.layers {
 		c := l.u.Capabilities()
@@ -438,6 +445,9 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		}
 		if c.GQL {
 			gql = true
+		}
+		if c.ReverseWalk {
+			reverseWalk = true
 		}
 		if c.RawClaims {
 			rawClaims = true
@@ -469,6 +479,7 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		Enumerate:       enumerate,
 		Persistent:      persistent,
 		GQL:             gql,
+		ReverseWalk:     reverseWalk,
 		RawClaims:       rawClaims,
 		ExternalContent: externalContent,
 		ContentCap:      contentCap,

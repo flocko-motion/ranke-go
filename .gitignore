@@ -35,3 +35,5 @@ docs/papers/
 .todos/
 
 /test
+/ranke 
+_scrap.go
