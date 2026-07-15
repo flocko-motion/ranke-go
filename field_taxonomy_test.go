@@ -28,7 +28,8 @@ func nsContributor(t *testing.T) Contributor { return contributor(t) }
 // and returns the build error (nil on success).
 func buildWithType(t *testing.T, typ string) error {
 	t.Helper()
-	_, err := NewClaim(typ, nsContributor(t)).WithInlineContent([]byte("x")).Sign()
+	ctr := nsContributor(t)
+	_, err := NewClaim(typ, ctr).WithInlineContent([]byte("x")).WithHeight(HeightOf(ctr)).Sign()
 	return err
 }
 
@@ -36,9 +37,11 @@ func buildWithType(t *testing.T, typ string) error {
 // media type and returns the build error (nil on success).
 func buildWithEncoding(t *testing.T, enc string) error {
 	t.Helper()
-	_, err := NewClaim(TypeSource("note"), nsContributor(t)).
+	ctr := nsContributor(t)
+	_, err := NewClaim(TypeSource("note"), ctr).
 		WithEncoding(enc).
 		WithInlineContent([]byte("x")).
+		WithHeight(HeightOf(ctr)).
 		Sign()
 	return err
 }
@@ -47,9 +50,11 @@ func buildWithEncoding(t *testing.T, enc string) error {
 
 // TestFieldNameNamespace_Valid: an ordinary user field name is accepted.
 func TestFieldNameNamespace_Valid(t *testing.T) {
-	_, err := NewClaim(TypeSource("note"), nsContributor(t)).
+	ctr := nsContributor(t)
+	_, err := NewClaim(TypeSource("note"), ctr).
 		WithInlineContent([]byte("x")).
 		WithField("topic", "news").
+		WithHeight(HeightOf(ctr)).
 		Sign()
 	require.NoError(t, err)
 }
@@ -68,6 +73,7 @@ func TestFieldNameNamespace_Rejected(t *testing.T) {
 		_, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte("x")).
 			WithField(name, "v").
+			WithHeight(HeightOf(alice)).
 			Sign()
 		require.Error(t, err, "field name %q is out of the allowed namespace and must be rejected", name)
 	}
@@ -83,6 +89,7 @@ func TestFieldNameStructuralNamesAllowed(t *testing.T) {
 		_, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte("x")).
 			WithField(name, "v").
+			WithHeight(HeightOf(alice)).
 			Sign()
 		require.NoError(t, err, "plain user field name %q no longer collides with a structural field", name)
 	}
@@ -92,7 +99,7 @@ func TestFieldNameStructuralNamesAllowed(t *testing.T) {
 // fields.
 func TestEdgeFieldNameNamespace_Rejected(t *testing.T) {
 	alice := nsContributor(t)
-	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).Sign()
+	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	_, err = NewEdge(EdgeConfig{
@@ -136,7 +143,7 @@ func TestSubtypeNamespace_Rejected(t *testing.T) {
 // TestEdgeSubtypeNamespace_Rejected: same strict rule on edge subtypes.
 func TestEdgeSubtypeNamespace_Rejected(t *testing.T) {
 	alice := nsContributor(t)
-	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).Sign()
+	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	for _, typ := range []string{"derivation/.hidden", "derivation/Source", "relation/a+b"} {

@@ -23,11 +23,13 @@ func TestDefaultMaterializeDiff(t *testing.T) {
 	base, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("base content")).
 		WithField("author", "alice").
+		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)
 	delta, err := NewClaim(TypeSource("note"), root).
 		WithDiff(base.ID()).
 		WithField("rev", "2").
+		WithHeight(HeightOf(root, base)).
 		Sign()
 	require.NoError(t, err)
 	putClaims(t, u, root, base, delta)
@@ -66,4 +68,45 @@ func TestDefaultMaterializeNonDiffNoOp(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("plain content"), mustInline(t, out[0].Node()),
 		"a non-diff claim is unchanged")
+}
+
+// --- GetClaimHeights (§4.1) --------------------------------------------
+
+// TestGetClaimHeights: GetClaimHeights returns committed heights positionally —
+// 0 for an initial node, 1 + max(refs) for a referencing one — and the
+// single-item GetClaimHeight wrapper agrees.
+func TestGetClaimHeights(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	a := srcClaim(t, root, "a") // height 1
+	require.NoError(t, PutClaim(ctx, u, root))
+	require.NoError(t, PutClaim(ctx, u, a))
+
+	hs, err := u.GetClaimHeights(ctx, []Id{root.ID(), a.ID()})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0, 1}, hs, "initial node 0, source 1 — positionally")
+
+	h, err := GetClaimHeight(ctx, u, a.ID())
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), h, "single-item wrapper agrees")
+}
+
+// TestHeightCacheServesAfterNote: a HeightCache answers a Noted id without
+// touching the Universe, and heights being immutable it never overwrites.
+func TestHeightCacheServesAfterNote(t *testing.T) {
+	ctx := context.Background()
+	root := contributor(t)
+	a := srcClaim(t, root, "a") // height 1
+
+	cache := NewHeightCache()
+	cache.NoteClaims(root, a)
+	// An empty Universe: a hit must come from the cache, not a load.
+	hs, err := cache.GetClaimHeights(ctx, NewMemoryUniverse(), []Id{a.ID(), root.ID()})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 0}, hs, "served from the cache, positionally")
+
+	got, ok := cache.Get(a.ID())
+	require.True(t, ok)
+	require.Equal(t, uint64(1), got)
 }

@@ -184,6 +184,13 @@ func (m *metered) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke
 	return c, err
 }
 
+func (m *metered) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	t := time.Now()
+	hs, err := m.inner.GetClaimHeights(ctx, ids)
+	m.rec("GetClaimHeights", kindRead, len(ids), time.Since(t))
+	return hs, err
+}
+
 func (m *metered) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
 	return m.inner.CopyClaims(ctx, src, ids, opts...)
 }

@@ -4,7 +4,10 @@
 // limits:  called by Universe implementations (byte-store adapters delegate here; a graph-native backend may override with native queries); does no storage of its own
 package ranke
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // GetOption configures a claim read (Universe.GetClaims and the package
 // GetClaim helper).
@@ -135,6 +138,112 @@ func DefaultGetFromClosure(ctx context.Context, u Universe, heads []Id, id Id) (
 		return nil, ErrNotFound
 	}
 	return GetClaim(ctx, u, id)
+}
+
+// DefaultGetClaimHeights is the fallback GetClaimHeights for a Universe with no
+// height index: it loads the claims (in delta form — height is the claim's own
+// field, never inherited, so materialising the diff chain is unnecessary) and
+// reads each committed height, positionally. A backend that keeps an id→height
+// cache answers from it instead, deserialising only the misses — the whole
+// point of putting height on the Universe port (§4.1). See HeightCache.
+func DefaultGetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64, error) {
+	cs, err := u.GetClaims(ctx, ids, WithNotDiffMaterialized())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uint64, len(cs))
+	for i, c := range cs {
+		out[i] = c.Node().Height()
+	}
+	return out, nil
+}
+
+// HeightCache memoises claim heights for a Universe. A height is immutable —
+// fixed at creation and bound into the content-addressed id (§4.1) — so a
+// cached entry is valid forever and needs no invalidation; the same id yields
+// the same height in any Universe. A byte-store backend embeds one to answer
+// GetClaimHeights without re-reading and re-decoding the claim, and populates
+// it opportunistically from any get/put that already holds a claim (NoteClaims),
+// so it fills naturally and the fallback load is rarely taken. The zero value
+// is not usable — construct with NewHeightCache. All methods are safe for
+// concurrent use, and a nil *HeightCache is a no-op reader (Get misses), so it
+// degrades gracefully.
+type HeightCache struct {
+	mu sync.RWMutex
+	m  map[string]uint64
+}
+
+// NewHeightCache returns an empty, ready-to-use cache.
+func NewHeightCache() *HeightCache { return &HeightCache{m: make(map[string]uint64)} }
+
+// Note records id→height if the id is not already cached. It checks under the
+// read lock first and takes the write lock only on a miss — heights never
+// change, so a present entry is authoritative and the hot path never
+// serialises writers. Cheap enough to call on every claim a get/put handles.
+func (c *HeightCache) Note(id Id, height uint64) {
+	if c == nil || id == nil {
+		return
+	}
+	k := id.String()
+	c.mu.RLock()
+	_, ok := c.m[k]
+	c.mu.RUnlock()
+	if ok {
+		return // already known; heights are immutable, so never overwrite
+	}
+	c.mu.Lock()
+	c.m[k] = height
+	c.mu.Unlock()
+}
+
+// NoteClaims records the height of every non-nil claim — the convenience a
+// get/put path calls after handling a batch, so reads and writes both warm the
+// cache.
+func (c *HeightCache) NoteClaims(cs ...Claim) {
+	for _, cl := range cs {
+		if cl != nil {
+			c.Note(cl.ID(), cl.Node().Height())
+		}
+	}
+}
+
+// Get returns the cached height for id, if present.
+func (c *HeightCache) Get(id Id) (uint64, bool) {
+	if c == nil || id == nil {
+		return 0, false
+	}
+	c.mu.RLock()
+	h, ok := c.m[id.String()]
+	c.mu.RUnlock()
+	return h, ok
+}
+
+// GetClaimHeights answers ids from the cache, loading only the misses from u in
+// one bulk DefaultGetClaimHeights and caching them. This is the cached
+// GetClaimHeights a backend delegates to instead of the naive default.
+func (c *HeightCache) GetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64, error) {
+	out := make([]uint64, len(ids))
+	var missIDs []Id
+	var missAt []int
+	for i, id := range ids {
+		if h, ok := c.Get(id); ok {
+			out[i] = h
+			continue
+		}
+		missIDs = append(missIDs, id)
+		missAt = append(missAt, i)
+	}
+	if len(missIDs) > 0 {
+		hs, err := DefaultGetClaimHeights(ctx, u, missIDs)
+		if err != nil {
+			return nil, err
+		}
+		for k, h := range hs {
+			out[missAt[k]] = h
+			c.Note(missIDs[k], h)
+		}
+	}
+	return out, nil
 }
 
 // DefaultCopyClaims is the reference CopyClaims for a Universe without a

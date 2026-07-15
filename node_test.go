@@ -69,7 +69,7 @@ func readContent(t *testing.T, n Node, u Universe) []byte {
 func TestNodeInlineContent(t *testing.T) {
 	alice := contributor(t)
 	body := []byte("From: alice\r\n\r\nI like apples.")
-	c, err := NewClaim(TypeSource("email"), alice).WithInlineContent(body).Sign()
+	c, err := NewClaim(TypeSource("email"), alice).WithInlineContent(body).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	n := c.Node()
@@ -98,6 +98,7 @@ func TestNodeExternalContent(t *testing.T) {
 
 	c, err := NewClaim(TypeSource("blob"), alice).
 		WithExternalContent(hash, uint64(len(blob))). // hash+size, no inline bytes (XOR, §4.4)
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
 
@@ -126,6 +127,7 @@ func TestNodeContentXOR(t *testing.T) {
 	_, err = NewClaim(TypeSource("blob"), alice).
 		WithInlineContent([]byte("bytes")).
 		WithExternalContent(hash, 5). // both inline and external — the builder must refuse
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.ErrorIs(t, err, errClaimContentXOR, "node content XOR is enforced")
 }
@@ -140,4 +142,24 @@ func TestNodeNoContent(t *testing.T) {
 	require.Equal(t, uint64(0), n.GetContentSize())
 	require.False(t, n.IsContentExternal(), "no content is not external content")
 	require.Empty(t, readContent(t, n, nil), "no-content node streams empty")
+}
+
+// --- height (§4.1) ------------------------------------------------------
+
+// TestNodeHeightInitialIsZero: an initial node (a root contributor, no edges)
+// is height 0 automatically.
+func TestNodeHeightInitialIsZero(t *testing.T) {
+	root := contributor(t)
+	require.Equal(t, uint64(0), root.Node().Height(), "an initial node is height 0")
+}
+
+// TestNodeHeightIncrementsDownChain: height is 1 + max(reference heights), so
+// it grows by one along a derivation chain root(0) ← a(1) ← b(2).
+func TestNodeHeightIncrementsDownChain(t *testing.T) {
+	root := contributor(t)
+	a := srcClaim(t, root, "a")
+	b := entityClaim(t, root, "person", "b", a)
+	require.Equal(t, uint64(0), root.Node().Height())
+	require.Equal(t, uint64(1), a.Node().Height(), "source over the height-0 contributor")
+	require.Equal(t, uint64(2), b.Node().Height(), "entity over the height-1 source")
 }

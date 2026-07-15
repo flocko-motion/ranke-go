@@ -315,6 +315,15 @@ func (s *stack) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.I
 	return ranke.DefaultGetFromClosure(ctx, s, heads, id)
 }
 
+// GetClaimHeights resolves heights through the stack's own GetClaims — the one
+// place the layer traversal (fall-through + read-fill) lives — then reads each
+// committed height. Delegating to DefaultGetClaimHeights keeps that traversal
+// unduplicated; the stack's fast top layer (and any leaf height cache it warms)
+// makes the underlying read cheap.
+func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	return ranke.DefaultGetClaimHeights(ctx, s, ids)
+}
+
 // Capabilities derives the stack's from its layers, per capability:
 //   - Overwrite: every eager layer can (repair must reach the durable tier);
 //   - Delete: every layer can (else a deleted key lingers in some layer);

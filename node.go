@@ -40,6 +40,12 @@ type Node interface {
 	EncodingClass() EncodingClass
 	EncodingSub() string
 	CreatedAt() time.Time
+	// Height is the claim's generation number in the provenance DAG: 0 for
+	// an initial node (no edges), else 1 + max over the heights of the
+	// claims this one references (§4.1). Fixed at creation and covered by
+	// the node hash, so the id commits to it; the verifier re-derives and
+	// enforces it against the closure.
+	Height() uint64
 	// Edges returns the ids of edges created with this claim, in
 	// canonical (sort) order.
 	Edges() []Id
@@ -61,7 +67,8 @@ type node struct {
 	content       []byte // raw content bytes, kept with the node
 	contentSize   uint64 // = len(content); paired with contentHash to defend against truncation/extension
 	createdAt     time.Time
-	edges         []Id // edge ids, sorted canonically
+	height        uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
+	edges         []Id   // edge ids, sorted canonically
 	fields        map[string]string
 	id            Id // = Sign(H(S(node))); also the claim id
 
@@ -137,7 +144,12 @@ func (n *node) IsContentExternal() bool {
 func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
 func (n *node) CreatedAt() time.Time   { return n.createdAt }
-func (n *node) ID() Id                 { return n.id }
+
+// Height returns the node's own generation number. Unlike content and the
+// field map, height is never inherited through a diff overlay — each claim
+// (delta or not) carries its own height, so this reads the node directly.
+func (n *node) Height() uint64 { return n.height }
+func (n *node) ID() Id         { return n.id }
 
 func (n *node) Edges() []Id {
 	out := make([]Id, len(n.edges))

@@ -64,7 +64,7 @@ type Streamer interface {
 //
 //deadcode:keep
 func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
-	u := &blobUniverse{store: store, concurrency: 1}
+	u := &blobUniverse{store: store, concurrency: 1, heights: ranke.NewHeightCache()}
 	for _, o := range opts {
 		o(u)
 	}
@@ -100,6 +100,11 @@ type blobUniverse struct {
 	// when concurrency<=1 → sequential). Shared by every forEach call, so the
 	// cap is a total, not per-call.
 	sem chan struct{}
+	// heights memoises id→height so GetClaimHeights rarely re-decodes a claim.
+	// Warmed opportunistically by GetClaims/PutClaims (every claim handled is
+	// Noted), so it fills with normal traffic. Heights are immutable, so the
+	// memo never goes stale.
+	heights *ranke.HeightCache
 }
 
 // forEach runs fn for each index in [0,n). When the Universe has a shared
@@ -176,6 +181,9 @@ func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ra
 	if err != nil {
 		return nil, err
 	}
+	// Warm the height cache from what we just decoded (heights are on the raw
+	// claims, before materialisation), so later GetClaimHeights avoids a reload.
+	u.heights.NoteClaims(out...)
 	// A byte store returns raw claims; the read path materialises diff overlays
 	// via the ADT default, honouring WithNotDiffMaterialized (passed through).
 	// Materialisation runs after the parallel fetch, so it sees complete claims.
@@ -184,7 +192,7 @@ func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ra
 
 //deadcode:keep
 func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
-	return u.forEach(ctx, len(cs), func(ctx context.Context, i int) error {
+	if err := u.forEach(ctx, len(cs), func(ctx context.Context, i int) error {
 		c := cs[i]
 		if c == nil || c.ID() == nil {
 			return errors.New("adapter.PutClaims: nil claim or id")
@@ -194,7 +202,12 @@ func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 			return err
 		}
 		return u.store.Put(ctx, c.ID().String(), data)
-	})
+	}); err != nil {
+		return err
+	}
+	// Every stored claim is one we hold in hand — warm the height cache.
+	u.heights.NoteClaims(cs...)
+	return nil
 }
 
 //deadcode:keep
@@ -323,4 +336,11 @@ func (u *blobUniverse) InClosure(ctx context.Context, heads []ranke.Id, id ranke
 // load).
 func (u *blobUniverse) GetFromClosure(ctx context.Context, heads []ranke.Id, id ranke.Id) (ranke.Claim, error) {
 	return ranke.DefaultGetFromClosure(ctx, u, heads, id)
+}
+
+// GetClaimHeights answers from the id→height cache, decoding only the ids it
+// has not seen (and caching those). With normal get/put traffic warming the
+// cache, a repeat lookup almost never touches the store.
+func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	return u.heights.GetClaimHeights(ctx, u, ids)
 }

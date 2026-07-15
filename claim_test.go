@@ -205,6 +205,7 @@ func TestClaimRoundTrip_SourceInlineContent(t *testing.T) {
 	c, err := NewClaim(TypeSource("email"), alice).
 		WithEncoding(EncodingMessage("rfc822")).
 		WithInlineContent([]byte("From: alice\r\nTo: bob\r\n\r\nI like apples.\r\n")).
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
 
@@ -223,6 +224,7 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 	alice := contributor(t)
 	source, err := NewClaim(TypeSource("email"), alice).
 		WithInlineContent([]byte("From: alice\r\n\r\nhello")).
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
 
@@ -239,6 +241,7 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 	entity, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
 		WithEdges(provEdge).
+		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
 
@@ -263,7 +266,7 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 	nodeHash, err := hashContent([]byte("a large external node payload"))
 	require.NoError(t, err)
 
-	source, err := NewClaim(TypeSource("blob"), alice).WithInlineContent([]byte("seed")).Sign()
+	source, err := NewClaim(TypeSource("blob"), alice).WithInlineContent([]byte("seed")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	extEdge, err := NewEdge(EdgeConfig{
@@ -280,6 +283,7 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 	c, err := NewClaim(TypeEntity("object"), alice).
 		WithExternalContent(nodeHash, nodeBlobLen). // hash+size, no inline bytes (XOR, §4.4)
 		WithEdges(extEdge).
+		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
 	require.True(t, c.Node().IsContentExternal(), "node content is external")
@@ -298,6 +302,7 @@ func TestClaimRoundTrip_Fields(t *testing.T) {
 		WithField("zeta", "26").
 		WithField("alpha", "1").
 		WithField("title", "just a plain field").
+		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
 
@@ -313,16 +318,18 @@ func TestClaimRoundTrip_Fields(t *testing.T) {
 // the codec on each edge.
 func TestClaimRoundTrip_RelationDirections(t *testing.T) {
 	alice := contributor(t)
-	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).Sign()
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 	person, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
 		WithEdges(mustDerivEdge(t, source)).
+		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
 	object, err := NewClaim(TypeEntity("object"), alice).
 		WithInlineContent([]byte("apples")).
 		WithEdges(mustDerivEdge(t, source)).
+		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
 
@@ -338,6 +345,7 @@ func TestClaimRoundTrip_RelationDirections(t *testing.T) {
 	rel, err := NewClaim(TypeRelation("likes"), alice).
 		WithInlineContent([]byte("likes")).
 		WithEdges(fromEdge, toEdge, mustDerivEdge(t, source)).
+		WithHeight(HeightOf(alice, person, object, source)).
 		Sign()
 	require.NoError(t, err)
 
@@ -366,6 +374,7 @@ func TestClaimIdReflectsContent(t *testing.T) {
 		c, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte(body)).
 			WithCreatedAt(at).
+			WithHeight(HeightOf(alice)).
 			Sign()
 		require.NoError(t, err)
 		return c

@@ -38,9 +38,10 @@ func branchEdge(t *testing.T, name string, head Id) Edge {
 
 // branchTable builds a contribution/branches claim (a branch table head)
 // carrying the given branch edges, attributed to root.
-func branchTable(t *testing.T, root Contributor, edges ...Edge) Claim {
+func branchTable(t *testing.T, root Contributor, heads []Claim, edges ...Edge) Claim {
 	t.Helper()
-	c, err := NewClaim(NodeBranches, root).WithEdges(edges...).Sign()
+	c, err := NewClaim(NodeBranches, root).WithEdges(edges...).
+		WithHeight(HeightOf(append([]Claim{root}, heads...)...)).Sign()
 	require.NoError(t, err)
 	return c
 }
@@ -70,7 +71,7 @@ func TestArchiveClaimAndContentReads(t *testing.T) {
 	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "the body")
-	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
 	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
@@ -109,10 +110,10 @@ func TestArchiveExternalContentRead(t *testing.T) {
 	blob := []byte("external archive payload")
 	hash, err := HashContent(blob)
 	require.NoError(t, err)
-	ext, err := NewClaim(TypeSource("blob"), root).WithExternalContent(hash, uint64(len(blob))).Sign()
+	ext, err := NewClaim(TypeSource("blob"), root).WithExternalContent(hash, uint64(len(blob))).WithHeight(HeightOf(root)).Sign()
 	require.NoError(t, err)
 
-	bth := branchTable(t, root, branchEdge(t, "main", ext.ID()))
+	bth := branchTable(t, root, []Claim{ext}, branchEdge(t, "main", ext.ID()))
 	putClaims(t, u, root, ext, bth)
 	require.NoError(t, u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: blob}}))
 
@@ -140,16 +141,18 @@ func TestArchiveMaterializesDiff(t *testing.T) {
 	base, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("the full base content")).
 		WithField("author", "alice").
+		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)
 	// A revision restating only "rev" — content and "author" are inherited.
 	delta, err := NewClaim(TypeSource("note"), root).
 		WithDiff(base.ID()).
 		WithField("rev", "2").
+		WithHeight(HeightOf(root, base)).
 		Sign()
 	require.NoError(t, err)
 
-	bth := branchTable(t, root, branchEdge(t, "main", delta.ID()))
+	bth := branchTable(t, root, []Claim{delta}, branchEdge(t, "main", delta.ID()))
 	putClaims(t, u, root, base, delta, bth)
 
 	// The stored delta itself carries neither the inherited field nor the base
@@ -187,7 +190,7 @@ func TestArchiveBranchReads(t *testing.T) {
 	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
-	bth := branchTable(t, root, branchEdge(t, "main", em.ID()))
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
 	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
@@ -225,11 +228,12 @@ func TestArchiveBranchDiffChain(t *testing.T) {
 	emDev := srcClaim(t, root, "dev head")
 
 	// table1: just main.
-	table1 := branchTable(t, root, branchEdge(t, "main", emMain.ID()))
+	table1 := branchTable(t, root, []Claim{emMain}, branchEdge(t, "main", emMain.ID()))
 	// table2: a diff over table1 that adds dev.
 	table2, err := NewClaim(NodeBranches, root).
 		WithDiff(table1.ID()).
 		WithEdges(branchEdge(t, "dev", emDev.ID())).
+		WithHeight(HeightOf(root, table1, emDev)).
 		Sign()
 	require.NoError(t, err)
 
