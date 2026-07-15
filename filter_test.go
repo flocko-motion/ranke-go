@@ -84,6 +84,21 @@ func TestEdgeFilterType(t *testing.T) {
 	require.Empty(t, c.Edges(EdgeFilterType{Type: "relation/knows"}), "no such edge")
 }
 
+// TestEdgeFilterTypes: EdgeFilterTypes selects edges matching ANY of the types
+// (the union / OR analog of EdgeFilterType).
+func TestEdgeFilterTypes(t *testing.T) {
+	c := richClaim(t)
+	require.Len(t, c.Edges(EdgeFilterTypes{Types: []string{"derivation/source", "derivation/summary"}}), 2,
+		"union of both derivation subtypes")
+	require.Len(t, c.Edges(EdgeFilterTypes{Types: []string{EdgeTypeContributor, "relation/likes"}}), 3,
+		"contributor + the two likes edges, across classes")
+	require.Len(t, c.Edges(EdgeFilterTypes{Types: []string{"derivation/source", "relation/knows"}}), 1,
+		"an absent type in the set contributes nothing")
+	require.Len(t, c.Edges(EdgeFilterTypes{Types: []string{"relation/likes"}}), 2,
+		"a single-element set behaves like EdgeFilterType")
+	require.Empty(t, c.Edges(EdgeFilterTypes{Types: nil}), "empty set matches nothing")
+}
+
 // TestEdgeFilterFieldValue: matches an edge whose field equals the value;
 // an edge lacking the field never matches.
 func TestEdgeFilterFieldValue(t *testing.T) {

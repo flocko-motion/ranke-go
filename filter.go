@@ -49,3 +49,25 @@ func (f EdgeFilterType) MatchNode(Node) bool { return true }
 
 // IsEdgeFilter reports that this filter selects edges (not nodes).
 func (f EdgeFilterType) IsEdgeFilter() bool { return true }
+
+// EdgeFilterTypes matches an edge whose type ("class/sub") is any of Types —
+// EdgeFilterType widened to a set (OR within this one filter).
+type EdgeFilterTypes struct {
+	Types []string
+}
+
+// MatchEdge reports whether e's type equals any of the target types.
+func (f EdgeFilterTypes) MatchEdge(e Edge) bool {
+	for _, t := range f.Types {
+		if e.Type() == t {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchNode always passes — this is an edge-only filter.
+func (f EdgeFilterTypes) MatchNode(Node) bool { return true }
+
+// IsEdgeFilter reports that this filter selects edges (not nodes).
+func (f EdgeFilterTypes) IsEdgeFilter() bool { return true }

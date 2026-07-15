@@ -41,18 +41,6 @@ type Claim interface {
 	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
 
-	// Tags returns the claim's mutable runtime tags — a pure-functional overlay
-	// (branch membership, spine revision), not part of the id or the encoded
-	// bytes. The map is live: mutate it, then persist with SetTag. A tag-aware
-	// Universe injects these when handing out a claim (see GetClaims); an opaque
-	// byte store leaves them empty.
-	Tags() map[string]string
-	// Tag returns one tag's value, "" if unset (best effort).
-	Tag(key string) string
-	// HasTag reports whether key is set.
-	HasTag(key string) bool
-	// SetTag persists the claim's current tags to u (via u.SetClaimsTags).
-	SetTag(ctx context.Context, u Universe) error
 	// Encode returns the claim's canonical CBOR serialization — the whole
 	// storage record (node + edge bodies + any inline content), storage-
 	// agnostic. Inverse of the package-level DecodeClaim; persistence
