@@ -26,14 +26,29 @@ type Query struct {
 	Execution Execution
 }
 
-// Select is a generator: a starting point and a traversal. Claim roots at a
-// claim id; Path is how to walk from it. Branch names a branch to root at — an
-// archive-level concept the Universe cannot resolve on its own, so a Universe
-// read requires Claim to be set (a higher layer resolves Branch → head id
-// first). An empty Path follows every edge outward to the full closure (§Closures).
+// Reserved virtual branch scopes for Select.Branch (the $-target family, spec
+// §Access). A real branch name confines a query to that branch's closure;
+// these two name the archive-wide and unconfined scopes.
+const (
+	// BranchUniverse applies no confinement — privileged access rooted at
+	// Select.Claim, which is therefore required. The explicit form of "no
+	// branch"; an empty Branch is not allowed.
+	BranchUniverse = "$universe"
+	// BranchArchive confines to the whole Ranke-Archive: the closure of the
+	// branch-table header. Select.Claim defaults to the current archive head.
+	BranchArchive = "$archive"
+)
+
+// Select is a generator: a scope, a root, and a traversal. Branch is the
+// mandatory scope — a real branch name (confined to that branch), or the
+// reserved BranchUniverse / BranchArchive. Claim is the root within the scope:
+// required under BranchUniverse (there is no head to default to), optional
+// otherwise (the archive layer defaults it to the scope's current head — the
+// branch head, or the branch-table header for BranchArchive). An empty Path
+// follows every edge outward to the full closure (§Closures).
 type Select struct {
-	Branch string
-	Claim  Id
+	Branch string // scope: BranchUniverse, BranchArchive, or a branch name
+	Claim  Id     // root within the scope; required under BranchUniverse
 	Path   []PathStep
 }
 

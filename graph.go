@@ -99,13 +99,13 @@ func (g *graph) ContainsClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
 		return false, nil
 	}
-	return g.u.InClosure(ctx, g.Heads(), id)
+	return InClosure(ctx, g.u, BranchUniverse, g.Heads(), id)
 }
 
 // GetClaim returns the claim at id if it is reachable from any open head,
 // loaded (materialised) from the Universe; ErrNotFound otherwise.
 func (g *graph) GetClaim(ctx context.Context, id Id) (Claim, error) {
-	return g.u.GetFromClosure(ctx, g.Heads(), id)
+	return GetFromClosure(ctx, g.u, BranchUniverse, g.Heads(), id)
 }
 
 func (g *graph) Heads() []Id {

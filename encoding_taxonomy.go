@@ -4,6 +4,29 @@
 // limits:  vocabulary + alias resolution only; the codec applies the aliases into the canonical bytes and the node holds the value (-> codec, node)
 package ranke
 
+import "strings"
+
+// IsTextEncoding reports whether a media type carries human-legible text —
+// text/*, message/* (e.g. rfc822), and structured-text application types
+// (application/json, application/xml, and any +json / +xml suffix). Binary
+// types (image/audio/video/font, application/octet-stream, …) return false. An
+// empty encoding is treated as non-text. Used to decide whether content is
+// worth inlining as readable text vs left to a byte store.
+func IsTextEncoding(encoding string) bool {
+	switch {
+	case encoding == "":
+		return false
+	case strings.HasPrefix(encoding, "text/"),
+		strings.HasPrefix(encoding, "message/"),
+		strings.HasSuffix(encoding, "+json"),
+		strings.HasSuffix(encoding, "+xml"),
+		encoding == EncodingJSON,
+		encoding == EncodingXML:
+		return true
+	}
+	return false
+}
+
 // --- Top-level class vocabulary (RFC 6838 media types; the subtype is open) ---
 
 // EncodingClass is the closed top-level MIME vocabulary (RFC 6838

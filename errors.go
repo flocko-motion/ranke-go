@@ -100,6 +100,7 @@ var (
 	errCopyContents           = errors.New("ranke.CopyContents")
 	errQuery                  = errors.New("ranke.Query")
 	errQueryNoRoot            = errors.New("ranke.Query: Select.Claim is required (resolve a branch to a head id before querying a Universe)")
+	errQueryNoScope           = errors.New("ranke.Query: Select.Branch is required (scope is mandatory — use BranchUniverse for an unconfined read)")
 	errReverseWalkUnsupported = errors.New("ranke.Query: this Universe cannot walk edges backward (Capabilities.ReverseWalk is false); use a reverse-indexed layer or a provenance step; direction")
 	errVerify                 = errors.New("ranke.verify")
 	errContributorUnresolved  = errors.New("ranke.verify: contributor claim unresolved")

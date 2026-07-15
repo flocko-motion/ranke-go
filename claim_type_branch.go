@@ -63,14 +63,14 @@ func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
 		return false, errNilID
 	}
-	return b.u.InClosure(ctx, []Id{b.Reference()}, id)
+	return InClosure(ctx, b.u, b.Name(), []Id{b.Reference()}, id)
 }
 
 func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
-	return b.u.GetFromClosure(ctx, []Id{b.Reference()}, id)
+	return GetFromClosure(ctx, b.u, b.Name(), []Id{b.Reference()}, id)
 }
 
 func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
