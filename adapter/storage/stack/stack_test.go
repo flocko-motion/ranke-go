@@ -414,20 +414,17 @@ func TestStackResolvesContributorContentByClaim(t *testing.T) {
 		t.Fatalf("expected the cache to return a content-stripped claim, got %d inline bytes", len(b))
 	}
 
-	// Resolving content BY CLAIM must still recover the pubkey (fall-through to
-	// the byte layer), for both an explicit Inline hint and Unknown.
-	for _, kind := range []ranke.ContentKind{ranke.ContentInline, ranke.ContentUnknown} {
-		rc, err := ranke.GetClaimContent(ctx, st, c.ID(), kind)
-		if err != nil {
-			t.Fatalf("GetClaimContent(kind=%d): %v", kind, err)
-		}
-		data, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			t.Fatalf("read content (kind=%d): %v", kind, err)
-		}
-		if !bytes.Equal(data, pubkey) {
-			t.Fatalf("kind=%d: content = %d bytes, want the %d-byte pubkey", kind, len(data), len(pubkey))
-		}
+	// Reading content from the claim in hand recovers the pubkey: the
+	// structure-only view falls through to the byte layer.
+	rc, err := got.GetContent(ctx, st)
+	if err != nil {
+		t.Fatalf("GetContent: %v", err)
+	}
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	if !bytes.Equal(data, pubkey) {
+		t.Fatalf("content = %d bytes, want the %d-byte pubkey", len(data), len(pubkey))
 	}
 }

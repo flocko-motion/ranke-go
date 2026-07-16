@@ -7,6 +7,7 @@ package ranke
 import (
 	"context"
 	"crypto"
+	"io"
 )
 
 // Contributor is a typed view over a Claim whose node type is
@@ -71,7 +72,10 @@ func (s *signedContributor) IsContributor() bool            { return s.contribut
 func (s *signedContributor) AsContributor(ctx context.Context, u Universe, key ...crypto.Signer) (Contributor, error) {
 	return s.contributor.AsContributor(ctx, u, key...)
 }
-func (s *signedContributor) ID() Id                  { return s.contributor.ID() }
+func (s *signedContributor) ID() Id { return s.contributor.ID() }
+func (s *signedContributor) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
+	return s.contributor.GetContent(ctx, u)
+}
 func (s *signedContributor) Tags() map[string]string { return s.contributor.Tags() }
 func (s *signedContributor) Tag(key string) string   { return s.contributor.Tag(key) }
 func (s *signedContributor) HasTag(key string) bool  { return s.contributor.HasTag(key) }

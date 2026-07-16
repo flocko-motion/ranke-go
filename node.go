@@ -22,13 +22,18 @@ type Node interface {
 	// IsContentExternal reports whether the content is stored as a
 	// separate Universe blob (true) or inline in the node (false).
 	IsContentExternal() bool
-	// GetContentHash is H(content) — the content's address; nil when the
-	// node carries no content.
+	// GetContentHash is the address of EXTERNAL content, H(content); nil for
+	// inline content (whose bytes are in the node, §Content) and for no content.
 	GetContentHash() Id
 	// GetContentSize is the content's byte length (0 when no content).
 	// Paired with the hash to defend against truncation/extension and to
 	// let storage layers know the size without loading the bytes.
 	GetContentSize() uint64
+	// ContentKind reports whether and where the node's content lives — Inline,
+	// External, or None. A node always knows its own kind (never Unknown);
+	// GetClaimContent uses it to route. Reads through a diff overlay via the
+	// effective content source.
+	ContentKind() ContentKind
 	// GetInlineContent returns the inline content bytes (nil when the node
 	// carries no content); it errors when the content is external — check
 	// IsContentExternal first, or use GetContent with a Universe.
@@ -63,19 +68,14 @@ type node struct {
 	typeSub       string
 	encodingClass EncodingClass
 	encodingSub   string
-	contentHash   Id     // nil when no content
-	content       []byte // raw content bytes, kept with the node
-	contentSize   uint64 // = len(content); paired with contentHash to defend against truncation/extension
-	// contentExternal, when non-nil, is the authoritative inline/external flag
-	// (set by AssembleClaim from ClaimParts); nil means derive it from whether
-	// content bytes are present. A structure cache (neo4j) may hold the hash
-	// without the bytes yet still know the content is inline, not external.
-	contentExternal *bool
-	createdAt       time.Time
-	height          uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
-	edges           []Id   // edge ids, sorted canonically
-	fields          map[string]string
-	id              Id // = Sign(H(S(node))); also the claim id
+	contentHash   Id     // external content: its address; nil for inline or no content
+	content       []byte // inline content bytes, kept with the node; nil when external or none
+	contentSize   uint64 // paired with content/contentHash to defend against truncation/extension
+	createdAt     time.Time
+	height        uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
+	edges         []Id   // edge ids, sorted canonically
+	fields        map[string]string
+	id            Id // = Sign(H(S(node))); also the claim id
 
 	// Diff materialisation (set by the loader when the owning claim is a
 	// contribution/diff overlay): diffNode is the materialised predecessor
@@ -113,10 +113,10 @@ func (n *node) computeDiffFields() {
 }
 
 // contentSource is the node that supplies this node's content: self if it
-// sets its own content, else the diff predecessor's source (content is
-// inherited unless a diff restates it).
+// sets its own content — inline (content) or external (content_hash) — else the
+// diff predecessor's source (content is inherited unless a diff restates it).
 func (n *node) contentSource() *node {
-	if n.contentHash != nil || n.diffNode == nil {
+	if n.content != nil || n.contentHash != nil || n.diffNode == nil {
 		return n
 	}
 	return n.diffNode.contentSource()
@@ -143,15 +143,33 @@ func (n *node) EncodingClass() EncodingClass { return n.contentSource().encoding
 func (n *node) EncodingSub() string          { return n.contentSource().encodingSub }
 
 func (n *node) IsContentExternal() bool {
+	// content_hash ⟺ external (§Content: content and content_hash are mutually
+	// exclusive, so a hash means the bytes live in the Universe, not the record).
 	cs := n.contentSource()
-	if cs.contentExternal != nil {
-		return *cs.contentExternal // authoritative (set by AssembleClaim)
-	}
-	return cs.content == nil && cs.contentHash != nil // derived
+	return cs.content == nil && cs.contentHash != nil
 }
 func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
 func (n *node) CreatedAt() time.Time   { return n.createdAt }
+
+// ContentKind derives from the effective source's fields. content_hash marks
+// External (§Content: content and content_hash are mutually exclusive, and the
+// hash is retained even by a structure-only cache). Otherwise inline bytes — or
+// a non-zero content_size — mark Inline: the size lets a structure-only cache
+// that dropped the inline bytes still report Inline, so GetClaimContent falls
+// through to the byte layer for them. Neither ⇒ None. Never Unknown — a node
+// always knows its own kind.
+func (n *node) ContentKind() ContentKind {
+	cs := n.contentSource()
+	switch {
+	case cs.contentHash != nil:
+		return ContentExternal
+	case cs.content != nil || cs.contentSize > 0:
+		return ContentInline
+	default:
+		return ContentNone
+	}
+}
 
 // Height returns the node's own generation number. Unlike content and the
 // field map, height is never inherited through a diff overlay — each claim
@@ -175,16 +193,23 @@ func (n *node) GetInlineContent() ([]byte, error) {
 
 func (n *node) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
 	cs := n.contentSource()
-	if cs.contentHash == nil {
-		return bytes.NewReader(nil), nil // no content — empty reader
+	switch n.ContentKind() {
+	case ContentExternal:
+		if u == nil {
+			return nil, errNoUniverseForContent
+		}
+		return u.StreamContent(ctx, cs.contentHash, cs.contentSize)
+	case ContentInline:
+		if cs.content != nil {
+			return bytes.NewReader(cs.content), nil // complete: bytes in hand
+		}
+		if u == nil {
+			return nil, errNoUniverseForContent
+		}
+		return claimInlineReader(ctx, u, cs.id) // structure-only: re-fetch dropped bytes
+	default: // ContentNone
+		return bytes.NewReader(nil), nil
 	}
-	if cs.content != nil {
-		return bytes.NewReader(cs.content), nil // inline
-	}
-	if u == nil {
-		return nil, errNoUniverseForContent
-	}
-	return u.StreamContent(ctx, cs.contentHash, cs.contentSize)
 }
 
 func (n *node) HasField(name string) bool {

@@ -96,13 +96,11 @@ func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
 }
 
 func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
-	c, err := a.GetClaim(ctx, id)
+	c, err := a.GetClaim(ctx, id) // scope-checked; then read from the claim in hand
 	if err != nil {
 		return nil, err
 	}
-	// Claim-addressed: internal content comes from the claim's own bytes,
-	// external is streamed by hash
-	return GetClaimContent(ctx, a.u, id, c.Node().ContentKind())
+	return c.GetContent(ctx, a.u)
 }
 
 // --- Branches ---

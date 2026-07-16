@@ -66,6 +66,9 @@ func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
 	return InClosure(ctx, b.u, b.Name(), []Id{b.Reference()}, id)
 }
 
+// GetClaim resolves id in this branch — the expensive route, verifying
+// branch-scope membership through the closure. Hold the claim already? Read its
+// content via Claim.GetContent instead of re-resolving here.
 func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
@@ -74,11 +77,11 @@ func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 }
 
 func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
-	c, err := b.GetClaim(ctx, id)
+	c, err := b.GetClaim(ctx, id) // scope-checked; then read from the claim in hand
 	if err != nil {
 		return nil, err
 	}
-	return c.Node().GetContent(ctx, b.u)
+	return c.GetContent(ctx, b.u)
 }
 
 // Prev returns the previous revision of this branch: a branch, same name,

@@ -41,6 +41,11 @@ type Claim interface {
 	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
 
+	// GetContent reads the claim's content (unscoped, no branch check): inline
+	// from the claim, external streamed from u; re-fetches from u only if a
+	// structure-only view dropped the inline bytes.
+	GetContent(ctx context.Context, u Universe) (io.Reader, error)
+
 	// Encode returns the claim's canonical CBOR serialization — the whole
 	// storage record (node + edge bodies + any inline content), storage-
 	// agnostic. Inverse of the package-level DecodeClaim; persistence
@@ -87,6 +92,10 @@ type claim struct {
 func (c *claim) Node() Node     { return c.node }
 func (c *claim) ID() Id         { return c.node.id }
 func (c *claim) unwrap() *claim { return c }
+
+func (c *claim) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
+	return c.node.GetContent(ctx, u)
+}
 
 func (c *claim) Tags() map[string]string {
 	if c.tags == nil {
