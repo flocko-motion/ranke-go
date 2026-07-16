@@ -6,6 +6,7 @@ package neo4j
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -46,79 +47,49 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) map[string]any {
 
 	// Edge content is meaningful — an agent's reasoning, a proof, or detail like
 	// "is the sister of" on a relation/family edge — so it is inlined as legible
-	// text too. Edges carry no encoding yet, so eligibility is UTF-8 validity
-	// alone (pass IsTextEncoding here once edges expose an encoding).
+	// text too, gated on the edge's own encoding being a text type (edges now
+	// carry an encoding, exactly like nodes).
 	edges := make([]map[string]any, 0, len(c.Edges()))
 	for _, e := range c.Edges() {
 		ep := map[string]any{
 			"edge_id":      e.ID().String(),
 			"reference":    e.Reference().String(),
 			"type":         labelFor(e.Type()),
-			"direction":    int64(e.RelationDirection()),
+			"encoding":     strProp(e.Encoding()),
+			"direction":    directionProp(e.RelationDirection()),
 			"content_hash": idStr(e.GetContentHash()),
-			"content_size": int64(e.GetContentSize()),
-			"content":      u.inlineText(true, e.GetContentSize(), e.IsContentExternal(), e.GetInlineContent),
+			"content_size": contentSizeProp(e.GetContentHash(), e.GetContentSize()),
+			"content":      u.inlineText(ranke.IsTextEncoding(e.Encoding()), e.GetContentSize(), e.IsContentExternal(), e.GetInlineContent),
 		}
-		setFields(ep, e.Fields(), e.GetField)
-		setContentFlag(ep, e.GetContentHash(), e.IsContentExternal())
+		ep["fields"] = fieldsMapOf(e.Fields(), e.GetField)
 		edges = append(edges, ep)
 	}
 
 	np := map[string]any{
 		"id":           c.ID().String(),
 		"type":         labelFor(n.Type()),
-		"encoding":     n.Encoding(),
-		"created_at":   n.CreatedAt().UTC().UnixNano(),
+		"encoding":     strProp(n.Encoding()),
+		"created_at":   n.CreatedAt().UTC().Format(iso8601Nano),
 		"height":       int64(n.Height()),
 		"content_hash": idStr(n.GetContentHash()),
-		"content_size": int64(n.GetContentSize()),
+		"content_size": contentSizeProp(n.GetContentHash(), n.GetContentSize()),
 		"content":      u.inlineText(ranke.IsTextEncoding(n.Encoding()), n.GetContentSize(), n.IsContentExternal(), n.GetInlineContent),
+		"fields":       fieldsMapOf(n.Fields(), n.GetField),
 		"edges":        edges,
 	}
-	setFields(np, n.Fields(), n.GetField)
-	setContentFlag(np, n.GetContentHash(), n.IsContentExternal())
 	return np
-}
-
-// setContentFlag stamps exactly one content-location flag when the node/edge
-// carries content: _ci (inline) or _ce (external). A content-bearing record
-// with neither is a broken node (partsFromNode rejects it), so the retrieval
-// path never guesses.
-func setContentFlag(m map[string]any, hash ranke.Id, external bool) {
-	if hash == nil {
-		return // no content — no flag
-	}
-	if external {
-		m[ranke.ContentExternalKey] = true
-	} else {
-		m[ranke.ContentInternalKey] = true
-	}
-}
-
-// contentFlag reads the content-location flag from a content-bearing record's
-// props: exactly one of _ci/_ce must be set. It returns whether the content is
-// external, or an error when neither (or both) is set — a broken node, surfaced
-// rather than guessed.
-func contentFlag(props map[string]any, what string) (external bool, err error) {
-	ci := asBool(props[ranke.ContentInternalKey])
-	ce := asBool(props[ranke.ContentExternalKey])
-	if ci == ce { // neither set, or both — malformed
-		return false, fmt.Errorf("adapter/neo4j: %s carries content but not exactly one of %s/%s — broken node",
-			what, ranke.ContentInternalKey, ranke.ContentExternalKey)
-	}
-	return ce, nil
 }
 
 // inlineText returns the content bytes as a legible string when the content is
 // inline, within cap, eligible to be text, and valid UTF-8 — so the browser
 // shows readable content (a claim's body, or an edge's reasoning/proof/detail
-// like "is the sister of"). Otherwise nil: the property is absent and the claim
-// reconstructs as external for the durable layer to serve. Storing readable
-// text (not base64) is the point — the graph is meant to be inspected.
+// like "is the sister of"). Otherwise nil: the property is absent, and the claim
+// still reconstructs as internal (content_size marks that content exists) with
+// the bytes served from the byte layer by claim. Storing readable text (not
+// base64) is the point — the graph is meant to be inspected.
 //
-// eligible gates text-ness: for a node it is ranke.IsTextEncoding(encoding);
-// for an edge (which carries no encoding yet) it is true, so valid UTF-8 is the
-// sole signal. Once edges expose an encoding, pass IsTextEncoding for them too.
+// eligible gates text-ness — ranke.IsTextEncoding(encoding) for both a node and
+// an edge (both carry an encoding): binary content is left out, never base64'd.
 func (u *neo4jUniverse) inlineText(eligible bool, size uint64, external bool, get func() ([]byte, error)) any {
 	if external || u.contentCap == 0 || size > uint64(u.contentCap) || !eligible {
 		return nil
@@ -134,33 +105,40 @@ func (u *neo4jUniverse) inlineText(eligible bool, size uint64, external bool, ge
 // labels (the node's type is its label), and its edge records (each carrying
 // its relationship type as rtype). id is the caller-supplied id (a signature —
 // never re-derived). Inline content, when the cache holds it, is carried as the
-// `content` text property; content the cache lacks is left off, so the claim
-// reconstructs as external and the durable layer serves it.
+// `content` text property; binary/over-cap content the cache didn't inline is
+// left off but still reconstructs as internal (content_size marks it), with the
+// bytes served from the byte layer by claim.
 func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []any) (ranke.ClaimParts, error) {
+	createdAt, err := time.Parse(iso8601Nano, asString(props["created_at"]))
+	if err != nil {
+		return ranke.ClaimParts{}, fmt.Errorf("adapter/neo4j: claim %s: bad created_at: %w", id, err)
+	}
 	p := ranke.ClaimParts{
 		ID:        id,
 		Type:      typeFromLabels(labels),
 		Encoding:  asString(props["encoding"]),
-		CreatedAt: time.Unix(0, asInt(props["created_at"])).UTC(),
+		CreatedAt: createdAt,
 		Height:    uint64(asInt(props["height"])),
 	}
 	ch, err := parseOptID(props["content_hash"])
 	if err != nil {
 		return ranke.ClaimParts{}, err
 	}
-	if ch != nil {
+	// Content location follows §Content: a content_hash means external; an inline
+	// `content` property (or, when the cache didn't hold the bytes, just a
+	// content_size) means internal. No flag — AssembleClaim derives external from
+	// content_hash presence.
+	switch {
+	case ch != nil: // external — the byte layer serves the blob by hash
 		p.ContentHash = ch
 		p.ContentSize = uint64(asInt(props["content_size"]))
-		ext, err := contentFlag(props, "claim "+id.String())
-		if err != nil {
-			return ranke.ClaimParts{}, err
-		}
-		p.ContentExternal = ext // authoritative: neo4j may hold the hash without the bytes
-		if s := asString(props["content"]); s != "" {
-			p.InlineContent = []byte(s) // legible text, stored verbatim
-		}
+	case asString(props["content"]) != "": // inline text the cache holds
+		p.InlineContent = []byte(asString(props["content"]))
+		p.ContentSize = uint64(asInt(props["content_size"]))
+	case asInt(props["content_size"]) > 0: // inline, but not held here (binary/over-cap)
+		p.ContentSize = uint64(asInt(props["content_size"]))
 	}
-	p.Fields = fieldsFrom(props)
+	p.Fields = fieldsFrom(props, nodeStructural)
 	p.Tags = tagsFrom(props)
 
 	for _, raw := range edgeRecs {
@@ -183,24 +161,23 @@ func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []a
 			ID:                eid,
 			Reference:         ref,
 			Type:              asString(er["rtype"]), // the relationship type IS the edge type
+			Encoding:          asString(eprops["encoding"]),
 			RelationDirection: ranke.RelationDirection(asInt(eprops["direction"])),
-			Fields:            fieldsFrom(eprops),
+			Fields:            fieldsFrom(eprops, edgeStructural),
 		}
 		ech, err := parseOptID(eprops["content_hash"])
 		if err != nil {
 			return ranke.ClaimParts{}, err
 		}
-		if ech != nil {
+		switch {
+		case ech != nil: // external
 			ep.ContentHash = ech
 			ep.ContentSize = uint64(asInt(eprops["content_size"]))
-			ext, err := contentFlag(eprops, "edge "+asString(eprops["edge_id"]))
-			if err != nil {
-				return ranke.ClaimParts{}, err
-			}
-			ep.ContentExternal = ext
-			if s := asString(eprops["content"]); s != "" {
-				ep.InlineContent = []byte(s) // legible text, stored verbatim
-			}
+		case asString(eprops["content"]) != "": // inline text the cache holds
+			ep.InlineContent = []byte(asString(eprops["content"]))
+			ep.ContentSize = uint64(asInt(eprops["content_size"]))
+		case asInt(eprops["content_size"]) > 0: // inline, but not held here
+			ep.ContentSize = uint64(asInt(eprops["content_size"]))
 		}
 		p.Edges = append(p.Edges, ep)
 	}
@@ -218,56 +195,89 @@ func typeFromLabels(labels []any) string {
 	return ""
 }
 
-// setFields stores a name→value map as parallel string arrays, omitting them
-// entirely when empty (neo4j rejects empty-typed list properties).
-func setFields(m map[string]any, names []string, get func(string) (string, error)) {
-	if len(names) == 0 {
-		return
-	}
-	keys := make([]string, len(names))
-	vals := make([]string, len(names))
-	for i, k := range names {
-		v, _ := get(k)
-		keys[i] = k
-		vals[i] = v
-	}
-	m["field_keys"] = keys
-	m["field_vals"] = vals
+// iso8601Nano is the created_at property format: an ISO-8601 UTC timestamp with
+// nanosecond precision — legible in the neo4j browser and an exact round-trip of
+// the claim's created_at (which feeds the id preimage), unlike a raw unix count.
+const iso8601Nano = "2006-01-02T15:04:05.000000000Z"
+
+// A claim's extension fields are projected as first-class neo4j properties —
+// each under its own key, so the browser shows and can query them — rather than
+// opaque parallel arrays. Reconstruction recovers them as every property that is
+// neither a structural projection key (nodeStructural/edgeStructural) nor a
+// reserved "_" key (tags/flags).
+var nodeStructural = map[string]bool{
+	"id": true, "encoding": true, "created_at": true, "height": true,
+	"content": true, "content_hash": true, "content_size": true,
 }
 
-// fieldsFrom rebuilds the field map from the parallel arrays (nil when absent).
-func fieldsFrom(props map[string]any) map[string]string {
-	keys := asStringSlice(props["field_keys"])
-	vals := asStringSlice(props["field_vals"])
-	if len(keys) == 0 {
-		return nil
+var edgeStructural = map[string]bool{
+	"edge_id": true, "encoding": true, "direction": true,
+	"content": true, "content_hash": true, "content_size": true,
+}
+
+// fieldsMapOf builds the extension-field property map for a node/edge param
+// (empty, never nil, so the Cypher `SET n += fields` is a clean no-op).
+func fieldsMapOf(names []string, get func(string) (string, error)) map[string]string {
+	m := make(map[string]string, len(names))
+	for _, k := range names {
+		v, _ := get(k)
+		m[k] = v
 	}
-	out := make(map[string]string, len(keys))
-	for i, k := range keys {
-		if i < len(vals) {
-			out[k] = vals[i]
+	return m
+}
+
+// fieldsFrom rebuilds a record's extension fields from its properties: every key
+// that is neither a structural projection key nor a reserved "_" key. nil when
+// none.
+func fieldsFrom(props map[string]any, structural map[string]bool) map[string]string {
+	var out map[string]string
+	for k, v := range props {
+		if structural[k] || strings.HasPrefix(k, ranke.ReservedPrefix) {
+			continue
 		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[k] = asString(v)
 	}
 	return out
 }
 
 // tagsFrom extracts the tag overlay from a node's properties — those under the
-// reserved (ranke.ReservedPrefix) namespace, minus codec flags. nil when none.
+// reserved (ranke.ReservedPrefix) namespace. nil when none.
 func tagsFrom(props map[string]any) map[string]string {
 	var out map[string]string
 	for k, v := range props {
 		if !strings.HasPrefix(k, ranke.ReservedPrefix) {
 			continue
 		}
-		if k == ranke.ContentInternalKey || k == ranke.ContentExternalKey {
-			continue // reserved codec flags (_ci/_ce), not tags
-		}
 		if out == nil {
 			out = map[string]string{}
 		}
-		out[k] = asString(v) // key carries the "_" prefix — stored verbatim
+		out[k] = tagValue(v) // key carries the "_" prefix — stored verbatim
 	}
 	return out
+}
+
+// tagParam stores a tag value in its natural neo4j type: an integer-valued tag
+// (_br revision, _b_<branch> height) as a native integer — legible and
+// range-queryable in the browser — otherwise a string. Only canonical integer
+// strings convert (round-trip-safe), and tagValue reads them back as strings,
+// since the tag contract is string-valued.
+func tagParam(v string) any {
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil && strconv.FormatInt(n, 10) == v {
+		return n
+	}
+	return v
+}
+
+// tagValue reads a tag property back as its string form: a native integer tag
+// (see tagParam) is rendered as its digits.
+func tagValue(v any) string {
+	if n, ok := v.(int64); ok {
+		return strconv.FormatInt(n, 10)
+	}
+	return asString(v)
 }
 
 // idStr renders an id for a property, or nil (neo4j null) when absent.
@@ -276,6 +286,39 @@ func idStr(id ranke.Id) any {
 		return nil
 	}
 	return id.String()
+}
+
+// strProp renders a string property, or nil (omitted) when empty — e.g.
+// encoding, which per §Content/§Nodes exists only alongside content, so a
+// content-less claim carries none.
+func strProp(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// directionProp is the relation_direction property: set only on relation/*
+// edges, which carry ±1 (§Relations — from=1/to=-1). Other edges have 0 and
+// omit it, so there is no meaningless "direction: 0" on a contribution/diff or
+// derivation/source edge.
+func directionProp(d ranke.RelationDirection) any {
+	if d == 0 {
+		return nil
+	}
+	return int64(d)
+}
+
+// contentSizeProp is the content_size property value: the byte length when the
+// record carries content (§Content — mandatory with content, inline or
+// external), else nil so the property is omitted. Without this, content-less
+// claims (contributor heads, branch tables) would carry a meaningless
+// content_size: 0.
+func contentSizeProp(hash ranke.Id, size uint64) any {
+	if hash == nil && size == 0 {
+		return nil
+	}
+	return int64(size)
 }
 
 // parseOptID parses an optional id property (nil/absent → nil id).
@@ -292,11 +335,6 @@ func asString(v any) string {
 	return s
 }
 
-func asBool(v any) bool {
-	b, _ := v.(bool)
-	return b
-}
-
 func asInt(v any) int64 {
 	switch n := v.(type) {
 	case int64:
@@ -307,18 +345,4 @@ func asInt(v any) int64 {
 		return int64(n)
 	}
 	return 0
-}
-
-func asStringSlice(v any) []string {
-	switch xs := v.(type) {
-	case []string:
-		return xs
-	case []any:
-		out := make([]string, 0, len(xs))
-		for _, x := range xs {
-			out = append(out, asString(x))
-		}
-		return out
-	}
-	return nil
 }

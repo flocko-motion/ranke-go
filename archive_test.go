@@ -110,7 +110,7 @@ func TestArchiveExternalContentRead(t *testing.T) {
 	blob := []byte("external archive payload")
 	hash, err := HashContent(blob)
 	require.NoError(t, err)
-	ext, err := NewClaim(TypeSource("blob"), root).WithExternalContent(hash, uint64(len(blob))).WithHeight(HeightOf(root)).Sign()
+	ext, err := NewClaim(TypeSource("blob"), root).WithExternalContent(hash, uint64(len(blob))).WithEncoding(EncodingOctetStream).WithHeight(HeightOf(root)).Sign()
 	require.NoError(t, err)
 
 	bth := branchTable(t, root, []Claim{ext}, branchEdge(t, "main", ext.ID()))
@@ -140,6 +140,7 @@ func TestArchiveMaterializesDiff(t *testing.T) {
 
 	base, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("the full base content")).
+		WithEncoding(EncodingPlain).
 		WithField("author", "alice").
 		WithHeight(HeightOf(root)).
 		Sign()

@@ -142,6 +142,7 @@ func keyedContributor(t *testing.T, ctx context.Context, clock *generator.Clock,
 	require.NoError(t, err, "encode pubkey")
 	c, err := ranke.NewClaim(ranke.NodeContributor, nil).
 		WithInlineContent(pubkey).
+		WithEncoding(ranke.EncodingOctetStream).
 		WithCreatedAt(clock.Tick()).
 		Sign(priv)
 	require.NoError(t, err, "sign contributor")
@@ -156,6 +157,7 @@ func (f *fixture) email(t *testing.T, ctr ranke.Contributor, from, to, body stri
 	t.Helper()
 	c, err := ranke.NewClaim(ranke.TypeSource("email"), ctr).
 		WithInlineContent([]byte("From: " + from + "\r\nTo: " + to + "\r\n\r\n" + body)).
+		WithEncoding(ranke.EncodingMessage("rfc822")).
 		WithCreatedAt(f.clock.Tick()).
 		WithHeight(ranke.HeightOf(ctr)).
 		Sign()
@@ -171,6 +173,7 @@ func (f *fixture) entity(t *testing.T, ctr ranke.Contributor, sub, label string,
 	require.NoError(t, err, "derivation edge")
 	c, err := ranke.NewClaim(ranke.TypeEntity(sub), ctr).
 		WithInlineContent([]byte(label)).
+		WithEncoding(ranke.EncodingPlain).
 		WithEdges(de).
 		WithCreatedAt(f.clock.Tick()).
 		WithHeight(ranke.HeightOf(ctr, source)).

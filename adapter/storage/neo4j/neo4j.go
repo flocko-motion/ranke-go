@@ -107,22 +107,24 @@ func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[str
 // MERGE'd by id with no label (so a reference target and its later full claim
 // are the same node) and given their type as a dynamic label; edges are
 // relationships typed dynamically by the edge type. Inline content rides along
-// as a legible `content` property. Requires Neo4j ≥ 5.26 (dynamic labels/types
-// via $()). A null property (content, field_keys, …) is simply not set.
+// as a legible `content` property; a claim's extension fields ride as their own
+// properties (SET += fields), so the browser shows and can query them. Requires
+// Neo4j ≥ 5.26 (dynamic labels/types via $()). A null property is simply unset.
 const cypherPutClaims = `
 UNWIND $claims AS c
 MERGE (n {id: c.id})
 SET n:$(c.type)
+SET n += c.fields
 SET n.encoding = c.encoding, n.created_at = c.created_at, n.height = c.height,
     n.content_hash = c.content_hash, n.content_size = c.content_size,
-    n.content = c.content, n.field_keys = c.field_keys, n.field_vals = c.field_vals
+    n.content = c.content
 WITH n, c
 UNWIND c.edges AS e
 MERGE (t {id: e.reference})
 MERGE (n)-[r:$(e.type) {edge_id: e.edge_id}]->(t)
-SET r.direction = e.direction, r.content_hash = e.content_hash,
-    r.content_size = e.content_size, r.content = e.content,
-    r.field_keys = e.field_keys, r.field_vals = e.field_vals`
+SET r += e.fields
+SET r.encoding = e.encoding, r.direction = e.direction, r.content_hash = e.content_hash,
+    r.content_size = e.content_size, r.content = e.content`
 
 // PutClaims projects each claim into neo4j's native typed graph: a node
 // labelled with the claim's type, its edges as relationships typed by the edge
@@ -435,7 +437,7 @@ func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, t
 			}
 		}
 		for k, v := range kv {
-			props[k] = v
+			props[k] = tagParam(v) // store integer-valued tags (_br, _b_*) as native ints
 		}
 		if len(props) == 0 {
 			continue

@@ -28,6 +28,7 @@ func revision(t *testing.T, root Contributor, name string) (v1, v2 Claim) {
 	v1 = srcClaim(t, root, name+" v1")
 	v2, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte(name + " v2")).
+		WithEncoding(EncodingPlain).
 		WithDiff(v1.ID()).
 		WithHeight(HeightOf(root, v1)).
 		Sign()

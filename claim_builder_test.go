@@ -53,6 +53,7 @@ func TestBuilderWithTypeOverride(t *testing.T) {
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithType(TypeSource("email")).
 		WithInlineContent([]byte("x")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
@@ -68,6 +69,7 @@ func TestBuilderWithExternalContent(t *testing.T) {
 
 	c, err := NewClaim(TypeSource("blob"), alice).
 		WithExternalContent(hash, 13).
+		WithEncoding(EncodingOctetStream).
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
@@ -82,6 +84,7 @@ func TestBuilderWithEdges(t *testing.T) {
 	src := srcClaim(t, alice, "s")
 	c, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
+		WithEncoding(EncodingPlain).
 		WithEdges(mustDerivEdge(t, src)).
 		WithHeight(HeightOf(alice, src)).
 		Sign()
@@ -94,7 +97,7 @@ func TestBuilderWithEdges(t *testing.T) {
 // is what makes it safe to fan out from a partially-configured builder.
 func TestBuilderWithFieldImmutable(t *testing.T) {
 	alice := contributor(t)
-	base := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).WithHeight(HeightOf(alice))
+	base := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice))
 
 	withField := base.WithField("a", "1")
 
@@ -113,6 +116,7 @@ func TestBuilderSignedRootContributor(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
 	c, err := NewClaim(NodeContributor, nil).
 		WithInlineContent(pubkey). // the pubkey IS the content
+		WithEncoding(EncodingOctetStream).
 		WithSigningKey(priv).
 		Sign()
 	require.NoError(t, err)
@@ -143,6 +147,7 @@ func TestContributorExternalPubkey(t *testing.T) {
 	// hashes to the declared content_hash, so no Universe is needed at build.
 	claim, err := NewClaim(NodeContributor, nil).
 		WithExternalContent(hash, uint64(len(pubkey))).
+		WithEncoding(EncodingOctetStream).
 		Sign(priv)
 	require.NoError(t, err, "external pubkey + matching key signs")
 	require.Equal(t, "ed25519-pub", claim.ID().Algorithm(), "the contributor is signed")
@@ -171,6 +176,7 @@ func TestContributorExternalPubkey(t *testing.T) {
 	// was inline or external.
 	child, err := NewClaim(TypeSource("note"), c).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(c)).
 		Sign() // no explicit key, no Universe — both come from c
 	require.NoError(t, err, "child of an external-pubkey contributor signs from the cached pubkey")
@@ -245,6 +251,7 @@ func TestProvenanceSatisfied(t *testing.T) {
 	} {
 		_, err := NewClaim(typ, ctr).
 			WithInlineContent([]byte("...")).
+			WithEncoding(EncodingPlain).
 			WithEdges(mustDerivEdge(t, source)).
 			WithHeight(HeightOf(ctr, source)).
 			Sign()
@@ -259,7 +266,7 @@ func TestProvenanceSatisfied(t *testing.T) {
 // initial node is exempt (see TestInitialNodeMayLackProvenance).
 func TestSourceCarriesProvenance(t *testing.T) {
 	ctr := contributor(t)
-	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte("x")).WithHeight(HeightOf(ctr)).Sign()
+	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte("x")).WithEncoding(EncodingPlain).WithHeight(HeightOf(ctr)).Sign()
 	require.NoError(t, err, "source/* builds without a derivation edge")
 	require.Len(t, c.Edges(EdgeFilterType{Type: EdgeTypeContributor}), 1,
 		"a source claim still carries its contribution/contributor edge — its provenance")
@@ -370,6 +377,7 @@ func TestClaimDiffEdgeNamesPredecessor(t *testing.T) {
 
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("v2")).
+		WithEncoding(EncodingPlain).
 		WithDiff(pred.ID()).
 		WithHeight(HeightOf(alice, pred)).
 		Sign()
@@ -391,6 +399,7 @@ func TestClaimDiffRestatesNodeChanges(t *testing.T) {
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithDiff(pred.ID()).
 		WithInlineContent([]byte("new body")).
+		WithEncoding(EncodingPlain).
 		WithField("status", "revised").
 		WithHeight(HeightOf(alice, pred)).
 		Sign()
@@ -419,6 +428,7 @@ func TestClaimDiffAddsEdges(t *testing.T) {
 	c, err := NewClaim(TypeEntity("person"), alice).
 		WithDiff(pred.ID()).
 		WithInlineContent([]byte("Alice v2")).
+		WithEncoding(EncodingPlain).
 		WithEdges(named).
 		WithHeight(HeightOf(alice, pred, src)).
 		Sign()
@@ -463,6 +473,7 @@ func TestClaimDiffAllowsNamedEdge(t *testing.T) {
 	_, err := NewClaim(TypeEntity("person"), alice).
 		WithDiff(pred.ID()).
 		WithInlineContent([]byte("Alice v2")).
+		WithEncoding(EncodingPlain).
 		WithEdges(named).
 		WithHeight(HeightOf(alice, pred, src)).
 		Sign()
@@ -481,6 +492,7 @@ func TestClaimDiffIsPartOfId(t *testing.T) {
 	mk := func(pred Claim) Claim {
 		c, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte("same body")).
+			WithEncoding(EncodingPlain).
 			WithDiff(pred.ID()).
 			WithCreatedAt(at).
 			WithHeight(HeightOf(alice, pred)).
@@ -502,11 +514,11 @@ func TestClaimDiffIsSmallerThanFull(t *testing.T) {
 	big := bytes.Repeat([]byte("a repeated payload block — "), 200)
 
 	// Predecessor holds the large content.
-	pred, err := NewClaim(TypeSource("note"), alice).WithInlineContent(big).WithHeight(HeightOf(alice)).Sign()
+	pred, err := NewClaim(TypeSource("note"), alice).WithInlineContent(big).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	// Full: re-states the whole content. Diff: inherits it, restating nothing.
-	full, err := NewClaim(TypeSource("note"), alice).WithInlineContent(big).WithHeight(HeightOf(alice)).Sign()
+	full, err := NewClaim(TypeSource("note"), alice).WithInlineContent(big).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 	diff, err := NewClaim(TypeSource("note"), alice).WithDiff(pred.ID()).WithHeight(HeightOf(alice, pred)).Sign()
 	require.NoError(t, err)
@@ -528,6 +540,7 @@ func TestBuilderHeightRequiredWhenReferencing(t *testing.T) {
 	alice := contributor(t)
 	_, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		Sign()
 	require.ErrorIs(t, err, errHeightRequired)
 }
@@ -537,6 +550,7 @@ func TestBuilderHeightRequiredWhenReferencing(t *testing.T) {
 func TestBuilderHeightRejectedOnInitialNode(t *testing.T) {
 	_, err := NewClaim(NodeContributor, nil).
 		WithInlineContent([]byte("pubkey-ish")).
+		WithEncoding(EncodingOctetStream).
 		WithHeight(1).
 		Sign()
 	require.ErrorIs(t, err, errHeightOnInitial)
@@ -548,6 +562,7 @@ func TestBuilderHeightAndAutoExclusive(t *testing.T) {
 	alice := contributor(t)
 	_, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		WithHeight(1).
 		WithAutoHeight(context.Background(), NewMemoryUniverse()).
 		Sign()
@@ -566,6 +581,7 @@ func TestBuilderWithAutoHeight(t *testing.T) {
 
 	b, err := NewClaim(TypeEntity("person"), root).
 		WithInlineContent([]byte("b")).
+		WithEncoding(EncodingPlain).
 		WithEdges(mustDerivEdge(t, a)).
 		WithAutoHeight(ctx, u).
 		Sign()
@@ -591,6 +607,7 @@ func TestClaimBuilderWithContributor(t *testing.T) {
 	c, err := NewClaim(TypeSource("note"), nil).
 		WithContributor(root).
 		WithInlineContent([]byte("attributed via WithContributor")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)

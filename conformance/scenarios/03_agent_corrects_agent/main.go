@@ -62,6 +62,7 @@ func main() {
 	operatorClaim := must(ranke.ClaimBuilder{
 		Type:          ranke.NodeContributor,
 		InlineContent: opPub,
+		Encoding:      ranke.EncodingOctetStream,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		SigningKey:    opPriv,
 	}.Sign())
@@ -71,6 +72,7 @@ func main() {
 	agentAClaim := must(ranke.ClaimBuilder{
 		Type:          ranke.NodeContributor,
 		InlineContent: agentAKey.Pubkey,
+		Encoding:      ranke.EncodingOctetStream,
 		Contributor:   operator,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(operator),
@@ -81,6 +83,7 @@ func main() {
 	agentBClaim := must(ranke.ClaimBuilder{
 		Type:          ranke.NodeContributor,
 		InlineContent: agentBKey.Pubkey,
+		Encoding:      ranke.EncodingOctetStream,
 		Contributor:   operator,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(operator),
@@ -101,6 +104,7 @@ func main() {
 	alice := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("person"),
 		InlineContent: []byte("Alice"),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agentA,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agentA, email),
@@ -112,6 +116,7 @@ func main() {
 	bob := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("person"),
 		InlineContent: []byte("Bob"),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agentA,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agentA, email),
@@ -125,6 +130,7 @@ func main() {
 	siblingA := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("sibling"),
 		InlineContent: []byte("Alice mentions 'my brother' in a note to Bob; agentA infers they are siblings."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agentA,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agentA, email, alice, bob),
@@ -141,6 +147,7 @@ func main() {
 	siblingNeg := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("sibling"),
 		InlineContent: []byte("Re-reading the source: 'my brother' refers to a third party, not Bob. agentA's sibling claim is incorrect."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agentB,
 		CreatedAt:     s.NextTimestamp(31 * 24 * time.Hour),
 		Height:        ranke.HeightOf(agentB, email, alice, bob),
@@ -155,6 +162,7 @@ func main() {
 	employedBy := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("employed_by"),
 		InlineContent: []byte("Cross-referenced employment records: Alice works for Bob's company."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agentB,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agentB, email, alice, bob),

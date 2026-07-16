@@ -17,7 +17,7 @@ import (
 // pubkey; without it these are what a bare claim reports.
 func TestBareClaimContributorFallbacks(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
-	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
+	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream).Sign(priv)
 	require.NoError(t, err)
 
 	bare, ok := c.(Contributor) // the bare *claim satisfies Contributor
@@ -30,7 +30,7 @@ func TestBareClaimContributorFallbacks(t *testing.T) {
 // the session key and the resolved pubkey while forwarding the rest.
 func TestSignedContributorWrapper(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
-	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
+	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream).Sign(priv)
 	require.NoError(t, err)
 	bare := c.(Contributor)
 

@@ -55,6 +55,7 @@ func main() {
 	operatorClaim := must(ranke.ClaimBuilder{
 		Type:          ranke.NodeContributor,
 		InlineContent: opPub,
+		Encoding:      ranke.EncodingOctetStream,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		SigningKey:    opPriv,
 	}.Sign())
@@ -67,6 +68,7 @@ func main() {
 	agentClaim := must(ranke.ClaimBuilder{
 		Type:          ranke.NodeContributor,
 		InlineContent: agentAKey.Pubkey,
+		Encoding:      ranke.EncodingOctetStream,
 		Contributor:   operator,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(operator),
@@ -95,6 +97,7 @@ func main() {
 	summary := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeDerivation("summary"),
 		InlineContent: []byte("Alice expresses preference for apples."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples),
@@ -108,6 +111,7 @@ func main() {
 	alice := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("person"),
 		InlineContent: []byte("Alice"),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples),
@@ -119,6 +123,7 @@ func main() {
 	apples := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("object"),
 		InlineContent: []byte("apples"),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples),
@@ -130,6 +135,7 @@ func main() {
 	bobSr := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("person"),
 		InlineContent: []byte("Bob"),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples),
@@ -141,6 +147,7 @@ func main() {
 	bobJr := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeEntity("person"),
 		InlineContent: []byte("Bob Jr."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailFamily),
@@ -166,6 +173,7 @@ func main() {
 	likes := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("likes"),
 		InlineContent: []byte("Alice expresses preference for apples in the email."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples, alice, apples),
@@ -178,6 +186,7 @@ func main() {
 	knows := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("knows"),
 		InlineContent: []byte("Alice addresses Bob directly, implying they are acquainted."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples, alice, bobSr),
@@ -190,6 +199,7 @@ func main() {
 	ignores := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("ignores"),
 		InlineContent: []byte("Bob does not respond to Alice (inferred from absence of reply)."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailApples, bobSr, alice),
@@ -202,6 +212,7 @@ func main() {
 	family := must(ranke.ClaimBuilder{
 		Type:          ranke.TypeRelation("family"),
 		InlineContent: []byte("Bob Sr. and Bob Jr. share a surname; Alice's email implies kinship."),
+		Encoding:      ranke.EncodingPlain,
 		Contributor:   agent,
 		CreatedAt:     s.NextTimestamp(time.Second),
 		Height:        ranke.HeightOf(agent, emailFamily, bobSr, bobJr),

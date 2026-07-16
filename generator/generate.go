@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"time"
 
@@ -35,7 +36,9 @@ type Manifest struct {
 	Expiries      []ranke.Id // contribution/expiry claims (key expiry)
 	Deletes       []ranke.Id // contribution/delete tombstones
 
-	ClaimCount int // claims contributed (excludes Sequencer-minted heads/tables)
+	ClaimCount int      // claims contributed (excludes Sequencer-minted heads/tables)
+	Revisions  int      // contributions merged = branch-table revisions
+	Branches   []string // branch names the archive carries
 }
 
 // Generate builds the archive described by spec into u, returning its
@@ -71,16 +74,62 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 		return nil, b.err
 	}
 
-	head, err := seq.AddClaims(ctx, b.batch)
-	if err != nil {
-		return nil, fmt.Errorf("generator: merge: %w", err)
+	// A real archive grows over many contributions, not one: split the batch
+	// into contributions of varying size (small common, large rare) and merge
+	// each as its own branch-table revision. The batch is in dependency order
+	// (references precede referrers), so in-order chunks stay closed over the
+	// prior revisions already in 𝒰.
+	branches := branchNames(len(b.batch), spec.Seed)
+	var head ranke.Id
+	revisions := 0
+	for i, chunk := range contributionChunks(b.batch, spec.Seed) {
+		// Round-robin contributions across the branches (main takes the first,
+		// so the shared base lands there); references resolve across branches via
+		// 𝒰, which every contribution writes to regardless of branch.
+		head, err = seq.AddClaimsToBranch(ctx, branches[i%len(branches)], chunk)
+		if err != nil {
+			return nil, fmt.Errorf("generator: merge: %w", err)
+		}
+		revisions++
 	}
 
 	m := b.manifest
 	m.Spec = spec
 	m.Head = head
 	m.ClaimCount = len(b.batch)
+	m.Revisions = revisions
+	m.Branches = branches
 	return &m, nil
+}
+
+// contributionChunks splits an already-dependency-ordered batch into
+// contributions whose sizes follow a skewed distribution — small common, large
+// rare (exponential) — so the archive is built over many revisions like a real
+// one, not a single outlier contribution. The mean size grows with the batch so
+// the contribution COUNT stays bounded: the dev Sequencer re-verifies each
+// contribution's closure, so an unbounded count would be quadratic. Deterministic
+// per seed (chunking only shapes the Sequencer-minted revision chain; contributed
+// claim ids do not depend on it).
+func contributionChunks(batch []ranke.Claim, seed int64) [][]ranke.Claim {
+	n := len(batch)
+	if n == 0 {
+		return nil
+	}
+	rng := rand.New(rand.NewSource(seed))
+	mean := 4.0
+	if m := float64(n) / 150; m > mean {
+		mean = m // cap the count near ~150 for large graphs
+	}
+	var chunks [][]ranke.Claim
+	for i := 0; i < n; {
+		size := 1 + int(rng.ExpFloat64()*mean)
+		if i+size > n {
+			size = n - i
+		}
+		chunks = append(chunks, batch[i:i+size])
+		i += size
+	}
+	return chunks
 }
 
 // builder accumulates the contribution batch, threading the shared clock so
@@ -156,7 +205,7 @@ func (b *builder) sources() {
 		case i < b.spec.ExternalBlobs:
 			c = b.externalSource(who, i)
 		case i%2 == 0:
-			c = b.inlineSource(who, i, b.spec.TinyBlobBytes)
+			c = b.inlineSource(who, i)
 		default:
 			// Large data goes in EXTERNAL content (content-addressed), never
 			// inline: inline bytes are bundled in the claim record and cannot be
@@ -171,12 +220,13 @@ func (b *builder) sources() {
 	}
 }
 
-// inlineSource builds a source/* claim with n bytes of inline content. The
-// first inline source also carries the oversized field value (that corner,
-// applied once) — a large-but-valid field, kept under the ADT's field cap.
-func (b *builder) inlineSource(who ranke.Contributor, i, n int) ranke.Claim {
+// inlineSource builds a source/note claim with legible inline text. The first
+// inline source also carries the oversized field value (that corner, applied
+// once) — a large-but-valid field, kept under the ADT's field cap.
+func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
 	cb := ranke.NewClaim(ranke.TypeSource("note"), who).
-		WithInlineContent(fill(b.spec.Seed, "src", i, n)).
+		WithInlineContent([]byte(textFor(b.spec.Seed, "src", i))).
+		WithEncoding(ranke.EncodingPlain). // a note is legible text
 		WithCreatedAt(b.clock.Tick())
 	if !b.oversizedDone && b.spec.OversizedFieldBytes > 0 {
 		// A field value is text, not bytes — hex-encode so it is valid UTF-8
@@ -204,6 +254,7 @@ func (b *builder) externalSource(who ranke.Contributor, i int) ranke.Claim {
 	}
 	c := b.add(ranke.NewClaim(ranke.TypeSource("blob"), who).
 		WithExternalContent(hash, uint64(len(blob))).
+		WithEncoding(ranke.EncodingOctetStream). // deterministic binary blob
 		WithCreatedAt(b.clock.Tick()).
 		WithHeight(ranke.HeightOf(who)).
 		Sign())
@@ -213,24 +264,48 @@ func (b *builder) externalSource(who ranke.Contributor, i int) ranke.Claim {
 	return c
 }
 
-// diffChain builds one base source plus DiffChainLen revisions, each a
+// diffChain builds one base derivation plus DiffChainLen revisions, each a
 // contribution/diff overlay over the previous — the long-diff-chain corner.
+// Revision belongs on a derivation (a distillation refined over successive
+// contributions), never a source: sources are root artifacts that reference
+// nothing but their contributor, so they are never diffed over one another.
 func (b *builder) diffChain() {
-	if b.err != nil {
+	if b.err != nil || len(b.srcClaims) == 0 {
 		return
 	}
-	base := b.add(ranke.NewClaim(ranke.TypeSource("note"), b.who(0)).
-		WithInlineContent(fill(b.spec.Seed, "diff", 0, b.spec.TinyBlobBytes)).
+	src := b.srcClaims[0] // the chain distils this source
+	de, err := ranke.NewEdge(ranke.EdgeConfig{Reference: src.ID(), Type: ranke.TypeDerivation("source")})
+	if err != nil {
+		b.fail(fmt.Errorf("diff-chain provenance edge: %w", err))
+		return
+	}
+	base := b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(0)).
+		WithInlineContent([]byte(textFor(b.spec.Seed, "diff", 0))).
+		WithEncoding(ranke.EncodingPlain). // a summary is legible text
+		WithEdges(de).
 		WithCreatedAt(b.clock.Tick()).
-		WithHeight(ranke.HeightOf(b.who(0))).
+		WithHeight(ranke.HeightOf(b.who(0), src)).
 		Sign())
 	prev := base
 	for r := 1; r <= b.spec.DiffChainLen && prev != nil && b.err == nil; r++ {
-		prev = b.add(ranke.NewClaim(ranke.TypeSource("note"), b.who(r)).
+		// Each revision re-affirms its provenance (the §3.5 derivation/source
+		// edge, checked per delta) as a NAMED edge — diff claims name their
+		// edges, and the same name keeps it one edge through the chain.
+		re, err := ranke.NewEdge(ranke.EdgeConfig{
+			Reference: src.ID(),
+			Type:      ranke.TypeDerivation("source"),
+			Fields:    map[string]string{ranke.FieldName: "source"},
+		})
+		if err != nil {
+			b.fail(fmt.Errorf("diff-chain revision edge %d: %w", r, err))
+			return
+		}
+		prev = b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(r)).
 			WithDiff(prev.ID()).
+			WithEdges(re).
 			WithField("rev", strconv.Itoa(r)).
 			WithCreatedAt(b.clock.Tick()).
-			WithHeight(ranke.HeightOf(b.who(r), prev)).
+			WithHeight(ranke.HeightOf(b.who(r), prev, src)).
 			Sign())
 	}
 	if prev != nil {
@@ -260,7 +335,8 @@ func (b *builder) derivations() {
 			refs = append(refs, src)
 		}
 		c := b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(i)).
-			WithInlineContent(fill(b.spec.Seed, "deriv", i, b.spec.TinyBlobBytes)).
+			WithInlineContent([]byte(textFor(b.spec.Seed, "deriv", i))).
+			WithEncoding(ranke.EncodingPlain). // a summary is legible text
 			WithEdges(edges...).
 			WithCreatedAt(b.clock.Tick()).
 			WithHeight(ranke.HeightOf(refs...)).
@@ -285,7 +361,8 @@ func (b *builder) entities() {
 			return
 		}
 		c := b.add(ranke.NewClaim(ranke.TypeEntity("person"), b.who(i)).
-			WithInlineContent(fill(b.spec.Seed, "ent", i, b.spec.TinyBlobBytes)).
+			WithInlineContent([]byte(nameFor(b.spec.Seed, i))).
+			WithEncoding(ranke.EncodingPlain). // a person entity's content is a name
 			WithEdges(de).
 			WithCreatedAt(b.clock.Tick()).
 			WithHeight(ranke.HeightOf(b.who(i), src)).

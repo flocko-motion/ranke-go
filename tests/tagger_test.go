@@ -31,6 +31,7 @@ func TestTagArchive(t *testing.T) {
 
 	em, err := ranke.NewClaim(ranke.TypeSource("email"), self).
 		WithInlineContent([]byte("From: a\r\nTo: b\r\n\r\nhi\r\n")).
+		WithEncoding(ranke.EncodingMessage("rfc822")).
 		WithCreatedAt(clock.Tick()).
 		WithHeight(ranke.HeightOf(self)).
 		Sign()

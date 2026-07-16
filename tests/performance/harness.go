@@ -252,13 +252,29 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	spec := generator.SpecForSize(cfg.Seed, cfg.Size)
 	ctx := context.Background()
 
-	// The mem implementation is the standard: compute each query's reference
-	// result-set hash once, up front. Every backend's results are checked
-	// against these; a divergence is a determinism failure (reported per query
-	// in the backend's block, and surfaced as an error).
-	refHashes, err := referenceQueryHashes(ctx, spec)
+	// Generate the reference archive once into mem (the standard every backend
+	// must match). From this single deterministic graph we (1) print an overview
+	// of its shape — so the scale of a --size N run is legible before the matrix
+	// — and (2) compute each query's reference result-set hash; a backend whose
+	// results diverge is a determinism failure.
+	refU := mem.New()
+	refM, err := generator.Generate(ctx, refU, spec)
 	if err != nil {
-		return fmt.Errorf("mem reference query hashes: %w", err)
+		return fmt.Errorf("reference generate: %w", err)
+	}
+	ov, err := computeOverview(ctx, refU, refM)
+	if err != nil {
+		return fmt.Errorf("graph overview: %w", err)
+	}
+	printOverview(w, spec, refM, ov)
+	refStats, err := runQuerySet(ctx, refU, refM, 1)
+	if err != nil {
+		return fmt.Errorf("mem reference queries: %w", err)
+	}
+	printQueryList(w, refStats)
+	refHashes := make(map[string]string, len(refStats))
+	for _, s := range refStats {
+		refHashes[s.name] = s.hash
 	}
 
 	for _, be := range backends {
@@ -305,9 +321,11 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		}
 	}
 
-	// Chapter 1 — write.
+	// Setup — write: generate the test archive into the backend (via the dev
+	// sequencer). Timed as ingest, but it is setup; the perf tests below measure
+	// operations ON the resulting archive, the first of which is tagging.
 	progress("write")
-	u.setPhase("1-write")
+	u.setPhase("0-write")
 	c1 := time.Now()
 	m, err := generator.Generate(ctx, u, spec)
 	if err != nil {
@@ -319,6 +337,18 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	if err != nil {
 		return 0, fmt.Errorf("%s: open archive: %w", name, err)
 	}
+
+	// Chapter 1 — tag: stamp each claim with its branch membership (_b_<branch>)
+	// and each branch table with its revision (_br) — the overlay branch-scoped
+	// reads and the browser's tag view rely on. The first operation measured on
+	// the freshly-written archive; a real deployment runs it after a contribution.
+	progress("tag")
+	u.setPhase("1-tag")
+	ctag := time.Now()
+	if _, err := ranke.TagArchive(ctx, arc); err != nil {
+		return 0, fmt.Errorf("%s: tag: %w", name, err)
+	}
+	tagDur := time.Since(ctag)
 
 	// Chapter 2 — verify.
 	progress("verify")
@@ -337,11 +367,17 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		return 0, fmt.Errorf("%s: %d verify failure(s), first: %v", name, len(fs), fs[0])
 	}
 
-	// Chapter 3 — random access: branch (in-closure) vs universe (direct).
-	ids := accessOrder(m, cfg.Access)
+	// Chapter 3 — random access: branch (in-closure) vs universe (direct). Sample
+	// the ids from the "main" branch's own closure — with several branches a
+	// manifest claim may live on another branch, so a branch read of it would
+	// (correctly) miss.
 	branch, err := arc.GetBranch(ctx, "main")
 	if err != nil {
 		return 0, fmt.Errorf("%s: get branch: %w", name, err)
+	}
+	ids, err := accessIDs(ctx, u, branch.Head(), cfg.Access)
+	if err != nil {
+		return 0, fmt.Errorf("%s: access ids: %w", name, err)
 	}
 	progress("access:branch")
 	u.setPhase("3a-branch")
@@ -363,17 +399,17 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 	universeDur := time.Since(c3b)
 
-	// Chapter 4 — RQL queries: time each a few times for per-query latency, and
-	// hash each (order-sensitive) result set for the cross-backend determinism
-	// check against the mem reference.
+	// Chapter 4 — RQL queries: each timed a few times (under its own "4.N" phase,
+	// so it shows as a table row) and its result set hashed for the cross-backend
+	// determinism check against the mem reference.
 	progress("queries")
-	u.setPhase("4-query")
 	qstats, err := runQuerySet(ctx, u, m, cfg.QueryReps)
 	if err != nil {
 		return 0, fmt.Errorf("%s: query: %w", name, err)
 	}
 
-	r1, w1 := u.phaseIO("1-write")
+	r1, w1 := u.phaseIO("0-write")
+	r1t, w1t := u.phaseIO("1-tag")
 	r2, _ := u.phaseIO("2-verify")
 	r3a, _ := u.phaseIO("3a-branch")
 	r3b, _ := u.phaseIO("3b-universe")
@@ -383,49 +419,56 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	ms := func(d time.Duration) string { return d.Round(time.Millisecond).String() }
 	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, run.Verified(), len(ids))
 	fmt.Fprintf(w, "  write            %-9s (%dw %dr)\n", ms(writeDur), w1, r1)
+	fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", ms(tagDur), w1t, r1t)
 	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
 	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r3a)
 	fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r3b)
 
-	reps := cfg.QueryReps
-	if reps <= 0 {
-		reps = 10
-	}
-	qdur := func(d time.Duration) string { return d.Round(time.Microsecond).String() }
-	fmt.Fprintf(w, "  queries (%d× each, results hashed vs mem reference)\n", reps)
-	diverged := 0
+	// Determinism: each query's ordered result set must hash-match the mem
+	// reference. The timings themselves are the "4.N" rows in the table below.
+	var diverged []string
 	for _, qs := range qstats {
-		mark := ""
 		if want, ok := refHashes[qs.name]; ok && want != qs.hash {
-			mark = "   ✗ DIVERGES from mem reference"
-			diverged++
+			diverged = append(diverged, qs.name)
 		}
-		fmt.Fprintf(w, "    %-22s min %-9s avg %-9s max %-9s (%d results)%s\n",
-			qs.name, qdur(qs.min), qdur(qs.avg), qdur(qs.max), qs.results, mark)
 	}
 	fmt.Fprintf(w, "%s\n", u.report())
-	if diverged > 0 {
-		return run.Verified(), fmt.Errorf("%s: %d query result set(s) diverge from the mem reference — results must be deterministic", name, diverged)
+	if len(diverged) > 0 {
+		return run.Verified(), fmt.Errorf("%s: query result set(s) diverge from the mem reference (must be deterministic): %v", name, diverged)
 	}
 	return run.Verified(), nil
 }
 
-// accessOrder builds a deterministic pseudo-random sequence of n claim ids from
-// the manifest's content claims — a fixed seed so the access pattern is
-// reproducible across runs and backends. Samples with replacement.
-func accessOrder(m *generator.Manifest, n int) []ranke.Id {
-	pool := make([]ranke.Id, 0, len(m.Sources)+len(m.Derivations)+len(m.Entities)+len(m.Relations))
-	pool = append(pool, m.Sources...)
-	pool = append(pool, m.Derivations...)
-	pool = append(pool, m.Entities...)
-	pool = append(pool, m.Relations...)
-	if len(pool) == 0 || n <= 0 {
-		return nil
+// accessIDs samples n claim ids (with replacement) from the closure reachable
+// at root — a branch head — so every sampled id genuinely lives in that branch
+// and both the branch read and the direct read resolve it. A fixed seed keeps
+// the access pattern reproducible run to run.
+func accessIDs(ctx context.Context, u ranke.Universe, root ranke.Id, n int) ([]ranke.Id, error) {
+	if n <= 0 || root == nil {
+		return nil, nil
+	}
+	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: root}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	var pool []ranke.Id
+	for rs.Next() {
+		pool = append(pool, rs.Result().Claim.ID())
+	}
+	if e := rs.Err(); e != nil {
+		_ = rs.Close()
+		return nil, e
+	}
+	if e := rs.Close(); e != nil {
+		return nil, e
+	}
+	if len(pool) == 0 {
+		return nil, nil
 	}
 	rng := rand.New(rand.NewSource(1)) // fixed seed → reproducible access order
 	out := make([]ranke.Id, n)
 	for i := range out {
 		out[i] = pool[rng.Intn(len(pool))]
 	}
-	return out
+	return out, nil
 }

@@ -11,6 +11,17 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage/partition"
 )
 
+// getContent fetches one blob by hash via the content-plane primitive (the
+// single-item ranke.GetContent helper was removed in favour of claim-addressed
+// reads).
+func getContent(ctx context.Context, u ranke.Universe, h ranke.Id, size uint64) ([]byte, error) {
+	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: h, ContentSize: size}})
+	if err != nil {
+		return nil, err
+	}
+	return bs[0], nil
+}
+
 // TestConformance runs the shared black-box Universe suite against a 3-shard
 // partition — the composite must satisfy the full contract like any backend.
 func TestConformance(t *testing.T) {
@@ -62,7 +73,7 @@ func TestRoutingDisjointAndDeterministic(t *testing.T) {
 		t.Fatalf("key landed on %d shards, want exactly 1", count)
 	}
 	// Read it back through the partition (routes to the same shard).
-	got, err := ranke.GetContent(ctx, p, h, uint64(len(b)))
+	got, err := getContent(ctx, p, h, uint64(len(b)))
 	if err != nil || string(got) != "alice-likes-apple" {
 		t.Fatalf("GetContent = %q, %v", got, err)
 	}

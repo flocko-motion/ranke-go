@@ -1,7 +1,11 @@
 package stack_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"io"
 	"sync"
 	"testing"
 
@@ -10,6 +14,17 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
 )
+
+// getContent fetches one blob by hash via the content-plane primitive (the
+// single-item ranke.GetContent helper was removed in favour of claim-addressed
+// reads; blob-plane tests use GetContents directly).
+func getContent(ctx context.Context, u ranke.Universe, h ranke.Id, size uint64) ([]byte, error) {
+	bs, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: h, ContentSize: size}})
+	if err != nil {
+		return nil, err
+	}
+	return bs[0], nil
+}
 
 // TestConformance runs the shared black-box Universe suite against a two-layer
 // eager stack — the composite must satisfy the full contract like any backend.
@@ -52,7 +67,7 @@ func TestWriteThroughAndReadFill(t *testing.T) {
 		t.Fatal("lazy top layer should NOT be written on a write")
 	}
 
-	got, err := ranke.GetContent(ctx, st, h, uint64(len(b)))
+	got, err := getContent(ctx, st, h, uint64(len(b)))
 	if err != nil || string(got) != "alice" {
 		t.Fatalf("GetContent = %q, %v; want alice", got, err)
 	}
@@ -70,7 +85,7 @@ func TestNoReadFill(t *testing.T) {
 	}
 	h, b := blob(t, "bob")
 	mustPut(t, st, h, b)
-	if _, err := ranke.GetContent(ctx, st, h, uint64(len(b))); err != nil {
+	if _, err := getContent(ctx, st, h, uint64(len(b))); err != nil {
 		t.Fatalf("GetContent: %v", err)
 	}
 	if has(t, top, h) {
@@ -98,7 +113,7 @@ func TestMaxContentSize(t *testing.T) {
 	if !has(t, bottom, small) || !has(t, bottom, big) {
 		t.Fatal("uncapped bottom layer should hold both")
 	}
-	got, err := ranke.GetContent(ctx, st, big, uint64(len(bb)))
+	got, err := getContent(ctx, st, big, uint64(len(bb)))
 	if err != nil || string(got) != "way too long" {
 		t.Fatalf("read of over-cap blob = %q, %v", got, err)
 	}
@@ -121,7 +136,7 @@ func TestRepairViaReadThrough(t *testing.T) {
 	}
 	top.flag(h) // top's stored bytes go bad
 
-	got, err := ranke.GetContent(ctx, st, h, uint64(len(b)))
+	got, err := getContent(ctx, st, h, uint64(len(b)))
 	if err != nil || string(got) != "treasure" {
 		t.Fatalf("GetContent through corruption = %q, %v; want treasure", got, err)
 	}
@@ -129,7 +144,7 @@ func TestRepairViaReadThrough(t *testing.T) {
 		t.Fatal("read-through should have repaired the corrupt top layer")
 	}
 	// The repaired top now serves the good bytes directly.
-	if direct, err := ranke.GetContent(ctx, top, h, uint64(len(b))); err != nil || string(direct) != "treasure" {
+	if direct, err := getContent(ctx, top, h, uint64(len(b))); err != nil || string(direct) != "treasure" {
 		t.Fatalf("repaired top layer = %q, %v", direct, err)
 	}
 }
@@ -254,5 +269,165 @@ func TestCapabilitiesDerivation(t *testing.T) {
 	}
 	if st4.Capabilities().Overwrite {
 		t.Fatal("a non-overwriting eager layer should make the stack non-overwriting")
+	}
+}
+
+// --- structure-only cache: models a neo4j-style cache in a stack ---
+//
+// It holds claim STRUCTURE but reconstructs claims WITHOUT their inline content
+// bytes (like neo4j, which cannot inline binary content), and keeps no verbatim
+// CBOR (RawClaims=false) and no content blobs (ExternalContent=false). So a
+// content read cannot be served from this layer: it must fall through to the
+// byte layer below, addressed BY CLAIM (GetClaimContent) — a bare hash lookup
+// would miss, since inline content is not a standalone blob.
+type structOnlyCache struct{ ranke.Universe }
+
+func (s structOnlyCache) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
+	cs, err := s.Universe.GetClaims(ctx, ids, opts...)
+	if err != nil {
+		return nil, err
+	}
+	for i, c := range cs {
+		stripped, err := stripContent(c)
+		if err != nil {
+			return nil, err
+		}
+		cs[i] = stripped
+	}
+	return cs, nil
+}
+
+func (s structOnlyCache) GetClaimsRaw(context.Context, []ranke.Id) ([][]byte, error) {
+	return nil, ranke.ErrNotFound // structure-only: keeps no verbatim CBOR
+}
+
+func (s structOnlyCache) GetContents(context.Context, []ranke.ContentRef) ([][]byte, error) {
+	return nil, ranke.ErrNotFound // holds no content blobs
+}
+
+func (s structOnlyCache) HasContents(_ context.Context, hashes []ranke.Id) ([]bool, error) {
+	return make([]bool, len(hashes)), nil
+}
+
+func (s structOnlyCache) StreamContent(context.Context, ranke.Id, uint64) (io.ReadCloser, error) {
+	return nil, ranke.ErrNotFound
+}
+
+func (s structOnlyCache) Capabilities() ranke.Capabilities {
+	c := s.Universe.Capabilities()
+	c.RawClaims = false
+	c.ExternalContent = false
+	c.ContentCap = 0
+	return c
+}
+
+type fielder interface {
+	Fields() []string
+	GetField(string) (string, error)
+}
+
+func fieldsOf(f fielder) map[string]string {
+	names := f.Fields()
+	if len(names) == 0 {
+		return nil
+	}
+	m := make(map[string]string, len(names))
+	for _, k := range names {
+		v, _ := f.GetField(k)
+		m[k] = v
+	}
+	return m
+}
+
+// stripContent rebuilds a claim from its parts WITHOUT the inline content bytes
+// (InlineContent omitted) — exactly how a structure-only cache reconstructs a
+// claim it holds but whose binary content it never inlined.
+func stripContent(c ranke.Claim) (ranke.Claim, error) {
+	n := c.Node()
+	parts := ranke.ClaimParts{
+		ID:          n.ID(),
+		Type:        n.Type(),
+		Encoding:    n.Encoding(),
+		CreatedAt:   n.CreatedAt(),
+		Height:      n.Height(),
+		ContentHash: n.GetContentHash(),
+		ContentSize: n.GetContentSize(),
+		Fields:      fieldsOf(n),
+	}
+	for _, e := range c.Edges() {
+		parts.Edges = append(parts.Edges, ranke.EdgeParts{
+			ID:                e.ID(),
+			Reference:         e.Reference(),
+			Type:              e.Type(),
+			Encoding:          e.Encoding(),
+			RelationDirection: e.RelationDirection(),
+			ContentHash:       e.GetContentHash(),
+			ContentSize:       e.GetContentSize(),
+			Fields:            fieldsOf(e),
+		})
+	}
+	return ranke.AssembleClaim(parts)
+}
+
+// TestStackResolvesContributorContentByClaim stores a contributor (whose content
+// is its binary, octet-stream pubkey — content a structure-only cache cannot
+// inline) into a neo4j/mem-shaped stack and reads its content back by claim. The
+// top cache returns the contributor without its pubkey bytes; resolving BY CLAIM
+// must recover them from the byte layer. A bare hash lookup would miss, since
+// inline content is not a standalone blob — this is the regression the neo4j/mem
+// perf run hit.
+func TestStackResolvesContributorContentByClaim(t *testing.T) {
+	ctx := context.Background()
+	cache := structOnlyCache{mem.New()}
+	store := mem.New()
+	st, err := stack.NewStack(stack.Eager(cache), stack.Eager(store))
+	if err != nil {
+		t.Fatalf("NewStack: %v", err)
+	}
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	pubkey, err := ranke.EncodePublicKey(priv.Public())
+	if err != nil {
+		t.Fatalf("EncodePublicKey: %v", err)
+	}
+	c, err := ranke.NewClaim(ranke.NodeContributor, nil).
+		WithInlineContent(pubkey).
+		WithEncoding(ranke.EncodingOctetStream).
+		Sign(priv)
+	if err != nil {
+		t.Fatalf("build contributor: %v", err)
+	}
+	if err := ranke.PutClaim(ctx, st, c); err != nil {
+		t.Fatalf("PutClaim: %v", err)
+	}
+
+	// Sanity: reading the claim through the stack yields the structure-only
+	// (content-stripped) view from the top cache — no inline bytes in hand.
+	got, err := ranke.GetClaim(ctx, st, c.ID())
+	if err != nil {
+		t.Fatalf("GetClaim: %v", err)
+	}
+	if b, _ := got.Node().GetInlineContent(); len(b) != 0 {
+		t.Fatalf("expected the cache to return a content-stripped claim, got %d inline bytes", len(b))
+	}
+
+	// Resolving content BY CLAIM must still recover the pubkey (fall-through to
+	// the byte layer), for both an explicit Inline hint and Unknown.
+	for _, kind := range []ranke.ContentKind{ranke.ContentInline, ranke.ContentUnknown} {
+		rc, err := ranke.GetClaimContent(ctx, st, c.ID(), kind)
+		if err != nil {
+			t.Fatalf("GetClaimContent(kind=%d): %v", kind, err)
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("read content (loc=%d): %v", loc, err)
+		}
+		if !bytes.Equal(data, pubkey) {
+			t.Fatalf("loc=%d: content = %d bytes, want the %d-byte pubkey", loc, len(data), len(pubkey))
+		}
 	}
 }

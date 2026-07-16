@@ -73,7 +73,7 @@ func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash 
 	}
 	// A contributor's pubkey is its content (§5.7); it carries the key so
 	// claims attributed to it sign automatically.
-	opClaim, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
+	opClaim, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(ranke.EncodingOctetStream).Sign(priv)
 	if err != nil {
 		t.Fatalf("contributor: %v", err)
 	}
@@ -86,6 +86,7 @@ func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash 
 	// its provenance); HeightOf derives it from the referenced claims.
 	em, err = ranke.NewClaim(ranke.TypeSource("note"), op).
 		WithInlineContent([]byte("hi")).
+		WithEncoding(ranke.EncodingPlain).
 		WithHeight(ranke.HeightOf(op)).
 		Sign()
 	if err != nil {
@@ -99,6 +100,7 @@ func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash 
 	}
 	blob, err = ranke.NewClaim(ranke.TypeSource("blob"), op).
 		WithExternalContent(blobHash, uint64(len(blobBytes))).
+		WithEncoding(ranke.EncodingOctetStream).
 		WithHeight(ranke.HeightOf(op)).
 		Sign()
 	if err != nil {
@@ -264,7 +266,7 @@ func testCopyClosure(t *testing.T, newU Factory) {
 	// A head absent from src must surface an error.
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	pubkey, _ := ranke.EncodePublicKey(priv.Public())
-	orphan, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
+	orphan, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(ranke.EncodingOctetStream).Sign(priv)
 	if err != nil {
 		t.Fatalf("synthesize orphan: %v", err)
 	}

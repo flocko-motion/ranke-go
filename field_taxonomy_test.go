@@ -29,7 +29,7 @@ func nsContributor(t *testing.T) Contributor { return contributor(t) }
 func buildWithType(t *testing.T, typ string) error {
 	t.Helper()
 	ctr := nsContributor(t)
-	_, err := NewClaim(typ, ctr).WithInlineContent([]byte("x")).WithHeight(HeightOf(ctr)).Sign()
+	_, err := NewClaim(typ, ctr).WithInlineContent([]byte("x")).WithEncoding(EncodingPlain).WithHeight(HeightOf(ctr)).Sign()
 	return err
 }
 
@@ -53,6 +53,7 @@ func TestFieldNameNamespace_Valid(t *testing.T) {
 	ctr := nsContributor(t)
 	_, err := NewClaim(TypeSource("note"), ctr).
 		WithInlineContent([]byte("x")).
+		WithEncoding(EncodingPlain).
 		WithField("topic", "news").
 		WithHeight(HeightOf(ctr)).
 		Sign()
@@ -88,6 +89,7 @@ func TestFieldNameStructuralNamesAllowed(t *testing.T) {
 	for _, name := range []string{"content", "content_size", "name", "edges"} {
 		_, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte("x")).
+			WithEncoding(EncodingPlain).
 			WithField(name, "v").
 			WithHeight(HeightOf(alice)).
 			Sign()
@@ -99,7 +101,7 @@ func TestFieldNameStructuralNamesAllowed(t *testing.T) {
 // fields.
 func TestEdgeFieldNameNamespace_Rejected(t *testing.T) {
 	alice := nsContributor(t)
-	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithHeight(HeightOf(alice)).Sign()
+	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	_, err = NewEdge(EdgeConfig{
@@ -143,7 +145,7 @@ func TestSubtypeNamespace_Rejected(t *testing.T) {
 // TestEdgeSubtypeNamespace_Rejected: same strict rule on edge subtypes.
 func TestEdgeSubtypeNamespace_Rejected(t *testing.T) {
 	alice := nsContributor(t)
-	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithHeight(HeightOf(alice)).Sign()
+	src, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("s")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	for _, typ := range []string{"derivation/.hidden", "derivation/Source", "relation/a+b"} {
