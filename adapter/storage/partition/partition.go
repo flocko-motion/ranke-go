@@ -104,6 +104,10 @@ func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke
 		if len(idx) == 0 {
 			continue
 		}
+		if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
+			ranke.ReportEvent(ctx, "partition", "route", ranke.ReportDebug, "",
+				map[string]any{"shard": s, "ids": len(idx)})
+		}
 		// Fetch raw delta from the shard; materialise at the partition level
 		// (below) so a diff's predecessor resolves across shards.
 		got, err := p.shards[s].GetClaims(ctx, at(ids, idx), ranke.WithNotDiffMaterialized())

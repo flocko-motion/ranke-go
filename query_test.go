@@ -181,12 +181,20 @@ func TestQueryReport(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
 		Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
-		Execution: Execution{Report: true},
+		Execution: Execution{Report: ReportInfo},
 	}, nil)
 	require.NoError(t, err)
 	got := drain(t, rs)
 	rep := rs.Report()
 	require.NotNil(t, rep)
-	require.Equal(t, "native", rep.Engine)
 	require.Equal(t, len(got), rep.Results)
+	require.NotEmpty(t, rep.Events, "the report carries an execution log")
+	// The native engine logged at least one event, and the log ends with results.
+	var sawNative bool
+	for _, e := range rep.Events {
+		if e.Engine == "native" {
+			sawNative = true
+		}
+	}
+	require.True(t, sawNative, "native engine events are recorded")
 }

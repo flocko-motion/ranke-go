@@ -178,6 +178,10 @@ func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.Get
 			}
 		}
 		if len(hitIDs) > 0 {
+			if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
+				ranke.ReportEvent(ctx, "stack", "route", ranke.ReportDebug, "",
+					map[string]any{"layer": li, "hits": len(hitIDs)})
+			}
 			// Fetch raw delta from the layer; materialise at the stack level
 			// (below) so a diff's predecessor resolves across all layers.
 			got, err := s.layers[li].u.GetClaims(ctx, hitIDs, ranke.WithNotDiffMaterialized())

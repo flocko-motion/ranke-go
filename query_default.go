@@ -40,6 +40,8 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	if q.Select.Claim == nil {
 		return nil, errQueryNoRoot
 	}
+	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
+	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch, "root": q.Select.Claim.String()})
 	if q.Limit.Time > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, q.Limit.Time)
@@ -47,12 +49,13 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	}
 
 	needPaths := q.Output.Detail == DetailPath
-	reached, routes, err := queryTraverse(ctx, u, q.Select, needPaths)
+	reached, routes, err := queryTraverse(ctx, u, q.Select, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}
 
 	// Filter: injected visibility scope, then the Where tree.
+	filterStart := reportStart(rc)
 	var filtered []Claim
 	for _, c := range reached {
 		if scope != nil && !scope(c) {
@@ -63,13 +66,19 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		}
 		filtered = append(filtered, c)
 	}
+	rc.timed("native", "filter", ReportInfo, filterStart, "", map[string]any{"in": len(reached), "kept": len(filtered)})
 
+	sortStart := reportStart(rc)
 	sortResults(filtered, q.Order)
+	rc.timed("native", "sort", ReportInfo, sortStart, "", map[string]any{"ordered": q.Order != nil})
 
 	truncated := false
 	if q.Limit.Results > 0 && len(filtered) > q.Limit.Results {
 		filtered = filtered[:q.Limit.Results]
 		truncated = true
+	}
+	if truncated {
+		rc.log("native", "limit", ReportInfo, "", map[string]any{"results": q.Limit.Results, "truncated": true})
 	}
 
 	results := make([]QueryResult, 0, len(filtered))
@@ -84,16 +93,10 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		results = append(results, r)
 	}
 
+	rc.log("native", "results", ReportInfo, "", map[string]any{"results": len(results)})
 	var report *QueryReport
-	if q.Execution.Report {
-		report = &QueryReport{
-			Engine:    "native",
-			Layer:     q.Execution.Layer,
-			Lowered:   "native",
-			Elapsed:   time.Since(start),
-			Results:   len(results),
-			Truncated: truncated,
-		}
+	if createdReport {
+		report = rc.finalize(len(results), truncated)
 	}
 	return &sliceStream{results: results, report: report}, nil
 }
@@ -102,11 +105,13 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 // and returns the reached claim set (deduped) plus, when needPaths is set, the
 // root→claim route for each. An empty Path is one implicit unbounded
 // provenance step — the full closure.
-func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool) ([]Claim, map[string][]Claim, error) {
+func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
+	rootStart := reportStart(rc)
 	root, err := GetClaim(ctx, u, sel.Claim)
 	if err != nil {
 		return nil, nil, wrapDetail(errQuery, "root "+sel.Claim.String(), err)
 	}
+	rc.timed("native", "load-root", ReportInfo, rootStart, sel.Claim.String(), nil)
 
 	steps := sel.Path
 	if len(steps) == 0 {
@@ -116,17 +121,20 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool) 
 	frontier := []Claim{root}
 	routes := map[string][]Claim{root.ID().String(): {root}}
 	var reached []Claim
-	for _, step := range steps {
+	for i, step := range steps {
 		if step.Dir != "" && step.Dir != DirProvenance {
 			// Backward traversal needs edges indexed both ways; the byte-store
 			// reference has only forward edges, so it refuses rather than sweep
 			// the entire closure. A ReverseWalk-capable backend answers natively.
+			rc.log("native", "step", ReportError, "reverse walk unsupported", map[string]any{"index": i, "dir": string(step.Dir)})
 			return nil, nil, withDetail(errReverseWalkUnsupported, string(step.Dir))
 		}
-		reached, err = queryWalkStep(ctx, u, frontier, step, routes, needPaths)
+		stepStart := reportStart(rc)
+		reached, err = queryWalkStep(ctx, u, frontier, step, routes, needPaths, rc)
 		if err != nil {
 			return nil, nil, err
 		}
+		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "depth": step.Depth, "reached": len(reached)})
 		frontier = reached
 	}
 	return reached, routes, nil
@@ -136,7 +144,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool) 
 // edges whose type matches step.Edges, up to step.Depth hops (0 = unbounded),
 // collecting every visited claim whose node type matches step.Nodes (the
 // starting frontier counts as hop 0, per the paper's *0..depth semantics).
-func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, routes map[string][]Claim, needPaths bool) ([]Claim, error) {
+func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
 	type item struct {
 		c   Claim
 		hop int
@@ -184,6 +192,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 			if err != nil {
 				return nil, wrapDetail(errQuery, "traverse "+k, err)
 			}
+			rc.log("native", "fetch", ReportTrace, k, nil)
 			if needPaths {
 				parent := routes[cur.c.ID().String()]
 				route := make([]Claim, len(parent), len(parent)+1)

@@ -133,10 +133,14 @@ type Limit struct {
 	Time    time.Duration // execution budget; 0 = none
 }
 
-// Execution selects where the query runs and whether it reports on itself.
+// Execution selects where the query runs and how deeply it reports on itself.
 type Execution struct {
-	Layer  string // pin to one named storage layer; empty = the backend chooses
-	Report bool   // when true, the stream ends with a QueryReport
+	Layer string // pin to one named storage layer; empty = the backend chooses
+	// Report sets the execution-report verbosity threshold (see ReportLevel):
+	// empty = no report; ReportInfo for high-level stages; ReportDebug for
+	// routing/lowering; ReportTrace for per-claim detail. When set, the stream
+	// carries a QueryReport (ResultStream.Report).
+	Report ReportLevel
 }
 
 // Scope is an injected visibility predicate applied to every candidate claim:
@@ -173,13 +177,4 @@ type QueryResult struct {
 	Content []byte
 }
 
-// QueryReport ends a stream when Execution.Report is set — a report of how the
-// query ran.
-type QueryReport struct {
-	Engine    string        // which engine ran the query (e.g. "native")
-	Layer     string        // which storage layer answered
-	Lowered   string        // the query as that engine ran it ("native" for the reference walk)
-	Elapsed   time.Duration // wall-clock time
-	Results   int           // items emitted
-	Truncated bool          // whether Limit cut the read short
-}
+// QueryReport, QueryEvent, and the reporting machinery live in query_report.go.
