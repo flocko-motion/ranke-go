@@ -100,9 +100,9 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 	if err != nil {
 		return nil, err
 	}
-	// Transparent: inline is served from the node, external is streamed
-	// from 𝒰 — GetContent handles both.
-	return c.Node().GetContent(ctx, a.u)
+	// Claim-addressed: internal content comes from the claim's own bytes,
+	// external is streamed by hash
+	return GetClaimContent(ctx, a.u, id, c.Node().ContentKind())
 }
 
 // --- Branches ---

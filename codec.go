@@ -48,7 +48,7 @@ type encNode struct {
 	TypeSub       string `cbor:"2,keyasint"`
 	EncodingClass string `cbor:"3,keyasint,omitempty"`
 	EncodingSub   string `cbor:"4,keyasint,omitempty"`
-	ContentHash   []byte `cbor:"5,keyasint,omitempty"` // raw multihash bytes
+	ContentHash   []byte `cbor:"5,keyasint,omitempty"` // external content: its address H(c); mutually exclusive with Content
 	CreatedAt     string `cbor:"6,keyasint"`           // RFC3339 nano UTC
 	// Edge records inlined in canonical order — each element is one edge's
 	// S(e), so S(v) commits to the edges directly. Content bytes stay out (in
@@ -57,32 +57,28 @@ type encNode struct {
 	// Fields appear under tag 8 as a map sorted by key (CBOR
 	// Deterministic ensures sort order).
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
-	// ContentSize is the byte-length of the content addressed by
-	// ContentHash. Paired with ContentHash so a verifier can detect
-	// truncation/extension without rehashing — and so storage layers
-	// can know the size without loading the bytes. Emitted iff
-	// ContentHash is present (see buildEncNode).
+	// Content holds inline content bytes directly (§Content)
+	// Mutually exclusive with ContentHash
+	Content []byte `cbor:"9,keyasint,omitempty"`
+	// ContentSize is the byte-length of the content, mandatory whenever the
+	// node carries content (inline or external — §Content)
 	ContentSize uint64 `cbor:"11,keyasint,omitempty"`
-	// Height is the claim's generation number (§4.1): 0 for an initial
-	// node, else 1 + max(reference heights). omitempty drops height 0, so
-	// an initial node encodes no height field — height 0 and absent are the
-	// same on decode, matching the semantics (only initial nodes are 0).
+	// Height is the longest possible path, defined in paper 1 (§4.1)
 	Height uint64 `cbor:"12,keyasint,omitempty"`
 }
 
-// encEdge is the canonical record of an edge (§4.2), the shape the edge
-// id is computed over and inlined into its node's S(v). Content is addressed
-// by ContentHash+ContentSize (never inline bytes) so an edge's id is the same
-// whether its content is inline or external; the inline bytes, when any, live
-// in the storage shape (encClaimFile.EdgeContents), not here.
+// encEdge is the canonical record of an edge (§4.2)
 type encEdge struct {
 	Reference         []byte            `cbor:"1,keyasint"`
 	TypeClass         string            `cbor:"2,keyasint"`
 	TypeSub           string            `cbor:"3,keyasint"`
-	ContentHash       []byte            `cbor:"4,keyasint,omitempty"` // raw multihash bytes
+	ContentHash       []byte            `cbor:"4,keyasint,omitempty"` // external content address; mutually exclusive with Content
 	RelationDirection int8              `cbor:"5,keyasint,omitempty"`
 	Fields            map[string]string `cbor:"6,keyasint,omitempty"`
-	ContentSize       uint64            `cbor:"7,keyasint,omitempty"` // content byte length; emitted iff ContentHash present
+	ContentSize       uint64            `cbor:"7,keyasint,omitempty"` // content byte length; emitted iff content present
+	EncodingClass     string            `cbor:"8,keyasint,omitempty"`
+	EncodingSub       string            `cbor:"9,keyasint,omitempty"`
+	Content           []byte            `cbor:"10,keyasint,omitempty"`
 }
 
 // encodeNode serializes a node together with its (inlined) edges and returns
@@ -158,9 +154,8 @@ func unaliasFieldKeys(fields map[string]string) map[string]string {
 // inlined (in the given canonical order). Used both in id computation
 // (encodeNode wraps this) and in the claim codec (Claim.Encode). Each edge is
 // serialized to its S(e) and embedded as a raw item, so S(v) — and the node
-// id — commit to the edge contents directly. The edge inline content bytes
-// are not included here (they live in the storage shape), preserving edge-id
-// invariance to inline-vs-external content.
+// id — commit to the edge records directly, including any inline content they
+// carry (§Content).
 func buildEncNode(n *node, edges []*edge) (encNode, error) {
 	en := encNode{
 		TypeClass:     aliasToWire(n.typeClass, nodeClassToAlias),
@@ -171,7 +166,11 @@ func buildEncNode(n *node, edges []*edge) (encNode, error) {
 		Height:        n.height,
 		Fields:        aliasFieldKeys(n.fields),
 	}
-	if n.contentHash != nil {
+	switch {
+	case n.content != nil: // inline: the id commits to the bytes (§Content)
+		en.Content = n.content
+		en.ContentSize = n.contentSize
+	case n.contentHash != nil: // external: the id commits to the address
 		en.ContentHash = idBytes(n.contentHash)
 		en.ContentSize = n.contentSize
 	}
@@ -188,18 +187,22 @@ func buildEncNode(n *node, edges []*edge) (encNode, error) {
 	return en, nil
 }
 
-// buildEncEdge constructs the encEdge record for an *edge. Content is
-// addressed by hash+size; inline bytes (if any) are added by the caller
-// to the storage shape.
+// buildEncEdge constructs the encEdge record for an *edge
 func buildEncEdge(e *edge) (encEdge, error) {
 	ee := encEdge{
 		Reference:         idBytes(e.reference),
 		TypeClass:         aliasToWire(e.typeClass, edgeClassToAlias),
 		TypeSub:           aliasToWire(EdgeSubtype(e.typeSub), edgeSubtypeToAlias),
+		EncodingClass:     aliasToWire(e.encodingClass, encodingClassToAlias),
+		EncodingSub:       aliasToWire(EncodingSubtype(e.encodingSub), encodingSubToAlias),
 		RelationDirection: int8(e.relationDirection),
 		Fields:            aliasFieldKeys(e.fields),
 	}
-	if e.contentHash != nil {
+	switch {
+	case e.content != nil:
+		ee.Content = e.content
+		ee.ContentSize = e.contentSize
+	case e.contentHash != nil:
 		ee.ContentHash = idBytes(e.contentHash)
 		ee.ContentSize = e.contentSize
 	}
@@ -228,18 +231,10 @@ func idBytes(v Id) []byte {
 // adapters use them so they never need to know a claim's internal
 // representation; they move opaque bytes.
 
-// encClaimFile is the canonical serialized shape of a claim: the node record
-// (which inlines the edge records) plus — separately from the id-defining
-// records — the inline content bytes for the node and any edges that carry
-// them. Absent inline fields mean the content is external (referenced by
-// hash) or the claim has no content at all.
+// encClaimFile is the canonical serialized shape of a claim: just the node
+// record, which inlines the edge records
 type encClaimFile struct {
-	Node        encNode `cbor:"1,keyasint"`
-	NodeContent []byte  `cbor:"2,keyasint,omitempty"` // inline node content; absent when external or none
-	// Each edge's inline content bytes, positional with Node.Edges; kept out
-	// of Node so an edge id is inline/external-invariant. Emitted only when
-	// some edge is inline (nil element = that edge's content is external/none).
-	EdgeContents [][]byte `cbor:"3,keyasint,omitempty"`
+	Node encNode `cbor:"1,keyasint"`
 }
 
 // Encode serializes the claim to its canonical CBOR bytes — the same
@@ -249,22 +244,9 @@ func (c *claim) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	file := encClaimFile{Node: en, NodeContent: c.node.content}
-	// Edge inline content lives outside S(v). Allocate the positional array
-	// only when some edge is inline, so a claim with no inline edge content
-	// stores no EdgeContents (omitempty).
-	for _, e := range c.edges {
-		if len(e.content) > 0 {
-			file.EdgeContents = make([][]byte, len(c.edges))
-			break
-		}
-	}
-	if file.EdgeContents != nil {
-		for i, e := range c.edges {
-			file.EdgeContents[i] = e.content
-		}
-	}
-	data, err := encodingMode.Marshal(file)
+	// Inline content (node and edges) is already inside the records (§Content),
+	// so the storage shape is just the node record.
+	data, err := encodingMode.Marshal(encClaimFile{Node: en})
 	if err != nil {
 		return nil, wrapDetail(errEncodeClaim, c.node.id.String(), err)
 	}
@@ -286,9 +268,7 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 		return nil, wrapDetail(errDecodeClaim, "node", err)
 	}
 	n.id = id
-	if len(ec.NodeContent) > 0 {
-		n.content = ec.NodeContent // inline; contentHash+size set by decodeNode
-	}
+	// Node inline content (if any) is set by decodeNode from the node record.
 	// Edges are inlined in the node record. Each edge id is H(S(e)) over the
 	// stored edge bytes — computed here from the raw slice, never re-encoded,
 	// so it is stable as the alias taxonomy grows. Inline edge content, if
@@ -307,9 +287,6 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 		e, err := decodeEdge(ee)
 		if err != nil {
 			return nil, wrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
-		}
-		if i < len(ec.EdgeContents) && len(ec.EdgeContents[i]) > 0 {
-			e.content = ec.EdgeContents[i]
 		}
 		e.id = eid
 		edges[i] = e
@@ -349,7 +326,11 @@ func decodeNode(en encNode) (*node, error) {
 		height:        en.Height,
 		fields:        unaliasFieldKeys(en.Fields),
 	}
-	if len(en.ContentHash) > 0 {
+	switch {
+	case len(en.Content) > 0: // inline (§Content)
+		n.content = en.Content
+		n.contentSize = en.ContentSize
+	case len(en.ContentHash) > 0: // external
 		ch, err := hashFromMultihashBytes(en.ContentHash)
 		if err != nil {
 			return nil, err
@@ -371,12 +352,16 @@ func decodeEdge(ee encEdge) (*edge, error) {
 		reference:         ref,
 		typeClass:         aliasFromWire(ee.TypeClass, edgeClassFromAlias),
 		typeSub:           string(aliasFromWire(ee.TypeSub, edgeSubtypeFromAlias)),
+		encodingClass:     aliasFromWire(ee.EncodingClass, encodingClassFromAlias),
+		encodingSub:       string(aliasFromWire(ee.EncodingSub, encodingSubFromAlias)),
 		relationDirection: RelationDirection(ee.RelationDirection),
 		fields:            unaliasFieldKeys(ee.Fields),
 	}
-	// Inline content bytes (if any) are attached by DecodeClaim from the
-	// storage shape; here we restore only the hash+size reference.
-	if len(ee.ContentHash) > 0 {
+	switch {
+	case len(ee.Content) > 0: // inline (§Content)
+		e.content = ee.Content
+		e.contentSize = ee.ContentSize
+	case len(ee.ContentHash) > 0: // external
 		ch, err := hashFromMultihashBytes(ee.ContentHash)
 		if err != nil {
 			return nil, err

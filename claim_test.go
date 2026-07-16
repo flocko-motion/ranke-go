@@ -158,7 +158,7 @@ func newSignedContributor(t *testing.T) (Contributor, ed25519.PrivateKey) {
 	require.NoError(t, err)
 	pubkey, err := EncodePublicKey(priv.Public())
 	require.NoError(t, err)
-	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).Sign(priv)
+	c, err := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream).Sign(priv)
 	require.NoError(t, err)
 	view, err := c.AsContributor(context.Background(), nil, priv) // inline pubkey → no Universe needed
 	require.NoError(t, err)
@@ -224,6 +224,7 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 	alice := contributor(t)
 	source, err := NewClaim(TypeSource("email"), alice).
 		WithInlineContent([]byte("From: alice\r\n\r\nhello")).
+		WithEncoding(EncodingMessage("rfc822")).
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
@@ -234,12 +235,14 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 		Reference:     source.ID(),
 		Type:          TypeDerivation("source"),
 		InlineContent: []byte("extracted from the greeting line"),
+		Encoding:      EncodingPlain,
 	})
 	require.NoError(t, err)
 	require.False(t, provEdge.IsContentExternal())
 
 	entity, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
+		WithEncoding(EncodingPlain).
 		WithEdges(provEdge).
 		WithHeight(HeightOf(alice, source)).
 		Sign()
@@ -266,13 +269,14 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 	nodeHash, err := hashContent([]byte("a large external node payload"))
 	require.NoError(t, err)
 
-	source, err := NewClaim(TypeSource("blob"), alice).WithInlineContent([]byte("seed")).WithHeight(HeightOf(alice)).Sign()
+	source, err := NewClaim(TypeSource("blob"), alice).WithInlineContent([]byte("seed")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	extEdge, err := NewEdge(EdgeConfig{
 		Reference:   source.ID(),
 		Type:        TypeDerivation("source"),
 		ContentHash: edgeHash,
+		Encoding:    EncodingOctetStream,
 		ContentSize: uint64(len(edgeBlob)),
 	})
 	require.NoError(t, err)
@@ -282,6 +286,7 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 	nodeBlobLen := uint64(len("a large external node payload"))
 	c, err := NewClaim(TypeEntity("object"), alice).
 		WithExternalContent(nodeHash, nodeBlobLen). // hash+size, no inline bytes (XOR, §4.4)
+		WithEncoding(EncodingOctetStream).
 		WithEdges(extEdge).
 		WithHeight(HeightOf(alice, source)).
 		Sign()
@@ -299,6 +304,7 @@ func TestClaimRoundTrip_Fields(t *testing.T) {
 	alice := contributor(t)
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		WithField("zeta", "26").
 		WithField("alpha", "1").
 		WithField("title", "just a plain field").
@@ -318,16 +324,18 @@ func TestClaimRoundTrip_Fields(t *testing.T) {
 // the codec on each edge.
 func TestClaimRoundTrip_RelationDirections(t *testing.T) {
 	alice := contributor(t)
-	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithHeight(HeightOf(alice)).Sign()
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 	person, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
+		WithEncoding(EncodingPlain).
 		WithEdges(mustDerivEdge(t, source)).
 		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
 	object, err := NewClaim(TypeEntity("object"), alice).
 		WithInlineContent([]byte("apples")).
+		WithEncoding(EncodingPlain).
 		WithEdges(mustDerivEdge(t, source)).
 		WithHeight(HeightOf(alice, source)).
 		Sign()
@@ -344,6 +352,7 @@ func TestClaimRoundTrip_RelationDirections(t *testing.T) {
 
 	rel, err := NewClaim(TypeRelation("likes"), alice).
 		WithInlineContent([]byte("likes")).
+		WithEncoding(EncodingPlain).
 		WithEdges(fromEdge, toEdge, mustDerivEdge(t, source)).
 		WithHeight(HeightOf(alice, person, object, source)).
 		Sign()
@@ -373,6 +382,7 @@ func TestClaimIdReflectsContent(t *testing.T) {
 	mk := func(body string) Claim {
 		c, err := NewClaim(TypeSource("note"), alice).
 			WithInlineContent([]byte(body)).
+			WithEncoding(EncodingPlain).
 			WithCreatedAt(at).
 			WithHeight(HeightOf(alice)).
 			Sign()

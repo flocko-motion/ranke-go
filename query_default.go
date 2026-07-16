@@ -464,7 +464,7 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	if inline == nil && n.GetContentHash() == nil {
 		return nil // no content
 	}
-	rdr, err := GetClaimContent(ctx, u, c.ID(), ContentLocationOf(n))
+	rdr, err := GetClaimContent(ctx, u, c.ID(), n.ContentKind())
 	if err != nil {
 		return nil
 	}

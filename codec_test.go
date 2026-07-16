@@ -59,16 +59,16 @@ func TestEncodingRequiresContent(t *testing.T) {
 	require.Error(t, err, "encoding without content must be rejected")
 }
 
-// TestEncodingOptional: encoding is optional and has NO default — a content
-// claim with no encoding builds fine and reports an empty encoding, so
-// binary content (e.g. a contributor's multikey pubkey) needn't carry a
-// bogus media type. An explicit encoding is preserved.
-func TestEncodingOptional(t *testing.T) {
+// TestContentRequiresEncoding: encoding (the content media type) is MANDATORY
+// whenever a claim carries content — the paper lists it in every content-bearing
+// node schema and commits it into the id preimage (a raw pubkey is an encoding
+// too). A content claim without an encoding is rejected; an explicit encoding is
+// preserved.
+func TestContentRequiresEncoding(t *testing.T) {
 	alice := contributor(t)
 
-	none, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).WithHeight(HeightOf(alice)).Sign()
-	require.NoError(t, err)
-	require.Equal(t, "", none.Node().Encoding(), "no encoding by default")
+	_, err := NewClaim(TypeSource("note"), alice).WithInlineContent([]byte("x")).WithHeight(HeightOf(alice)).Sign()
+	require.ErrorIs(t, err, errContentWithoutEncoding, "content without an encoding must be rejected")
 
 	typed, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("x")).
@@ -85,6 +85,7 @@ func TestClaimHeightRoundTrip(t *testing.T) {
 	alice := contributor(t)
 	src, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
