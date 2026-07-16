@@ -44,8 +44,36 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	if err != nil {
 		return nil, err
 	}
+	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
+}
 
-	// Filter by the Where tree (scope confinement happened during the walk).
+// DefaultQueryFrom is DefaultQuery with the traversal supplied by the caller — a
+// backend lowers Select→its own query (e.g. Cypher), then this applies the
+// reference filter/sort/limit/shape, so the result set matches DefaultQuery.
+// traverse runs under the report context and returns the reached set (+ routes
+// for DetailPath); engine names the backend in the report. Confinement and root
+// resolution are the traverse's job (it knows the backend); this only needs the
+// scope to be present.
+func DefaultQueryFrom(ctx context.Context, u Universe, engine string, q Query,
+	traverse func(ctx context.Context) (reached []Claim, routes map[string][]Claim, err error)) (ResultStream, error) {
+	start := time.Now()
+	if q.Select.Branch == "" {
+		return nil, errQueryNoScope
+	}
+	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
+	rc.log(engine, "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch})
+	reached, routes, err := traverse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
+}
+
+// finishReached is the reference post-traversal pipeline (Where, sort, limit,
+// shape) over an already-generated set — shared by DefaultQuery and
+// DefaultQueryFrom so every engine's results are identical. Finalises the report
+// if this call created it.
+func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, routes map[string][]Claim, rc *reportCollector, createdReport bool) (ResultStream, error) {
 	filterStart := reportStart(rc)
 	var filtered []Claim
 	for _, c := range reached {
@@ -69,6 +97,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		rc.log("native", "limit", ReportInfo, "", map[string]any{"results": q.Limit.Results, "truncated": true})
 	}
 
+	needPaths := q.Output.Detail == DetailPath
 	results := make([]QueryResult, 0, len(filtered))
 	for _, c := range filtered {
 		r := QueryResult{Claim: c}

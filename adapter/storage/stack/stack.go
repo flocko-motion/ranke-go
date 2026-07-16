@@ -412,9 +412,18 @@ func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, tags map[
 	return nil
 }
 
-// Capabilities derives the stack's from its layers: write-through properties
-// (Overwrite/Enumerate) from the written tiers, Persistent from an authoritative
-// layer, the rest from any layer. Tier is authoritative — a stack has one.
+// Capabilities derives the stack's from its layers, per capability:
+//   - Overwrite: every synchronous layer can (repair must reach the durable tier);
+//   - Delete: every layer can (else a deleted key lingers in some layer);
+//   - Enumerate: some synchronous layer can (it holds the whole keyset);
+//   - Persistent: an authoritative layer is (the durable tier survives);
+//   - ReverseWalk: some layer can walk edges backward (a query routes to it);
+//   - Tags: some layer holds the tag overlay;
+//   - RawClaims: some layer keeps verbatim bytes (raw reads route to it);
+//   - ExternalContent: some layer holds unbounded content (the stack does too);
+//   - ContentCap: 0 if some layer is unbounded, else the largest layer cap.
+//
+// Tier is authoritative — a stack has one.
 func (s *stack) Capabilities() ranke.Capabilities {
 	overwrite, del := true, true
 	var enumerate, persistent, reverseWalk, rawClaims, externalContent, tags bool

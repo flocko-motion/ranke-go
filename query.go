@@ -2,7 +2,7 @@
 // type:    data
 // job:     the declarative read AST (RQL — the RankeDB paper's §Filtered Reads), its
 //
-//	result/stream shapes, and the visibility Scope — the value types Universe.Query carries
+//	result/stream shapes — the value types Universe.Query carries
 //
 // limits:  types only; the reference executor is DefaultQuery (-> query_default.go); a capable
 //

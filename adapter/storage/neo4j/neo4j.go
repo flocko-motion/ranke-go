@@ -300,13 +300,7 @@ func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]
 	return out, nil
 }
 
-// Query answers an RQL read. For now it delegates to the reference executor
-// over this Universe's own reads (forward-only, uses/connections refused); a
-// future native lowering to Cypher — and ReverseWalk support, since neo4j holds
-// edges both directions — would override this.
-func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	return ranke.DefaultQuery(ctx, u, q, scope)
-}
+// Query is implemented natively in query.go (Cypher traversal lowering).
 
 // GetClaimsRaw always misses: a structure/query cache stores no CBOR. The
 // ErrNotFound lets a stack route the request to the authoritative byte layer.
@@ -464,15 +458,16 @@ func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, t
 }
 
 // Capabilities: a graph DB can overwrite, delete, and enumerate, is durable,
-// and holds branch tags.
+// answers queries natively (Cypher), and holds branch tags.
 func (u *neo4jUniverse) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
-		Overwrite:  true,
-		Delete:     true,
-		Enumerate:  true,
-		Persistent: true,
-		Tags:       true,
-		Tier:       u.tier,
+		Overwrite:   true,
+		Delete:      true,
+		Enumerate:   true,
+		Persistent:  true,
+		ReverseWalk: true, // holds edges both directions; Query lowers uses/connections to Cypher
+		Tags:        true,
+		Tier:        u.tier,
 	}
 }
 

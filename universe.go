@@ -44,8 +44,12 @@ type Capabilities struct {
 	// In-memory backends report false.
 	Persistent bool
 	// ReverseWalk: the backend can follow edges backward NATIVELY/efficiently
-	// (e.g. neo4j). Any Universe can answer uses/connections via DefaultQuery's
-	// closure-inversion; this flag signals a cheap native path, not mere ability.
+	// (e.g. neo4j holds edges indexed both directions). Any Universe can still
+	// answer uses/connections via DefaultQuery's closure-inversion (O(closure),
+	// inherently confined to the scope closure it builds); this flag signals a
+	// cheap native path, not mere ability. Composed per-primitive: a stack ORs
+	// over its layers (any capable layer can answer), a partition ANDs over its
+	// shards (a referrer can live in any shard, so all must support it).
 	ReverseWalk bool
 	// RawClaims: the backend stores claims as CBOR
 	RawClaims bool
