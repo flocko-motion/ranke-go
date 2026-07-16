@@ -120,8 +120,7 @@ func assertEdgeEqual(t *testing.T, want, got Edge) {
 // the bytes themselves.
 func assertContentEqual(t *testing.T, want, got contentCarrier, what string) {
 	t.Helper()
-	require.Equal(t, want.IsContentExternal(), got.IsContentExternal(),
-		"%s content external flag", what)
+	require.Equal(t, want.ContentKind(), got.ContentKind(), "%s content kind", what)
 	require.Equal(t, want.GetContentSize(), got.GetContentSize(), "%s content length", what)
 	if wh := want.GetContentHash(); wh != nil {
 		require.NotNil(t, got.GetContentHash(), "%s content hash present", what)
@@ -129,7 +128,7 @@ func assertContentEqual(t *testing.T, want, got contentCarrier, what string) {
 	} else {
 		require.Nil(t, got.GetContentHash(), "%s content hash absent", what)
 	}
-	if !want.IsContentExternal() {
+	if want.ContentKind() != ContentExternal {
 		wb, err := want.GetInlineContent()
 		require.NoError(t, err)
 		gb, err := got.GetInlineContent()
@@ -210,7 +209,7 @@ func TestClaimRoundTrip_SourceInlineContent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "source/email", c.Node().Type())
-	require.False(t, c.Node().IsContentExternal(), "content is inline")
+	require.Equal(t, ContentInline, c.Node().ContentKind(), "content is inline")
 	require.Len(t, c.Edges(), 1, "one auto-built contribution/contributor edge")
 	require.Equal(t, EdgeTypeContributor, c.Edges()[0].Type())
 	require.True(t, c.Edges()[0].Reference().Equal(alice.ID()), "edge references the contributor")
@@ -238,7 +237,7 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 		Encoding:      EncodingPlain,
 	})
 	require.NoError(t, err)
-	require.False(t, provEdge.IsContentExternal())
+	require.NotEqual(t, ContentExternal, provEdge.ContentKind())
 
 	entity, err := NewClaim(TypeEntity("person"), alice).
 		WithInlineContent([]byte("Alice")).
@@ -280,7 +279,7 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 		ContentSize: uint64(len(edgeBlob)),
 	})
 	require.NoError(t, err)
-	require.True(t, extEdge.IsContentExternal(), "edge content is external")
+	require.Equal(t, ContentExternal, extEdge.ContentKind(), "edge content is external")
 	require.Equal(t, uint64(len(edgeBlob)), extEdge.GetContentSize(), "edge external size recorded")
 
 	nodeBlobLen := uint64(len("a large external node payload"))
@@ -291,7 +290,7 @@ func TestClaimRoundTrip_ExternalContentNodeAndEdges(t *testing.T) {
 		WithHeight(HeightOf(alice, source)).
 		Sign()
 	require.NoError(t, err)
-	require.True(t, c.Node().IsContentExternal(), "node content is external")
+	require.Equal(t, ContentExternal, c.Node().ContentKind(), "node content is external")
 	require.Equal(t, nodeBlobLen, c.Node().GetContentSize(), "external node size recorded")
 	roundTrip(t, c)
 }

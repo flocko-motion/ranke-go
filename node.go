@@ -19,9 +19,6 @@ type Node interface {
 	Type() string
 	TypeClass() NodeClass
 	TypeSub() string
-	// IsContentExternal reports whether the content is stored as a
-	// separate Universe blob (true) or inline in the node (false).
-	IsContentExternal() bool
 	// GetContentHash is the address of EXTERNAL content, H(content); nil for
 	// inline content (whose bytes are in the node, §Content) and for no content.
 	GetContentHash() Id
@@ -36,7 +33,7 @@ type Node interface {
 	ContentKind() ContentKind
 	// GetInlineContent returns the inline content bytes (nil when the node
 	// carries no content); it errors when the content is external — check
-	// IsContentExternal first, or use GetContent with a Universe.
+	// ContentKind first, or use GetContent with a Universe.
 	GetInlineContent() ([]byte, error)
 	// GetContent returns a reader over the content, transparently
 	// streaming external content from u; u may be nil for inline content.
@@ -142,12 +139,6 @@ func (n *node) Encoding() string {
 func (n *node) EncodingClass() EncodingClass { return n.contentSource().encodingClass }
 func (n *node) EncodingSub() string          { return n.contentSource().encodingSub }
 
-func (n *node) IsContentExternal() bool {
-	// content_hash ⟺ external (§Content: content and content_hash are mutually
-	// exclusive, so a hash means the bytes live in the Universe, not the record).
-	cs := n.contentSource()
-	return cs.content == nil && cs.contentHash != nil
-}
 func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
 func (n *node) CreatedAt() time.Time   { return n.createdAt }

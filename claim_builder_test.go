@@ -73,7 +73,7 @@ func TestBuilderWithExternalContent(t *testing.T) {
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)
-	require.True(t, c.Node().IsContentExternal())
+	require.Equal(t, ContentExternal, c.Node().ContentKind())
 	require.Equal(t, uint64(13), c.Node().GetContentSize())
 	require.True(t, hash.Equal(c.Node().GetContentHash()))
 }

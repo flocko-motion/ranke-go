@@ -284,13 +284,38 @@ func GetClaimHeight(ctx context.Context, u Universe, id Id) (uint64, error) {
 	return hs[0], nil
 }
 
-// GetContent is the single-item form of Universe.GetContents.
-func GetContent(ctx context.Context, u Universe, id Id, size uint64) ([]byte, error) {
-	bs, err := u.GetContents(ctx, []ContentRef{{Hash: id, ContentSize: size}})
+// ContentKind states whether and where a claim's content lives — a node's own,
+// definitive answer (Claim.GetContent routes on it):
+//
+//	Inline   — held in the claim record
+//	External — a separate Universe blob, addressed by content hash
+//	None     — the claim carries no content
+type ContentKind int
+
+const (
+	ContentNone ContentKind = iota // no content
+	ContentInline                  // inline in the claim record
+	ContentExternal                // a separate Universe blob
+)
+
+// claimInlineReader recovers inline bytes a structure-only cache dropped: it
+// reads the raw claim via GetClaimsRaw (which falls through the cache to the byte
+// layer, unlike GetClaim) and decodes the content. Callers pass the content
+// source's id, so the decoded claim carries the bytes directly.
+func claimInlineReader(ctx context.Context, u Universe, id Id) (io.ReadCloser, error) {
+	raws, err := u.GetClaimsRaw(ctx, []Id{id})
 	if err != nil {
 		return nil, err
 	}
-	return bs[0], nil
+	c, err := DecodeClaim(id, raws[0])
+	if err != nil {
+		return nil, err
+	}
+	b, err := c.Node().GetInlineContent()
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
 // GetTag is a single-item form of Universe.GetClaimTags: it reports whether

@@ -73,7 +73,7 @@ func TestNodeInlineContent(t *testing.T) {
 	require.NoError(t, err)
 
 	n := c.Node()
-	require.False(t, n.IsContentExternal(), "inline content is not external")
+	require.Equal(t, ContentInline, n.ContentKind(), "inline content")
 	require.Equal(t, uint64(len(body)), n.GetContentSize(), "size tracks byte length")
 
 	require.Nil(t, n.GetContentHash(), "inline content has no content_hash (§Content) — the id commits to the bytes")
@@ -102,7 +102,7 @@ func TestNodeExternalContent(t *testing.T) {
 	require.NoError(t, err)
 
 	n := c.Node()
-	require.True(t, n.IsContentExternal(), "content referenced by hash is external")
+	require.Equal(t, ContentExternal, n.ContentKind(), "content referenced by hash is external")
 	require.True(t, hash.Equal(n.GetContentHash()), "content hash is preserved")
 	require.Equal(t, uint64(len(blob)), n.GetContentSize(), "external size is recorded on the node")
 
@@ -139,7 +139,7 @@ func TestNodeNoContent(t *testing.T) {
 	n := c.Node()
 	require.Nil(t, n.GetContentHash(), "no-content node has no hash")
 	require.Equal(t, uint64(0), n.GetContentSize())
-	require.False(t, n.IsContentExternal(), "no content is not external content")
+	require.Equal(t, ContentNone, n.ContentKind(), "no content")
 	require.Empty(t, readContent(t, n, nil), "no-content node streams empty")
 }
 

@@ -59,7 +59,7 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) map[string]any {
 			"direction":    directionProp(e.RelationDirection()),
 			"content_hash": idStr(e.GetContentHash()),
 			"content_size": contentSizeProp(e.GetContentHash(), e.GetContentSize()),
-			"content":      u.inlineText(ranke.IsTextEncoding(e.Encoding()), e.GetContentSize(), e.IsContentExternal(), e.GetInlineContent),
+			"content":      u.inlineText(ranke.IsTextEncoding(e.Encoding()), e.GetContentSize(), e.ContentKind() == ranke.ContentExternal, e.GetInlineContent),
 		}
 		ep["fields"] = fieldsMapOf(e.Fields(), e.GetField)
 		edges = append(edges, ep)
@@ -73,7 +73,7 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) map[string]any {
 		"height":       int64(n.Height()),
 		"content_hash": idStr(n.GetContentHash()),
 		"content_size": contentSizeProp(n.GetContentHash(), n.GetContentSize()),
-		"content":      u.inlineText(ranke.IsTextEncoding(n.Encoding()), n.GetContentSize(), n.IsContentExternal(), n.GetInlineContent),
+		"content":      u.inlineText(ranke.IsTextEncoding(n.Encoding()), n.GetContentSize(), n.ContentKind() == ranke.ContentExternal, n.GetInlineContent),
 		"fields":       fieldsMapOf(n.Fields(), n.GetField),
 		"edges":        edges,
 	}

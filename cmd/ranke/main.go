@@ -305,12 +305,14 @@ func printClaim(c ranke.Claim) {
 	fmt.Printf("type:         %s\n", n.Type())
 	fmt.Printf("encoding:     %s\n", n.Encoding())
 	fmt.Printf("created_at:   %s\n", n.CreatedAt().Format("2006-01-02T15:04:05.000000000Z"))
-	if h := n.GetContentHash(); h != nil {
-		fmt.Printf("content_hash: %s\n", h.String())
+	switch n.ContentKind() {
+	case ranke.ContentExternal:
+		fmt.Printf("content_hash: %s\n", n.GetContentHash().String())
 		fmt.Printf("content_size: %d\n", n.GetContentSize())
-		if n.IsContentExternal() {
-			fmt.Printf("content:      (external, %d bytes)\n", n.GetContentSize())
-		} else if b, err := n.GetInlineContent(); err == nil && b != nil {
+		fmt.Printf("content:      (external, %d bytes)\n", n.GetContentSize())
+	case ranke.ContentInline:
+		fmt.Printf("content_size: %d\n", n.GetContentSize())
+		if b, err := n.GetInlineContent(); err == nil && b != nil {
 			fmt.Printf("content:      %s\n", previewBytes(b))
 		}
 	}

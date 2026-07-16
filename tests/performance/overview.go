@@ -57,11 +57,11 @@ func computeOverview(ctx context.Context, u ranke.Universe, m *generator.Manifes
 		if h := n.Height(); h > ov.maxHeight {
 			ov.maxHeight = h
 		}
-		switch {
-		case n.IsContentExternal():
+		switch n.ContentKind() {
+		case ranke.ContentExternal:
 			ov.external++
 			ov.bytes += n.GetContentSize()
-		case n.GetContentSize() > 0:
+		case ranke.ContentInline:
 			ov.inline++
 			ov.bytes += n.GetContentSize()
 		default:

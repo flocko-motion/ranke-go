@@ -22,13 +22,22 @@ type Edge interface {
 	TypeClass() EdgeClass
 	TypeSub() string
 
-	// IsContentExternal reports whether the content is stored as a
-	// separate Universe blob (true) or inline in the edge (false).
-	IsContentExternal() bool
-	// GetContentHash is H(content); nil when the edge carries no content.
+	// Encoding is the content's MIME media type ("class/sub"), or "" when the
+	// edge carries no content. Like a node, a content-bearing edge declares one
+	// (§Nodes; the same content⇒encoding rule applies — edge content is fully
+	// expressive: an agent's reasoning, a proof, a relation's meaning).
+	Encoding() string
+	EncodingClass() EncodingClass
+	EncodingSub() string
+
+	// GetContentHash is the address of EXTERNAL content, H(content); nil for
+	// inline content (bytes in the edge, §Content) and for no content.
 	GetContentHash() Id
 	// GetContentSize is the content's byte length (0 when no content).
 	GetContentSize() uint64
+	// ContentKind reports whether and where the edge's content lives — Inline,
+	// External, or None.
+	ContentKind() ContentKind
 	// GetInlineContent returns the inline content bytes (nil when none);
 	// it errors when the content is external.
 	GetInlineContent() ([]byte, error)
@@ -65,6 +74,7 @@ type EdgeConfig struct {
 	Type              string
 	TypeClass         EdgeClass
 	TypeSub           string
+	Encoding          string // content media type ("class/sub"); required with content, forbidden without
 	InlineContent     []byte
 	ContentHash       Id
 	ContentSize       uint64
@@ -76,15 +86,14 @@ type EdgeConfig struct {
 // immutable after. id is computed once at construction from the
 // canonical serialization of the other fields.
 type edge struct {
-	reference   Id
-	typeClass   EdgeClass
-	typeSub     string
-	contentHash Id     // H(content); nil when no content
-	content     []byte // inline content bytes; nil when external
-	contentSize uint64 // content byte length
-	// contentExternal, when non-nil, is the authoritative inline/external flag
-	// (set by AssembleClaim); nil means derive from content-byte presence.
-	contentExternal   *bool
+	reference         Id
+	typeClass         EdgeClass
+	typeSub           string
+	encodingClass     EncodingClass // "" when no content
+	encodingSub       string
+	contentHash       Id     // external content address; nil for inline or no content
+	content           []byte // inline content bytes; nil when external or none
+	contentSize       uint64 // content byte length
 	relationDirection RelationDirection
 	fields            map[string]string
 	id                Id // = H(S(edge))
@@ -129,6 +138,12 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	if len(cfg.InlineContent) > maxInlineContent {
 		return nil, errInlineContentTooLarge
 	}
+	// Encoding is the content media type — mandatory with content, forbidden
+	// without (same rule as a node; see resolveContentEncoding).
+	encClass, encSub, err := resolveContentEncoding(cfg.Encoding, cfg.InlineContent != nil || cfg.ContentHash != nil)
+	if err != nil {
+		return nil, err
+	}
 
 	// Relation direction rules (§4.7):
 	//   - relation/* edges must carry RelationFrom or RelationTo
@@ -151,18 +166,16 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		reference:         cfg.Reference,
 		typeClass:         cfg.TypeClass,
 		typeSub:           cfg.TypeSub,
+		encodingClass:     encClass,
+		encodingSub:       encSub,
 		relationDirection: cfg.RelationDirection,
 		fields:            cloneFields(cfg.Fields),
 	}
 	switch {
 	case cfg.InlineContent != nil:
-		// Inline: hold the bytes, address them by their hash.
-		ch, err := hashContent(cfg.InlineContent)
-		if err != nil {
-			return nil, wrapDetail(errNewEdge, "content hash", err)
-		}
+		// Inline: hold the bytes; no content_hash — the edge id commits to the
+		// bytes directly (§Content). Mutually exclusive with ContentHash.
 		e.content = cfg.InlineContent
-		e.contentHash = ch
 		e.contentSize = uint64(len(cfg.InlineContent))
 	case cfg.ContentHash != nil:
 		// External: reference content stored elsewhere by hash + size.
@@ -188,33 +201,48 @@ func (e *edge) Type() string         { return string(e.typeClass) + "/" + e.type
 func (e *edge) TypeClass() EdgeClass { return e.typeClass }
 func (e *edge) TypeSub() string      { return e.typeSub }
 
-func (e *edge) IsContentExternal() bool {
-	if e.contentExternal != nil {
-		return *e.contentExternal // authoritative (set by AssembleClaim)
+func (e *edge) Encoding() string {
+	if e.encodingClass == "" && e.encodingSub == "" {
+		return ""
 	}
-	return e.content == nil && e.contentHash != nil // derived
+	return string(e.encodingClass) + "/" + e.encodingSub
+}
+func (e *edge) EncodingClass() EncodingClass { return e.encodingClass }
+func (e *edge) EncodingSub() string          { return e.encodingSub }
+
+// ContentKind derives from the edge's fields: content_hash ⇒ External (§Content:
+// mutually exclusive with inline), bytes or a non-zero size ⇒ Inline, else None.
+func (e *edge) ContentKind() ContentKind {
+	switch {
+	case e.contentHash != nil:
+		return ContentExternal
+	case e.content != nil || e.contentSize > 0:
+		return ContentInline
+	default:
+		return ContentNone
+	}
 }
 func (e *edge) GetContentHash() Id     { return e.contentHash }
 func (e *edge) GetContentSize() uint64 { return e.contentSize }
 
 func (e *edge) GetInlineContent() ([]byte, error) {
-	if e.IsContentExternal() {
+	if e.ContentKind() == ContentExternal {
 		return nil, errContentExternal
 	}
 	return e.content, nil
 }
 
 func (e *edge) GetContent(ctx context.Context, u Universe) (io.Reader, error) {
+	if e.content != nil {
+		return bytes.NewReader(e.content), nil // inline (§Content)
+	}
 	if e.contentHash == nil {
 		return bytes.NewReader(nil), nil // no content
-	}
-	if e.content != nil {
-		return bytes.NewReader(e.content), nil // inline
 	}
 	if u == nil {
 		return nil, errNoUniverseForContent
 	}
-	return u.StreamContent(ctx, e.contentHash, e.contentSize)
+	return u.StreamContent(ctx, e.contentHash, e.contentSize) // external
 }
 
 func (e *edge) RelationDirection() RelationDirection { return e.relationDirection }

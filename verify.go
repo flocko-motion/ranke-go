@@ -431,7 +431,7 @@ func ruleContent(ctx context.Context, cc contentCarrier, t *claimUnderVerificati
 // ruleContentEncoding (per content carrier): a node or edge that carries
 // content must declare an encoding (a MIME media type).
 func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVerification) error {
-	if cc.GetContentHash() == nil {
+	if cc.ContentKind() == ContentNone {
 		return nil // no content — no encoding required
 	}
 	if cc.Encoding() == "" {
@@ -564,25 +564,20 @@ func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error
 // contentCarrier is the content-addressing surface shared by Node and Edge —
 // enough to verify a content reference without the concrete type.
 type contentCarrier interface {
+	ContentKind() ContentKind
 	GetContentHash() Id
 	GetContentSize() uint64
-	IsContentExternal() bool
 	GetInlineContent() ([]byte, error)
 	Encoding() string
 }
 
-// verifyContentRef checks content integrity for one node/edge.
+// verifyContentRef checks external content integrity for one node/edge. Inline
+// content is committed by the claim id (it has no content_hash), so only
+// external content is verified here — and only when the run opts into it.
 func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig, u Universe) error {
 	hash := cc.GetContentHash()
 	if hash == nil {
-		return nil // no content
-	}
-	if !cc.IsContentExternal() {
-		inline, err := cc.GetInlineContent()
-		if err != nil {
-			return err
-		}
-		return VerifyContent(hash, cc.GetContentSize(), inline)
+		return nil // inline (verified by the id) or no content
 	}
 	if !cfg.externalContent || u == nil {
 		return nil // external content: skipped by default (may be huge)

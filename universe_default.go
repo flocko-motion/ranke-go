@@ -253,7 +253,7 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 		// claim record (already copied by PutClaim above) — they have no
 		// content_hash and no separate blob (§Content). External content is a
 		// blob in the content keyspace, keyed by content_hash, copied here.
-		if cfg.Content && c.Node().IsContentExternal() {
+		if cfg.Content && c.Node().ContentKind() == ContentExternal {
 			ch := c.Node().GetContentHash()
 			bs, err := src.GetContents(ctx, []ContentRef{{Hash: ch, ContentSize: c.Node().GetContentSize()}})
 			if err != nil {

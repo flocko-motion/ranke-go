@@ -108,7 +108,7 @@ func TestEdgeInlineContent(t *testing.T) {
 	e, err := NewEdge(EdgeConfig{Reference: source.ID(), Type: TypeDerivation("source"), InlineContent: payload, Encoding: EncodingPlain})
 	require.NoError(t, err)
 
-	require.False(t, e.IsContentExternal())
+	require.Equal(t, ContentInline, e.ContentKind())
 	require.Equal(t, uint64(len(payload)), e.GetContentSize())
 	got, err := e.GetInlineContent()
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestEdgeExternalContent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.True(t, e.IsContentExternal())
+	require.Equal(t, ContentExternal, e.ContentKind())
 	require.Equal(t, uint64(len(blob)), e.GetContentSize(), "edge records external size")
 	_, err = e.GetInlineContent()
 	require.ErrorIs(t, err, errContentExternal)
