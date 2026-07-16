@@ -49,7 +49,7 @@ func idSet(rs []QueryResult) map[string]bool {
 // root — here b reaches a (derivation) and root (contributor), and a reaches root.
 func TestQueryFullClosure(t *testing.T) {
 	u, root, a, b := queryFixture(t)
-	rs, err := u.Query(context.Background(), Query{Select: Select{Claim: b.ID()}}, nil)
+	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, nil)
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{
@@ -62,8 +62,9 @@ func TestQueryFullClosure(t *testing.T) {
 func TestQueryPathTypedDepth(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{Select: Select{
-		Claim: b.ID(),
-		Path:  []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}},
+		Branch: BranchUniverse,
+		Claim:  b.ID(),
+		Path:   []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}},
 	}}
 	rs, err := u.Query(context.Background(), q, nil)
 	require.NoError(t, err)
@@ -75,7 +76,7 @@ func TestQueryPathTypedDepth(t *testing.T) {
 func TestQueryWhereType(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 	}
 	rs, err := u.Query(context.Background(), q, nil)
@@ -89,7 +90,7 @@ func TestQueryWhereType(t *testing.T) {
 func TestQueryWhereHeight(t *testing.T) {
 	u, root, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
 		Where:  &Where{Field: "height", Test: &Comparison{Ge: 1}},
 	}
 	rs, err := u.Query(context.Background(), q, nil)
@@ -103,7 +104,7 @@ func TestQueryWhereHeight(t *testing.T) {
 func TestQueryOrderLimit(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	q := Query{
-		Select: Select{Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
 		Order:  &Order{Field: "height", Desc: true},
 		Limit:  Limit{Results: 1},
 	}
@@ -119,7 +120,7 @@ func TestQueryOrderLimit(t *testing.T) {
 func TestQueryOutputContent(t *testing.T) {
 	u, _, a, _ := queryFixture(t)
 	q := Query{
-		Select: Select{Claim: a.ID()},
+		Select: Select{Branch: BranchUniverse, Claim: a.ID()},
 		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
 		Output: Output{Content: 4, Overflow: OverflowCutoff},
 	}
@@ -134,7 +135,7 @@ func TestQueryOutputContent(t *testing.T) {
 func TestQueryOutputPath(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
+		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
 		Output: Output{Detail: DetailPath},
 	}
 	rs, err := u.Query(context.Background(), q, nil)
@@ -151,7 +152,7 @@ func TestQueryOutputPath(t *testing.T) {
 func TestQueryScope(t *testing.T) {
 	u, root, a, b := queryFixture(t)
 	scope := func(c Claim) bool { return !c.ID().Equal(root.ID()) }
-	rs, err := u.Query(context.Background(), Query{Select: Select{Claim: b.ID()}}, scope)
+	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, scope)
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{a.ID().String(): true, b.ID().String(): true}, got)
@@ -162,7 +163,7 @@ func TestQueryScope(t *testing.T) {
 // refused with errReverseWalkUnsupported rather than sweeping the closure.
 func TestQueryReverseRefused(t *testing.T) {
 	u, _, _, b := queryFixture(t)
-	q := Query{Select: Select{Claim: b.ID(), Path: []PathStep{{Dir: DirUses}}}}
+	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Dir: DirUses}}}}
 	_, err := u.Query(context.Background(), q, nil)
 	require.ErrorIs(t, err, errReverseWalkUnsupported)
 }
@@ -179,7 +180,7 @@ func TestQueryNoRoot(t *testing.T) {
 func TestQueryReport(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
-		Select:    Select{Claim: b.ID()},
+		Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
 		Execution: Execution{Report: true},
 	}, nil)
 	require.NoError(t, err)

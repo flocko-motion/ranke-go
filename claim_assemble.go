@@ -19,17 +19,25 @@ import (
 // content and still reconstruct id-faithfully (the content is then served by
 // the durable layer).
 type ClaimParts struct {
-	ID            Id                // the node/claim id (a signature — taken as given, not recomputed)
-	Type          string            // "class/sub"
-	Encoding      string            // "class/sub", or "" when there is no content
-	CreatedAt     time.Time         // must retain nanosecond precision to re-encode identically
-	Height        uint64            // §4.1 generation number (0 for an initial node); part of the id-preimage
-	ContentHash   Id                // nil when the claim carries no content
-	ContentSize   uint64            //
-	InlineContent []byte            // optional — omit for external/large content
-	Fields        map[string]string //
-	Edges         []EdgeParts       //
-	Tags          map[string]string // mutable runtime tags (branch membership, revision) — not part of the id
+	ID            Id        // the node/claim id (a signature — taken as given, not recomputed)
+	Type          string    // "class/sub"
+	Encoding      string    // "class/sub", or "" when there is no content
+	CreatedAt     time.Time // must retain nanosecond precision to re-encode identically
+	Height        uint64    // §4.1 generation number (0 for an initial node); part of the id-preimage
+	ContentHash   Id        // nil when the claim carries no content
+	ContentSize   uint64    //
+	InlineContent []byte    // optional — omit for external/large content
+	// ContentExternal states, authoritatively, whether the content is external
+	// (a blob elsewhere) vs inline. It exists because a structure cache like
+	// neo4j may hold a claim's content_hash without its bytes: without an
+	// explicit flag, a nil InlineContent would be guessed as external and the
+	// retrieval path would wrongly look elsewhere for what is really inline.
+	// Honoured by AssembleClaim; the byte-store/builder paths leave it and the
+	// node derives inline/external from InlineContent presence as before.
+	ContentExternal bool
+	Fields          map[string]string //
+	Edges           []EdgeParts       //
+	Tags            map[string]string // mutable runtime tags (branch membership, revision) — not part of the id
 }
 
 // EdgeParts is the parsed structure of one edge. ID (the derived edge id) is
@@ -43,6 +51,7 @@ type EdgeParts struct {
 	ContentHash       Id
 	ContentSize       uint64
 	InlineContent     []byte
+	ContentExternal   bool // authoritative inline/external flag (see ClaimParts.ContentExternal)
 	Fields            map[string]string
 }
 
@@ -73,6 +82,10 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		fields:      cloneFields(parts.Fields),
 		id:          parts.ID,
 	}
+	// Authoritative inline/external flag from the caller (a structure cache
+	// knows even when it holds no bytes) — see ClaimParts.ContentExternal.
+	nExt := parts.ContentExternal
+	n.contentExternal = &nExt
 	if parts.Encoding != "" {
 		eClass, eSub, err := splitType(parts.Encoding)
 		if err != nil {
@@ -100,6 +113,8 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 			relationDirection: ep.RelationDirection,
 			fields:            cloneFields(ep.Fields),
 		}
+		eExt := ep.ContentExternal
+		e.contentExternal = &eExt
 		if ep.ID == nil {
 			return nil, withDetail(errAssemble, "edge "+strconv.Itoa(i)+": id required")
 		}

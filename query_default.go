@@ -11,6 +11,7 @@ package ranke
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -28,8 +29,16 @@ import (
 // graph-native backend (neo4j) overrides Universe.Query.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
+	if q.Select.Branch == "" {
+		return nil, errQueryNoScope // scope is mandatory — use BranchUniverse for unconfined reads.
+	}
+	// The reference executor has no archive context, so it cannot default Claim
+	// to a scope's head; the archive layer resolves that upstream and passes the
+	// root here. It then walks from Claim regardless of scope — a Tags-capable
+	// backend uses Branch to prune (e.g. neo4j via branch tags); this walk is the
+	// meaning that lowering must reproduce.
 	if q.Select.Claim == nil {
-		return nil, errQueryNoRoot // Branch resolution is an archive-level concern, done upstream.
+		return nil, errQueryNoRoot
 	}
 	if q.Limit.Time > 0 {
 		var cancel context.CancelFunc
@@ -494,3 +503,61 @@ func (s *sliceStream) Result() QueryResult  { return s.results[s.i-1] }
 func (s *sliceStream) Report() *QueryReport { return s.report }
 func (s *sliceStream) Err() error           { return nil }
 func (s *sliceStream) Close() error         { return nil }
+
+// GetFromClosure returns the claim at id when it is reachable within scope
+// branch from any of heads, else ErrNotFound. It replaces the old
+// Universe.GetFromClosure method as a package helper: a reference-edge walk from
+// the heads that stops at id, so a head is reachable even if its own closure
+// dangles — a gap is a real error only when the walk must cross it to reach id.
+// The branch scope (BranchUniverse/BranchArchive/a name) is the hint a
+// Tags-capable backend would use to accelerate this; the reference walk honours
+// reachability directly and ignores it. heads are the scope roots (usually one;
+// a multi-headed graph passes several, unioned by the shared visited set).
+func GetFromClosure(ctx context.Context, u Universe, branch string, heads []Id, id Id) (Claim, error) {
+	if id == nil {
+		return nil, errNilID
+	}
+	seen := map[string]struct{}{}
+	queue := make([]Id, 0, len(heads))
+	for _, h := range heads {
+		if h != nil {
+			queue = append(queue, h)
+		}
+	}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		k := cur.String()
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		if cur.Equal(id) {
+			return GetClaim(ctx, u, id) // reached — materialise and return, no expansion
+		}
+		c, err := GetClaim(ctx, u, cur, WithNotDiffMaterialized())
+		if err != nil {
+			return nil, err // a gap on the path to id is a real error
+		}
+		for _, e := range c.Edges() {
+			queue = append(queue, e.Reference())
+		}
+	}
+	return nil, ErrNotFound
+}
+
+// InClosure reports whether id is reachable within scope branch from any of
+// heads — GetFromClosure without materialising the claim.
+func InClosure(ctx context.Context, u Universe, branch string, heads []Id, id Id) (bool, error) {
+	_, err := GetFromClosure(ctx, u, branch, heads, id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

@@ -10,14 +10,8 @@ import (
 	"strconv"
 )
 
-// The tagger owns these tag keys; the Universe just stores them. spineRevKey
-// records the spine revision a branch-table claim sits at; branchTagKey(b)
-// marks a claim as a member of branch b's closure, valued with the branch
-// table's height at the revision it entered. Both share the "_b" prefix so a
-// single "_b*" clear scopes exactly to the tagger's tags.
-const spineRevKey = "_br"
-
-func branchTagKey(branch string) string { return "_b_" + branch }
+// The tag keys this tagger owns (SpineRevKey, BranchTagKey, BranchTagGlob) are
+// defined in universe_taxonomy.go, the central reserved-namespace registry.
 
 // TagArchiveOptions tunes TagArchive.
 type TagArchiveOptions struct {
@@ -27,14 +21,14 @@ type TagArchiveOptions struct {
 }
 
 // tagBranchClosure walks head's closure level by level, recording
-// branchTagKey(branch)=height for every claim that lacks it and pruning where
+// BranchTagKey(branch)=height for every claim that lacks it and pruning where
 // it is present — so the oldest revision to reach a claim wins. It reads
 // membership off the claim it already fetches (GetClaims injects tags) or the
 // pending map, and accumulates new tags into tags (keyed by claim-id string) for
 // TagArchive to flush once per revision. The prune stops descending at an
 // already-tagged claim (whose closure is tagged too).
 func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, height int, tags map[string]map[string]string) error {
-	key := branchTagKey(branch)
+	key := BranchTagKey(branch)
 	val := strconv.Itoa(height)
 	frontier := []Id{head}
 	for len(frontier) > 0 {
@@ -92,7 +86,7 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 		if err != nil {
 			return nil, err
 		}
-		if r := bt.Tag(spineRevKey); r != "" && !o.RetagAll {
+		if r := bt.Tag(SpineRevKey); r != "" && !o.RetagAll {
 			k, err := strconv.ParseUint(r, 10, 64)
 			if err != nil {
 				return nil, err
@@ -140,8 +134,8 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 		if tags[s] == nil {
 			tags[s] = map[string]string{}
 		}
-		tags[s][spineRevKey] = revisionStr
-		if err := u.SetClaimsTags(ctx, []string{"_b*"}, tags); err != nil {
+		tags[s][SpineRevKey] = revisionStr
+		if err := u.SetClaimsTags(ctx, []string{BranchTagGlob}, tags); err != nil {
 			return nil, err
 		}
 	}

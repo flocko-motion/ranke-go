@@ -76,12 +76,15 @@ type EdgeConfig struct {
 // immutable after. id is computed once at construction from the
 // canonical serialization of the other fields.
 type edge struct {
-	reference         Id
-	typeClass         EdgeClass
-	typeSub           string
-	contentHash       Id     // H(content); nil when no content
-	content           []byte // inline content bytes; nil when external
-	contentSize       uint64 // content byte length
+	reference   Id
+	typeClass   EdgeClass
+	typeSub     string
+	contentHash Id     // H(content); nil when no content
+	content     []byte // inline content bytes; nil when external
+	contentSize uint64 // content byte length
+	// contentExternal, when non-nil, is the authoritative inline/external flag
+	// (set by AssembleClaim); nil means derive from content-byte presence.
+	contentExternal   *bool
 	relationDirection RelationDirection
 	fields            map[string]string
 	id                Id // = H(S(edge))
@@ -185,9 +188,14 @@ func (e *edge) Type() string         { return string(e.typeClass) + "/" + e.type
 func (e *edge) TypeClass() EdgeClass { return e.typeClass }
 func (e *edge) TypeSub() string      { return e.typeSub }
 
-func (e *edge) IsContentExternal() bool { return e.content == nil && e.contentHash != nil }
-func (e *edge) GetContentHash() Id      { return e.contentHash }
-func (e *edge) GetContentSize() uint64  { return e.contentSize }
+func (e *edge) IsContentExternal() bool {
+	if e.contentExternal != nil {
+		return *e.contentExternal // authoritative (set by AssembleClaim)
+	}
+	return e.content == nil && e.contentHash != nil // derived
+}
+func (e *edge) GetContentHash() Id     { return e.contentHash }
+func (e *edge) GetContentSize() uint64 { return e.contentSize }
 
 func (e *edge) GetInlineContent() ([]byte, error) {
 	if e.IsContentExternal() {

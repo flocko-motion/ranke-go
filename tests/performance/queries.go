@@ -29,26 +29,26 @@ type namedQuery struct {
 func perfQueries(m *generator.Manifest) []namedQuery {
 	head := m.Head
 	qs := []namedQuery{
-		{"closure/head", ranke.Query{Select: ranke.Select{Claim: head}}},
+		{"closure/head", ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head}}},
 		{"where/sources", ranke.Query{
-			Select: ranke.Select{Claim: head},
+			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
 			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
 		}},
 		{"where/height-ge-2", ranke.Query{
-			Select: ranke.Select{Claim: head},
+			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
 			Where:  &ranke.Where{Field: "height", Test: &ranke.Comparison{Ge: 2}},
 		}},
 		{"path/derivation-d3", ranke.Query{
-			Select: ranke.Select{Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}},
+			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}},
 		}},
 		{"order/height-desc-20", ranke.Query{
-			Select: ranke.Select{Claim: head},
+			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
 			Order:  &ranke.Order{Field: "height", Desc: true},
 			Limit:  ranke.Limit{Results: 20},
 		}},
 	}
 	if m.HighDegree != nil {
-		qs = append(qs, namedQuery{"closure/high-degree", ranke.Query{Select: ranke.Select{Claim: m.HighDegree}}})
+		qs = append(qs, namedQuery{"closure/high-degree", ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.HighDegree}}})
 	}
 	return qs
 }

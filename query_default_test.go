@@ -66,7 +66,7 @@ func idsOf(cs ...Claim) map[string]bool {
 
 // fromHub is a full-closure query rooted at the hub, filtered by where.
 func fromHub(a map[string]Claim, where *Where) Query {
-	return Query{Select: Select{Claim: a["hub"].ID()}, Where: where}
+	return Query{Select: Select{Branch: BranchUniverse, Claim: a["hub"].ID()}, Where: where}
 }
 
 // TestQueryWhereAnd: And narrows — height ≥ 2 AND type entity/person → eAlice
@@ -132,8 +132,9 @@ func TestQueryFieldAbsent(t *testing.T) {
 func TestQueryPathNodeExclude(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{Select: Select{
-		Claim: a["hub"].ID(),
-		Path:  []PathStep{{Nodes: []string{"entity/*", "-entity/object"}}},
+		Branch: BranchUniverse,
+		Claim:  a["hub"].ID(),
+		Path:   []PathStep{{Nodes: []string{"entity/*", "-entity/object"}}},
 	}}
 	require.Equal(t, idsOf(a["eAlice"]), queryIDs(t, u, q))
 }
@@ -143,8 +144,9 @@ func TestQueryPathNodeExclude(t *testing.T) {
 func TestQueryPathEdgeExclude(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{Select: Select{
-		Claim: a["hub"].ID(),
-		Path:  []PathStep{{Edges: []string{"-contribution/*"}}},
+		Branch: BranchUniverse,
+		Claim:  a["hub"].ID(),
+		Path:   []PathStep{{Edges: []string{"-contribution/*"}}},
 	}}
 	got := queryIDs(t, u, q)
 	require.False(t, got[a["root"].ID().String()], "root is off-limits without contributor edges")
@@ -155,7 +157,7 @@ func TestQueryPathEdgeExclude(t *testing.T) {
 func TestQueryOverflowOmit(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{
-		Select: Select{Claim: a["s1"].ID()},
+		Select: Select{Branch: BranchUniverse, Claim: a["s1"].ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 		Output: Output{Content: 3, Overflow: OverflowOmit},
 	}
@@ -168,7 +170,7 @@ func TestQueryOverflowOmit(t *testing.T) {
 func TestQueryOverflowReference(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{
-		Select: Select{Claim: a["s1"].ID()},
+		Select: Select{Branch: BranchUniverse, Claim: a["s1"].ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 		Output: Output{Content: 3, Overflow: OverflowReference},
 	}
@@ -182,7 +184,7 @@ func TestQueryOverflowReference(t *testing.T) {
 // root first and the height-3 hub last, with heights non-decreasing throughout.
 func TestQueryOrderHeightAscending(t *testing.T) {
 	u, a := queryOpsFixture(t)
-	q := Query{Select: Select{Claim: a["hub"].ID()}, Order: &Order{Field: "height"}}
+	q := Query{Select: Select{Branch: BranchUniverse, Claim: a["hub"].ID()}, Order: &Order{Field: "height"}}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 6)
 	require.True(t, got[0].Claim.ID().Equal(a["root"].ID()), "height-0 root first")
@@ -196,7 +198,6 @@ func TestQueryOrderHeightAscending(t *testing.T) {
 // query (the replacement for the removed InClosure): claims reachable from the
 // head are returned, an unrelated claim is not.
 func TestQueryClosureExcludesUnrelated(t *testing.T) {
-	ctx := context.Background()
 	u := NewMemoryUniverse()
 	root := contributor(t)
 	em := srcClaim(t, root, "seed")
@@ -204,7 +205,7 @@ func TestQueryClosureExcludesUnrelated(t *testing.T) {
 	other := srcClaim(t, root, "unrelated")
 	putClaims(t, u, root, em, ent, other)
 
-	got := idSet(drain(t, mustQuery(t, u, Query{Select: Select{Claim: ent.ID()}})))
+	got := idSet(drain(t, mustQuery(t, u, Query{Select: Select{Branch: BranchUniverse, Claim: ent.ID()}})))
 	require.True(t, got[ent.ID().String()] && got[em.ID().String()] && got[root.ID().String()],
 		"ent, em, root are reachable from the head")
 	require.False(t, got[other.ID().String()], "an unrelated claim is not in the closure")
@@ -221,7 +222,7 @@ func TestQueryClosureGapIsError(t *testing.T) {
 	ent := entityClaim(t, root, "person", "Alice", em)
 	putClaims(t, u, root, ent) // em deliberately NOT stored — a gap under ent
 
-	_, err := u.Query(ctx, Query{Select: Select{Claim: ent.ID()}}, nil)
+	_, err := u.Query(ctx, Query{Select: Select{Branch: BranchUniverse, Claim: ent.ID()}}, nil)
 	require.Error(t, err, "a missing referenced claim aborts the closure walk")
 }
 

@@ -3,17 +3,21 @@
 // job:     a graph-native CACHE Universe on neo4j — stores claim structure (nodes, edges) so closure/membership run as native Cypher instead of edge walks
 // limits:  pure cache — no canonical CBOR, no external content, inline content only up to a cap (default 4 KiB); stack over a durable Universe (-> adapter/s3, adapter/fs) that holds the bytes and serves content misses
 //
-// Package neo4j is the first pure-caching ranke Universe. It stores each claim
-// as a graph node with its edges as :REFERENCES relationships, so closure and
-// membership queries run as native Cypher instead of the ADT's reference-edge
-// walk.
+// Package neo4j is the first pure-caching ranke Universe. It deconstructs each
+// claim into neo4j's native typed graph — a node labelled with the claim's type
+// (e.g. `source/email`) and its edges as relationships typed by the edge type
+// (e.g. `derivation/source`) — so closure and membership run as native Cypher,
+// and the graph is legible in the neo4j Browser. (Requires Neo4j ≥ 5.26 for the
+// dynamic label/type projection.)
 //
 // It deliberately does NOT store the canonical CBOR, external content, or
-// inline content beyond WithContentCap (default 4 KiB). A claim's id depends
-// only on content_hash + content_size — never the content bytes — so claims
-// reconstruct id-faithfully from the graph via ranke.AssembleClaim; content
-// this cache does not hold reconstructs as external and is served by the
-// durable Universe this cache is stacked over.
+// inline content beyond WithContentCap (default 4 KiB). Inline content of a
+// text encoding rides along as a legible `content` property on the node (or
+// relationship); binary, over-cap, and external content are left to the durable
+// Universe this cache is stacked over — nothing is stored outside a claim's own
+// node. A claim's id depends only on content_hash + content_size — never the
+// content bytes — so claims reconstruct id-faithfully via ranke.AssembleClaim,
+// with content this cache lacks reconstructing as external.
 //
 // New takes an already-configured neo4j driver so the adapter stays free of
 // connection/credential concerns: production wires a real driver, tests point
@@ -27,9 +31,7 @@
 package neo4j
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -101,47 +103,44 @@ func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[str
 	return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params, neo4jdriver.EagerResultTransformer)
 }
 
-const cypherPutContents = `
-UNWIND $contents AS ct
-MERGE (co:` + labelContent + ` {hash: ct.hash})
-SET co.size = ct.size, co.b64 = ct.b64`
-
+// cypherPutClaims projects claims into neo4j's native typed graph. Nodes are
+// MERGE'd by id with no label (so a reference target and its later full claim
+// are the same node) and given their type as a dynamic label; edges are
+// relationships typed dynamically by the edge type. Inline content rides along
+// as a legible `content` property. Requires Neo4j ≥ 5.26 (dynamic labels/types
+// via $()). A null property (content, field_keys, …) is simply not set.
 const cypherPutClaims = `
 UNWIND $claims AS c
-MERGE (n:` + labelClaim + ` {id: c.id})
-SET n.type = c.type, n.encoding = c.encoding, n.created_at = c.created_at,
-    n.height = c.height,
+MERGE (n {id: c.id})
+SET n:$(c.type)
+SET n.encoding = c.encoding, n.created_at = c.created_at, n.height = c.height,
     n.content_hash = c.content_hash, n.content_size = c.content_size,
-    n.field_keys = c.field_keys, n.field_vals = c.field_vals
+    n.content = c.content, n.field_keys = c.field_keys, n.field_vals = c.field_vals
 WITH n, c
 UNWIND c.edges AS e
-MERGE (t:` + labelClaim + ` {id: e.reference})
-MERGE (n)-[r:` + relReferences + ` {edge_id: e.edge_id}]->(t)
-SET r.type = e.type, r.direction = e.direction, r.content_hash = e.content_hash,
-    r.content_size = e.content_size, r.field_keys = e.field_keys, r.field_vals = e.field_vals`
+MERGE (t {id: e.reference})
+MERGE (n)-[r:$(e.type) {edge_id: e.edge_id}]->(t)
+SET r.direction = e.direction, r.content_hash = e.content_hash,
+    r.content_size = e.content_size, r.content = e.content,
+    r.field_keys = e.field_keys, r.field_vals = e.field_vals`
 
-// PutClaims caches each claim's structure — a :Claim node with its edges as
-// :REFERENCES relationships — and any inline content within cap as :Content
-// nodes. The canonical CBOR is not stored. Idempotent: nodes and edges MERGE
-// on id (claims are immutable, so a re-put writes identical structure).
+// PutClaims projects each claim into neo4j's native typed graph: a node
+// labelled with the claim's type, its edges as relationships typed by the edge
+// type, and any legible inline content as a `content` property on the node /
+// relationship — nothing is stored outside a claim's own node. The canonical
+// CBOR is not stored; external, binary, and over-cap content are left to the
+// durable layer. Nodes MERGE by id (a reference target is a labelless stub
+// until its own claim adds the type label), so re-puts are idempotent.
 func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	if len(cs) == 0 {
 		return nil
 	}
 	claims := make([]map[string]any, 0, len(cs))
-	var contents []map[string]any
 	for _, c := range cs {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		cp, cts := u.claimParam(c)
-		claims = append(claims, cp)
-		contents = append(contents, cts...)
-	}
-	if len(contents) > 0 {
-		if _, err := u.query(ctx, cypherPutContents, map[string]any{"contents": contents}); err != nil {
-			return fmt.Errorf("%w: put contents: %w", errQuery, err)
-		}
+		claims = append(claims, u.claimParam(c))
 	}
 	if _, err := u.query(ctx, cypherPutClaims, map[string]any{"claims": claims}); err != nil {
 		return fmt.Errorf("%w: put claims: %w", errQuery, err)
@@ -149,22 +148,23 @@ func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	return nil
 }
 
+// cypherGetClaims fetches nodes by id (label-agnostic — the adapter reads by
+// id; labels are the human/native-query projection) that are full claims
+// (size(labels) > 0, i.e. not a bare reference stub), with each node's labels
+// (its type) and its outgoing relationships (each carrying its own type via
+// type(r)).
 const cypherGetClaims = `
 UNWIND $ids AS id
-MATCH (n:` + labelClaim + ` {id: id})
-WHERE n.type IS NOT NULL
-RETURN properties(n) AS node,
-       [(n)-[r:` + relReferences + `]->(t) | {props: properties(r), ref: t.id}] AS edges`
-
-const cypherGetContents = `
-UNWIND $hashes AS h
-MATCH (co:` + labelContent + ` {hash: h})
-RETURN co.hash AS hash, co.b64 AS b64`
+MATCH (n {id: id})
+WHERE size(labels(n)) > 0
+RETURN properties(n) AS node, labels(n) AS labels,
+       [(n)-[r]->(t) | {props: properties(r), rtype: type(r), ref: t.id}] AS edges`
 
 // GetClaims reconstructs claims from their graph nodes (+ edge relationships),
-// re-inlining any content the cache holds and materialising diff overlays like
-// any Universe. A requested id absent from the cache is a miss
-// (ranke.ErrNotFound) so the stack can fall through to the durable layer.
+// re-inlining any legible content the cache holds (the `content` property) and
+// materialising diff overlays like any Universe. A requested id absent from the
+// cache is a miss (ranke.ErrNotFound) so the stack falls through to the durable
+// layer.
 func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	if len(ids) == 0 {
@@ -184,28 +184,16 @@ func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...r
 	}
 
 	type rec struct {
-		props map[string]any
-		edges []any
+		props  map[string]any
+		labels []any
+		edges  []any
 	}
 	byID := make(map[string]rec, len(res.Records))
-	hashes := make(map[string]struct{})
 	for _, r := range res.Records {
 		props, _ := valOf(r, "node").(map[string]any)
+		labels, _ := valOf(r, "labels").([]any)
 		edges, _ := valOf(r, "edges").([]any)
-		byID[asString(props["id"])] = rec{props, edges}
-		collectHash(hashes, props["content_hash"])
-		for _, e := range edges {
-			if em, ok := e.(map[string]any); ok {
-				if ep, ok := em["props"].(map[string]any); ok {
-					collectHash(hashes, ep["content_hash"])
-				}
-			}
-		}
-	}
-
-	content, err := u.fetchContents(ctx, hashes)
-	if err != nil {
-		return nil, err
+		byID[asString(props["id"])] = rec{props, labels, edges}
 	}
 
 	for i, id := range ids {
@@ -213,7 +201,7 @@ func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...r
 		if !ok {
 			return nil, fmt.Errorf("claim %s: %w", id, ranke.ErrNotFound)
 		}
-		parts, err := partsFromNode(id, r.props, r.edges, content)
+		parts, err := partsFromNode(id, r.props, r.labels, r.edges)
 		if err != nil {
 			return nil, err
 		}
@@ -227,35 +215,10 @@ func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...r
 	return ranke.DefaultMaterialize(ctx, u, out, opts...)
 }
 
-// fetchContents loads the inline bytes the cache holds for the given hashes,
-// decoding the stored base64. Hashes it lacks are simply absent from the map.
-func (u *neo4jUniverse) fetchContents(ctx context.Context, hashes map[string]struct{}) (map[string][]byte, error) {
-	if len(hashes) == 0 {
-		return nil, nil
-	}
-	list := make([]string, 0, len(hashes))
-	for h := range hashes {
-		list = append(list, h)
-	}
-	res, err := u.query(ctx, cypherGetContents, map[string]any{"hashes": list})
-	if err != nil {
-		return nil, fmt.Errorf("%w: get contents: %w", errQuery, err)
-	}
-	out := make(map[string][]byte, len(res.Records))
-	for _, r := range res.Records {
-		b, err := base64.StdEncoding.DecodeString(asString(valOf(r, "b64")))
-		if err != nil {
-			return nil, err
-		}
-		out[asString(valOf(r, "hash"))] = b
-	}
-	return out, nil
-}
-
 const cypherHasClaims = `
 UNWIND $ids AS id
-OPTIONAL MATCH (n:` + labelClaim + ` {id: id})
-RETURN id AS id, (n IS NOT NULL AND n.type IS NOT NULL) AS has`
+OPTIONAL MATCH (n {id: id})
+RETURN id AS id, (n IS NOT NULL AND size(labels(n)) > 0) AS has`
 
 // HasClaims reports which ids are present as full claims (a bare reference-
 // target stub does not count).
@@ -287,8 +250,8 @@ func (u *neo4jUniverse) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, 
 
 const cypherGetClaimHeights = `
 UNWIND $ids AS id
-MATCH (n:` + labelClaim + ` {id: id})
-WHERE n.type IS NOT NULL
+MATCH (n {id: id})
+WHERE size(labels(n)) > 0
 RETURN id AS id, n.height AS height`
 
 // GetClaimHeights returns each claim's committed height (§4.1) natively from
@@ -342,116 +305,36 @@ func (u *neo4jUniverse) GetClaimsRaw(_ context.Context, ids []ranke.Id) ([][]byt
 	return nil, fmt.Errorf("adapter/neo4j: stores no claim CBOR (structure-only cache): %w", ranke.ErrNotFound)
 }
 
-// GetContents returns inline content the cache holds (≤ cap); a hash it lacks
-// (external or over-cap content) is a miss (ranke.ErrNotFound) so the stack
-// falls through to the durable layer.
-func (u *neo4jUniverse) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
-	out := make([][]byte, len(refs))
+// GetContents always misses: this cache holds no external content — inline
+// content lives on the claim node and is served with the claim (GetClaims), so
+// the external-content API never has anything here. ErrNotFound routes the
+// request to the durable layer.
+func (u *neo4jUniverse) GetContents(_ context.Context, refs []ranke.ContentRef) ([][]byte, error) {
 	if len(refs) == 0 {
-		return out, nil
+		return nil, nil
 	}
-	hashes := make(map[string]struct{}, len(refs))
-	for _, ref := range refs {
-		if ref.Hash == nil {
-			return nil, errNilHash
-		}
-		hashes[ref.Hash.String()] = struct{}{}
-	}
-	content, err := u.fetchContents(ctx, hashes)
-	if err != nil {
-		return nil, err
-	}
-	for i, ref := range refs {
-		b, ok := content[ref.Hash.String()]
-		if !ok {
-			return nil, fmt.Errorf("content %s: %w", ref.Hash, ranke.ErrNotFound)
-		}
-		if err := ranke.VerifyContent(ref.Hash, ref.ContentSize, b); err != nil {
-			return nil, err
-		}
-		out[i] = b
-	}
-	return out, nil
+	return nil, fmt.Errorf("adapter/neo4j: holds no external content (inline only, on the claim node): %w", ranke.ErrNotFound)
 }
 
-// PutContents caches only inline content ≤ cap; larger content is skipped
-// silently (the durable layer holds it) rather than erroring.
-func (u *neo4jUniverse) PutContents(ctx context.Context, blobs []ranke.ContentBlob) error {
-	if len(blobs) == 0 {
-		return nil
-	}
-	contents := make([]map[string]any, 0, len(blobs))
-	for _, bl := range blobs {
-		if bl.Hash == nil {
-			return errNilHash
-		}
-		if u.contentCap == 0 || len(bl.Content) == 0 || len(bl.Content) > u.contentCap {
-			continue // over cap / empty / structure-only: the lower layer keeps it
-		}
-		contents = append(contents, map[string]any{
-			"hash": bl.Hash.String(),
-			"size": int64(len(bl.Content)),
-			"b64":  base64.StdEncoding.EncodeToString(bl.Content),
-		})
-	}
-	if len(contents) == 0 {
-		return nil
-	}
-	if _, err := u.query(ctx, cypherPutContents, map[string]any{"contents": contents}); err != nil {
-		return fmt.Errorf("%w: put contents: %w", errQuery, err)
-	}
+// PutContents is a no-op: content lives on the claim node (set by PutClaims),
+// and external content belongs to the durable layer — neo4j stores nothing
+// outside a claim's own node.
+func (u *neo4jUniverse) PutContents(_ context.Context, _ []ranke.ContentBlob) error {
 	return nil
 }
 
-const cypherHasContents = `
-UNWIND $hashes AS h
-OPTIONAL MATCH (co:` + labelContent + ` {hash: h})
-RETURN h AS hash, co IS NOT NULL AS has`
-
-// HasContents reports which hashes the cache holds inline.
-func (u *neo4jUniverse) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, error) {
-	out := make([]bool, len(hashes))
-	if len(hashes) == 0 {
-		return out, nil
-	}
-	hStrs := make([]string, len(hashes))
-	pos := make(map[string]int, len(hashes))
-	for i, h := range hashes {
-		if h == nil {
-			return nil, errNilHash
-		}
-		hStrs[i] = h.String()
-		pos[h.String()] = i
-	}
-	res, err := u.query(ctx, cypherHasContents, map[string]any{"hashes": hStrs})
-	if err != nil {
-		return nil, fmt.Errorf("%w: has contents: %w", errQuery, err)
-	}
-	for _, r := range res.Records {
-		if i, ok := pos[asString(valOf(r, "hash"))]; ok {
-			out[i], _ = valOf(r, "has").(bool)
-		}
-	}
-	return out, nil
+// HasContents reports false for everything: the cache holds no external content.
+func (u *neo4jUniverse) HasContents(_ context.Context, hashes []ranke.Id) ([]bool, error) {
+	return make([]bool, len(hashes)), nil
 }
 
-// StreamContent streams cached inline content (≤ cap); a miss for anything the
-// cache does not hold.
-func (u *neo4jUniverse) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
+// StreamContent always misses: the cache holds no external content to stream.
+func (u *neo4jUniverse) StreamContent(_ context.Context, hash ranke.Id, _ uint64) (io.ReadCloser, error) {
 	if hash == nil {
 		return nil, errNilHash
 	}
-	content, err := u.fetchContents(ctx, map[string]struct{}{hash.String(): {}})
-	if err != nil {
-		return nil, err
-	}
-	b, ok := content[hash.String()]
-	if !ok {
-		return nil, fmt.Errorf("content %s: %w", hash, ranke.ErrNotFound)
-	}
-	return ranke.NewVerifyingReader(io.NopCloser(bytes.NewReader(b)), hash, size)
+	return nil, fmt.Errorf("content %s: %w", hash, ranke.ErrNotFound)
 }
-
 
 // CopyClaims uses the ADT default walker; a native batched MERGE could
 // override later.
@@ -466,18 +349,16 @@ func (u *neo4jUniverse) CopyContents(ctx context.Context, src ranke.Universe, re
 
 // --- Tags (Capabilities.Tags): mutable per-claim overlay ---
 //
-// Tags are node properties whose key carries the tagPrefix ("_"). No fixed
-// claim property (id, type, height, …) starts with "_", so the prefix cleanly
-// separates tags; the tagger's keys (_rev, _b_<branch>) already carry it, so
-// they are stored verbatim. GetClaims injects them back onto the claim
+// Tags are node properties whose key carries ranke.ReservedPrefix ("_"). No
+// fixed claim property (id, type, height, …) starts with "_", so the prefix
+// cleanly separates tags; the tagger's keys (_br, _b_<branch>) already carry
+// it, so they are stored verbatim. GetClaims injects them back onto the claim
 // (partsFromNode); GetClaimTags is the tags-only shortcut.
-
-const tagPrefix = "_"
 
 const cypherGetClaimTags = `
 UNWIND $ids AS id
-MATCH (n:` + labelClaim + ` {id: id})
-WHERE n.type IS NOT NULL
+MATCH (n {id: id})
+WHERE size(labels(n)) > 0
 RETURN id AS id, properties(n) AS node`
 
 // GetClaimTags returns each claim's tags positionally; a claim absent from the
@@ -511,7 +392,7 @@ func (u *neo4jUniverse) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]
 
 const cypherSetClaimsTags = `
 UNWIND $rows AS row
-MATCH (c:` + labelClaim + ` {id: row.id})
+MATCH (c {id: row.id})
 SET c += row.props`
 
 // SetClaimsTags applies tags per claim (keyed by id string): for each claim it
@@ -590,11 +471,4 @@ func (u *neo4jUniverse) Close() error { return nil }
 func valOf(r *neo4jdriver.Record, key string) any {
 	v, _ := r.Get(key)
 	return v
-}
-
-// collectHash adds a non-empty id string to the set.
-func collectHash(set map[string]struct{}, v any) {
-	if s := asString(v); s != "" {
-		set[s] = struct{}{}
-	}
 }

@@ -66,11 +66,16 @@ type node struct {
 	contentHash   Id     // nil when no content
 	content       []byte // raw content bytes, kept with the node
 	contentSize   uint64 // = len(content); paired with contentHash to defend against truncation/extension
-	createdAt     time.Time
-	height        uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
-	edges         []Id   // edge ids, sorted canonically
-	fields        map[string]string
-	id            Id // = Sign(H(S(node))); also the claim id
+	// contentExternal, when non-nil, is the authoritative inline/external flag
+	// (set by AssembleClaim from ClaimParts); nil means derive it from whether
+	// content bytes are present. A structure cache (neo4j) may hold the hash
+	// without the bytes yet still know the content is inline, not external.
+	contentExternal *bool
+	createdAt       time.Time
+	height          uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
+	edges           []Id   // edge ids, sorted canonically
+	fields          map[string]string
+	id              Id // = Sign(H(S(node))); also the claim id
 
 	// Diff materialisation (set by the loader when the owning claim is a
 	// contribution/diff overlay): diffNode is the materialised predecessor
@@ -139,7 +144,10 @@ func (n *node) EncodingSub() string          { return n.contentSource().encoding
 
 func (n *node) IsContentExternal() bool {
 	cs := n.contentSource()
-	return cs.content == nil && cs.contentHash != nil
+	if cs.contentExternal != nil {
+		return *cs.contentExternal // authoritative (set by AssembleClaim)
+	}
+	return cs.content == nil && cs.contentHash != nil // derived
 }
 func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
