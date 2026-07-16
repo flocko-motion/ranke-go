@@ -76,15 +76,15 @@ func TestUniverseContentWrappers(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, has)
 
-	got, err := GetContent(ctx, u, hash, uint64(len(blob)))
+	gotBs, err := u.GetContents(ctx, []ContentRef{{Hash: hash, ContentSize: uint64(len(blob))}})
 	require.NoError(t, err)
-	require.Equal(t, blob, got)
+	require.Equal(t, blob, gotBs[0])
 
 	absent, err := HashContent([]byte("absent"))
 	require.NoError(t, err)
 	has, err = HasContent(ctx, u, absent)
 	require.NoError(t, err)
 	require.False(t, has)
-	_, err = GetContent(ctx, u, absent, 0)
+	_, err = u.GetContents(ctx, []ContentRef{{Hash: absent, ContentSize: 0}})
 	require.ErrorIs(t, err, ErrNotFound)
 }

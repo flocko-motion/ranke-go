@@ -250,20 +250,19 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 		prog.ClaimsCopied++
 
 		// Copy content only when it is EXTERNAL: inline bytes travel inside the
-		// claim record (already copied by PutClaim above) and are not in the
-		// content keyspace, though the id-preimage still carries a content_hash
-		// for them — so keying off the hash alone would wrongly try to fetch
-		// inline content and fail with not-found.
+		// claim record (already copied by PutClaim above) — they have no
+		// content_hash and no separate blob (§Content). External content is a
+		// blob in the content keyspace, keyed by content_hash, copied here.
 		if cfg.Content && c.Node().IsContentExternal() {
 			ch := c.Node().GetContentHash()
-			b, err := GetContent(ctx, src, ch, c.Node().GetContentSize())
+			bs, err := src.GetContents(ctx, []ContentRef{{Hash: ch, ContentSize: c.Node().GetContentSize()}})
 			if err != nil {
-				return wrapDetail(errCopyClaims, "src.GetContent "+ch.String(), err)
+				return wrapDetail(errCopyClaims, "src.GetContents "+ch.String(), err)
 			}
-			if err := PutContent(ctx, dst, ch, b); err != nil {
+			if err := PutContent(ctx, dst, ch, bs[0]); err != nil {
 				return wrapDetail(errCopyClaims, "dst.PutContent "+ch.String(), err)
 			}
-			prog.BytesCopied += uint64(len(b))
+			prog.BytesCopied += uint64(len(bs[0]))
 		}
 
 		if cfg.Closure {
@@ -306,14 +305,14 @@ func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentR
 			return wrapDetail(errCopyContents, "dst.HasContent "+ref.Hash.String(), err)
 		}
 		if !has {
-			b, err := GetContent(ctx, src, ref.Hash, ref.ContentSize)
+			bs, err := src.GetContents(ctx, []ContentRef{{Hash: ref.Hash, ContentSize: ref.ContentSize}})
 			if err != nil {
-				return wrapDetail(errCopyContents, "src.GetContent "+ref.Hash.String(), err)
+				return wrapDetail(errCopyContents, "src.GetContents "+ref.Hash.String(), err)
 			}
-			if err := PutContent(ctx, dst, ref.Hash, b); err != nil {
+			if err := PutContent(ctx, dst, ref.Hash, bs[0]); err != nil {
 				return wrapDetail(errCopyContents, "dst.PutContent "+ref.Hash.String(), err)
 			}
-			prog.BytesCopied += uint64(len(b))
+			prog.BytesCopied += uint64(len(bs[0]))
 		}
 		prog.ClaimsRemaining = uint64(len(refs) - i - 1)
 		if cfg.Progress != nil {

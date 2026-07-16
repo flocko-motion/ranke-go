@@ -40,6 +40,7 @@ func srcClaim(t *testing.T, ctr Contributor, body string) Claim {
 	t.Helper()
 	c, err := NewClaim(TypeSource("note"), ctr).
 		WithInlineContent([]byte(body)).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(ctr)).
 		Sign()
 	require.NoError(t, err)
@@ -50,6 +51,7 @@ func entityClaim(t *testing.T, ctr Contributor, sub, label string, source Claim)
 	t.Helper()
 	c, err := NewClaim(TypeEntity(sub), ctr).
 		WithInlineContent([]byte(label)).
+		WithEncoding(EncodingPlain).
 		WithEdges(mustDerivEdge(t, source)).
 		WithHeight(HeightOf(ctr, source)).
 		Sign()

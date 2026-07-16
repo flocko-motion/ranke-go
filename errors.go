@@ -52,6 +52,7 @@ var (
 	errClaimContentXOR          = errors.New("ranke.NewClaim: inline and external content are mutually exclusive")
 	errClaimContributorRequired = errors.New("ranke.NewClaim: Contributor is required (only the root contribution/contributor may omit it)")
 	errEncodingWithoutContent   = errors.New("ranke.NewClaim: encoding set without content")
+	errContentWithoutEncoding   = errors.New("content set without encoding: a content-bearing claim or edge must declare a media type")
 	errDiffEdgeUnnamed          = errors.New("ranke.NewClaim: a diff claim's edges must be named (except the contributor)")
 	errDiffEdgeDupName          = errors.New("ranke.NewClaim: duplicate edge name in a diff claim")
 	errTwoContributors          = errors.New("ranke.NewClaim: a claim may carry only one contribution/contributor edge")

@@ -402,7 +402,8 @@ type verifyRule struct {
 var verifyRules = []verifyRule{
 	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key", claim: ruleSignature},
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node", claim: ruleHeight},
-	{name: "content integrity", rule: "stored content matches its content_hash and content_size", content: ruleContent},
+	{name: "content integrity", rule: "content with a content_hash matches it and content_size (inline content is committed by the claim id)", content: ruleContent},
+	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim", edge: ruleBranchTableReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
 }
@@ -418,11 +419,25 @@ func ruleHeight(ctx context.Context, t *claimUnderVerification) error {
 	return verifyHeight(ctx, t.claim, t.u)
 }
 
-// ruleContent (per content carrier): stored content matches its content_hash
-// and content_size — inline always, external only when the run is configured
-// for it. The node and every edge share this logic, so one function serves both.
+// ruleContent (per content carrier): content that carries a content_hash must
+// match it and content_size — external only when the run is configured for it.
+// Native inline content has no hash and is committed by the claim id, so it
+// needs no check here. The node and every edge share this logic, so one
+// function serves both.
 func ruleContent(ctx context.Context, cc contentCarrier, t *claimUnderVerification) error {
 	return verifyContentRef(ctx, cc, t.cfg, t.u)
+}
+
+// ruleContentEncoding (per content carrier): a node or edge that carries
+// content must declare an encoding (a MIME media type).
+func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVerification) error {
+	if cc.GetContentHash() == nil {
+		return nil // no content — no encoding required
+	}
+	if cc.Encoding() == "" {
+		return errContentWithoutEncoding
+	}
+	return nil
 }
 
 // ruleBranchTableReference (per edge): a contribution/branches (branch-table)
@@ -513,31 +528,32 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 // content of the contributor named by its contribution/contributor edge.
 // Purely interface-driven.
 func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error) {
-	src := c.Node() // initial node (no edges): the pubkey is its own content
+	// The pubkey is the content of the referenced contribution/contributor claim
+	target, loc := c.ID(), ContentLocationOf(c.Node())
+	viaEdge := false
 	if edges := c.Edges(); len(edges) > 0 {
-		src = nil
+		target = nil
 		for _, e := range edges {
 			if e.TypeClass() == EdgeClassContribution && e.TypeSub() == "contributor" {
-				// Materialise the contributor (the default): its pubkey may be
-				// inherited from a predecessor if the contributor is itself a
-				// diff, so the stored delta alone could be empty.
-				contributor, err := GetClaim(ctx, u, e.Reference())
-				if err != nil {
-					return nil, wrapDetail(errContributorUnresolved, e.Reference().String(), err)
-				}
-				src = contributor.Node()
+				// The contributor is another claim (and may be a diff, whose
+				// pubkey is inherited); its location is unknown here, so let
+				// GetClaimContent inspect it.
+				target, loc, viaEdge = e.Reference(), ContentLocationUnknown, true
 				break
 			}
 		}
-		if src == nil {
+		if target == nil {
 			return nil, errNoContributorEdge
 		}
 	}
-	// Transparent: inline from the node, external streamed from u (§5.7).
-	rdr, err := src.GetContent(ctx, u)
+	rdr, err := GetClaimContent(ctx, u, target, loc)
 	if err != nil {
+		if viaEdge {
+			return nil, wrapDetail(errContributorUnresolved, target.String(), err)
+		}
 		return nil, err
 	}
+	defer rdr.Close()
 	return io.ReadAll(rdr)
 }
 
@@ -548,11 +564,10 @@ type contentCarrier interface {
 	GetContentSize() uint64
 	IsContentExternal() bool
 	GetInlineContent() ([]byte, error)
+	Encoding() string
 }
 
-// verifyContentRef checks content integrity for one node/edge. Inline content
-// is always re-hashed; external content is fetched and verified only when
-// cfg.externalContent is set and a Universe is available.
+// verifyContentRef checks content integrity for one node/edge.
 func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig, u Universe) error {
 	hash := cc.GetContentHash()
 	if hash == nil {

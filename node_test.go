@@ -69,16 +69,14 @@ func readContent(t *testing.T, n Node, u Universe) []byte {
 func TestNodeInlineContent(t *testing.T) {
 	alice := contributor(t)
 	body := []byte("From: alice\r\n\r\nI like apples.")
-	c, err := NewClaim(TypeSource("email"), alice).WithInlineContent(body).WithHeight(HeightOf(alice)).Sign()
+	c, err := NewClaim(TypeSource("email"), alice).WithInlineContent(body).WithEncoding(EncodingMessage("rfc822")).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	n := c.Node()
 	require.False(t, n.IsContentExternal(), "inline content is not external")
 	require.Equal(t, uint64(len(body)), n.GetContentSize(), "size tracks byte length")
 
-	wantHash, err := hashContent(body)
-	require.NoError(t, err)
-	require.True(t, wantHash.Equal(n.GetContentHash()), "content hash is H(content)")
+	require.Nil(t, n.GetContentHash(), "inline content has no content_hash (§Content) — the id commits to the bytes")
 
 	got, err := n.GetInlineContent()
 	require.NoError(t, err)
@@ -98,6 +96,7 @@ func TestNodeExternalContent(t *testing.T) {
 
 	c, err := NewClaim(TypeSource("blob"), alice).
 		WithExternalContent(hash, uint64(len(blob))). // hash+size, no inline bytes (XOR, §4.4)
+		WithEncoding(EncodingOctetStream).
 		WithHeight(HeightOf(alice)).
 		Sign()
 	require.NoError(t, err)

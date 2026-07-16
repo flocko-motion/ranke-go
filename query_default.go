@@ -460,10 +460,11 @@ func sortResults(claims []Claim, order *Order) {
 // content is fetched transparently; a read error yields no content.
 func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	n := c.Node()
-	if n.GetContentHash() == nil {
-		return nil
+	inline, _ := n.GetInlineContent() // nil for external or no content
+	if inline == nil && n.GetContentHash() == nil {
+		return nil // no content
 	}
-	rdr, err := n.GetContent(ctx, u)
+	rdr, err := GetClaimContent(ctx, u, c.ID(), ContentLocationOf(n))
 	if err != nil {
 		return nil
 	}
@@ -478,7 +479,16 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	case OverflowOmit:
 		return nil
 	case OverflowReference:
-		return []byte(n.GetContentHash().String())
+		// External content carries its address; inline content has none in the
+		// id (§Content), so its reference is H(content), computed on demand.
+		hash := n.GetContentHash()
+		if hash == nil {
+			hash, err = HashContent(inline)
+			if err != nil {
+				return nil
+			}
+		}
+		return []byte(hash.String())
 	default: // OverflowCutoff
 		return data[:out.Content]
 	}

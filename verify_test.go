@@ -56,6 +56,7 @@ func TestVerifySignedGraph(t *testing.T) {
 	g := newGraph(t, alice)
 	src, err := NewClaim(TypeSource("email"), alice).
 		WithInlineContent([]byte("From: alice\r\n\r\nhi")).
+		WithEncoding(EncodingMessage("rfc822")).
 		WithHeight(HeightOf(alice)).
 		Sign(alicePriv)
 	require.NoError(t, err)
@@ -166,6 +167,7 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 	g := newGraph(t, root)
 	em, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("recent")).
+		WithEncoding(EncodingPlain).
 		WithCreatedAt(recent).
 		WithHeight(HeightOf(root)).
 		Sign()
@@ -245,6 +247,7 @@ func TestVerifyExternalContentToggle(t *testing.T) {
 	require.NoError(t, err)
 	ext, err := NewClaim(TypeSource("blob"), root).
 		WithExternalContent(hash, uint64(len(realBlob))).
+		WithEncoding(EncodingOctetStream).
 		WithHeight(HeightOf(root)).
 		Sign()
 	require.NoError(t, err)
@@ -307,6 +310,7 @@ func TestVerifyRejectsWrongHeight(t *testing.T) {
 	g := newGraph(t, root)
 	bad, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
 		WithHeight(99). // correct is 1 — the only reference is the height-0 contributor
 		Sign()
 	require.NoError(t, err, "Sign does not itself check height against refs")
@@ -344,6 +348,7 @@ func TestVerifyRejectsBranchTableReference(t *testing.T) {
 	bad, err := NewClaim(TypeDerivation("summary"), root).
 		WithEdges(de).
 		WithInlineContent([]byte("illegal branch-table reference")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(root, bt)).
 		Sign()
 	require.NoError(t, err)
@@ -376,6 +381,7 @@ func TestVerifyWithSkipRules(t *testing.T) {
 	bad, err := NewClaim(TypeDerivation("summary"), root).
 		WithEdges(de).
 		WithInlineContent([]byte("illegal branch-table reference")).
+		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(root, bt)).
 		Sign()
 	require.NoError(t, err)

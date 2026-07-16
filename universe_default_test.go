@@ -22,6 +22,7 @@ func TestDefaultMaterializeDiff(t *testing.T) {
 	root := contributor(t)
 	base, err := NewClaim(TypeSource("note"), root).
 		WithInlineContent([]byte("base content")).
+		WithEncoding(EncodingPlain).
 		WithField("author", "alice").
 		WithHeight(HeightOf(root)).
 		Sign()

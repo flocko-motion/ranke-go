@@ -101,11 +101,11 @@ func TestEdgeIdDeterministic(t *testing.T) {
 // node — inline bytes held on the edge, reachable without a Universe.
 func TestEdgeInlineContent(t *testing.T) {
 	alice := contributor(t)
-	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithHeight(HeightOf(alice)).Sign()
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	payload := []byte("edge-borne annotation")
-	e, err := NewEdge(EdgeConfig{Reference: source.ID(), Type: TypeDerivation("source"), InlineContent: payload})
+	e, err := NewEdge(EdgeConfig{Reference: source.ID(), Type: TypeDerivation("source"), InlineContent: payload, Encoding: EncodingPlain})
 	require.NoError(t, err)
 
 	require.False(t, e.IsContentExternal())
@@ -126,7 +126,7 @@ func TestEdgeInlineContent(t *testing.T) {
 // node_test.go, same package).
 func TestEdgeExternalContent(t *testing.T) {
 	alice := contributor(t)
-	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithHeight(HeightOf(alice)).Sign()
+	source, err := NewClaim(TypeSource("doc"), alice).WithInlineContent([]byte("src")).WithEncoding(EncodingPlain).WithHeight(HeightOf(alice)).Sign()
 	require.NoError(t, err)
 
 	blob := []byte("external edge blob")
@@ -137,6 +137,7 @@ func TestEdgeExternalContent(t *testing.T) {
 		Reference:   source.ID(),
 		Type:        TypeDerivation("source"),
 		ContentHash: hash,
+		Encoding:    EncodingOctetStream,
 		ContentSize: uint64(len(blob)),
 	})
 	require.NoError(t, err)

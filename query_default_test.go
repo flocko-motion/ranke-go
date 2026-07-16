@@ -32,6 +32,7 @@ func queryOpsFixture(t *testing.T) (Universe, map[string]Claim) {
 	eApples := entityClaim(t, root, "object", "apples", s1)
 	hub, err := NewClaim(TypeDerivation("summary"), root).
 		WithInlineContent([]byte("hub")).
+		WithEncoding(EncodingPlain).
 		WithEdges(
 			mustDerivEdge(t, s1), mustDerivEdge(t, s2),
 			mustDerivEdge(t, eAlice), mustDerivEdge(t, eApples),
@@ -176,8 +177,13 @@ func TestQueryOverflowReference(t *testing.T) {
 	}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 1)
-	want := a["s1"].Node().GetContentHash().String()
-	require.Equal(t, want, string(got[0].Content), "over-cap content replaced by hash reference")
+	// s1's content is inline, so it has no stored content_hash; the reference is
+	// H(content) computed on demand.
+	inline, err := a["s1"].Node().GetInlineContent()
+	require.NoError(t, err)
+	wantHash, err := HashContent(inline)
+	require.NoError(t, err)
+	require.Equal(t, wantHash.String(), string(got[0].Content), "over-cap inline content replaced by its H(content) reference")
 }
 
 // TestQueryOrderHeightAscending: ascending order by height puts the height-0

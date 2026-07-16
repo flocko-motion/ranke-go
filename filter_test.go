@@ -40,6 +40,7 @@ func richClaim(t *testing.T) Claim {
 
 	rel, err := NewClaim(TypeRelation("likes"), root).
 		WithInlineContent([]byte("Alice likes apples")).
+		WithEncoding(EncodingPlain).
 		WithEdges(
 			mustEdge(t, EdgeConfig{
 				Reference: src.ID(),

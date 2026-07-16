@@ -5,6 +5,7 @@
 package ranke
 
 import (
+	"bytes"
 	"context"
 	"io"
 )
