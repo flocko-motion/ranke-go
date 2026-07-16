@@ -528,32 +528,36 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 // content of the contributor named by its contribution/contributor edge.
 // Purely interface-driven.
 func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error) {
-	// The pubkey is the content of the referenced contribution/contributor claim
-	target, loc := c.ID(), ContentLocationOf(c.Node())
-	viaEdge := false
+	// Initial node → own content. Else the contributor claim its
+	// contribution/contributor edge names (fetched by id, then read).
+	src, viaEdge := c, false
 	if edges := c.Edges(); len(edges) > 0 {
-		target = nil
+		var target Id
 		for _, e := range edges {
 			if e.TypeClass() == EdgeClassContribution && e.TypeSub() == "contributor" {
-				// The contributor is another claim (and may be a diff, whose
-				// pubkey is inherited); its location is unknown here, so let
-				// GetClaimContent inspect it.
-				target, loc, viaEdge = e.Reference(), ContentLocationUnknown, true
+				target = e.Reference()
 				break
 			}
 		}
 		if target == nil {
 			return nil, errNoContributorEdge
 		}
+		cc, err := GetClaim(ctx, u, target)
+		if err != nil {
+			return nil, wrapDetail(errContributorUnresolved, target.String(), err)
+		}
+		src, viaEdge = cc, true
 	}
-	rdr, err := GetClaimContent(ctx, u, target, loc)
+	rdr, err := src.GetContent(ctx, u)
 	if err != nil {
 		if viaEdge {
-			return nil, wrapDetail(errContributorUnresolved, target.String(), err)
+			return nil, wrapDetail(errContributorUnresolved, src.ID().String(), err)
 		}
 		return nil, err
 	}
-	defer rdr.Close()
+	if rc, ok := rdr.(io.ReadCloser); ok {
+		defer rc.Close()
+	}
 	return io.ReadAll(rdr)
 }
 

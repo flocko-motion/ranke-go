@@ -278,32 +278,49 @@ func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err er
 // and decode do not enforce it — an already-stored record is accepted as-is.
 const maxInlineContent = 1 << 20 // 1 MiB
 
-// resolveEncoding fills EncodingClass/Sub from the combined Encoding and
-// validates it. Encoding is the content media type, so it applies only with
-// content — optional then (validated only when set, so binary content like a
-// pubkey needn't carry a bogus type), and forbidden without content.
+// resolveEncoding fills EncodingClass/Sub from the combined Encoding (or a
+// directly-set split form)
 func resolveEncoding(cfg *ClaimBuilder, hasContent bool) error {
-	if cfg.Encoding != "" {
-		class, sub, err := splitType(cfg.Encoding)
+	enc := cfg.Encoding
+	if enc == "" && (cfg.EncodingClass != "" || cfg.EncodingSub != "") {
+		enc = string(cfg.EncodingClass) + "/" + cfg.EncodingSub
+	}
+	class, sub, err := resolveContentEncoding(enc, hasContent)
+	if err != nil {
+		return err
+	}
+	cfg.EncodingClass, cfg.EncodingSub = class, sub
+	return nil
+}
+
+// resolveContentEncoding parses the combined "class/sub" encoding and enforces
+// the content⇔encoding coupling shared by nodes (NewClaim) and edges (NewEdge):
+func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, string, error) {
+	var class EncodingClass
+	var sub string
+	if encoding != "" {
+		c, s, err := splitType(encoding)
 		if err != nil {
-			return wrapDetail(errNewClaim, "Encoding", err)
+			return "", "", wrapDetail(errNewClaim, "Encoding", err)
 		}
-		cfg.EncodingClass = EncodingClass(class)
-		cfg.EncodingSub = sub
+		class, sub = EncodingClass(c), s
 	}
 	if !hasContent {
-		if cfg.EncodingClass != "" || cfg.EncodingSub != "" {
-			return errEncodingWithoutContent
+		if class != "" || sub != "" {
+			return "", "", errEncodingWithoutContent
 		}
-		return nil
+		return "", "", nil
 	}
-	if cfg.EncodingClass == "" {
-		return nil // optional, none set
+	if class == "" {
+		return "", "", errContentWithoutEncoding
 	}
-	if !validEncodingClass(cfg.EncodingClass) {
-		return withDetail(errUnknownEncodingClass, string(cfg.EncodingClass))
+	if !validEncodingClass(class) {
+		return "", "", withDetail(errUnknownEncodingClass, string(class))
 	}
-	return checkEncodingSubtype(cfg.EncodingSub)
+	if err := checkEncodingSubtype(sub); err != nil {
+		return "", "", err
+	}
+	return class, sub, nil
 }
 
 // assembleEdges builds the claim's edge set: the caller's edges, the
@@ -403,17 +420,13 @@ func checkEdgeCardinality(edges []*edge) error {
 }
 
 // applyContent sets the node's content slots for the chosen mode: inline
-// content is hashed here (its address is H(content)); external carries the
-// caller's hash+size; none leaves the slots zero.
+// carries the bytes (no content_hash — the id commits to the bytes directly,
+// §Content); external carries the caller's hash+size; none leaves the slots
+// zero. content and content_hash are mutually exclusive.
 func applyContent(n *node, cfg ClaimBuilder, hasInline, hasExternal bool) error {
 	switch {
 	case hasInline:
-		ch, err := hashContent(cfg.InlineContent)
-		if err != nil {
-			return wrapDetail(errNewClaim, "content hash", err)
-		}
 		n.content = cfg.InlineContent
-		n.contentHash = ch
 		n.contentSize = uint64(len(cfg.InlineContent))
 	case hasExternal:
 		n.contentHash = cfg.ContentHash
