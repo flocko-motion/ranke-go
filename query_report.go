@@ -18,11 +18,9 @@ import (
 // ReportLevel classifies a QueryEvent.
 type ReportLevel string
 
-// Report levels form one ordered scale, least to most verbose: Error < Warn <
-// Info < Debug < Trace. Execution.Report sets a threshold; every event at or
-// above that importance is logged — so Error is always kept once a report is
-// requested, and Trace adds the per-claim/per-edge detail whose sheer volume is
-// itself a signal of execution cost. The empty level means no report.
+// Report levels are one ordered scale (Error < Warn < Info < Debug < Trace);
+// Execution.Report sets the threshold and every event at or above it is kept.
+// Empty means no report.
 const (
 	ReportError ReportLevel = "error" // failures — always logged when a report is requested
 	ReportWarn  ReportLevel = "warn"  // fallbacks, caps hit, recoverable issues
@@ -49,12 +47,9 @@ func reportRank(l ReportLevel) int {
 	}
 }
 
-// QueryReport is the structured execution log a query produces when
-// Execution.Report is set. A single query can span several engines and storage
-// layers, so the engine/layer identity lives on each QueryEvent, not on the
-// report — the outermost participant (usually a router like "stack") is not
-// interesting on its own. Returned via ResultStream.Report once the stream is
-// drained.
+// QueryReport is a query's execution log (Execution.Report set), returned via
+// ResultStream.Report. Engine/layer identity is per-event, since one query can
+// span several engines.
 type QueryReport struct {
 	StartedAt time.Time     // wall clock at query start
 	Elapsed   time.Duration // total execution time
