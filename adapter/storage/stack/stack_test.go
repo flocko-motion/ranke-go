@@ -424,10 +424,10 @@ func TestStackResolvesContributorContentByClaim(t *testing.T) {
 		data, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			t.Fatalf("read content (loc=%d): %v", loc, err)
+			t.Fatalf("read content (kind=%d): %v", kind, err)
 		}
 		if !bytes.Equal(data, pubkey) {
-			t.Fatalf("loc=%d: content = %d bytes, want the %d-byte pubkey", loc, len(data), len(pubkey))
+			t.Fatalf("kind=%d: content = %d bytes, want the %d-byte pubkey", kind, len(data), len(pubkey))
 		}
 	}
 }
