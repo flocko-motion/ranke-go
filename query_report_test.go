@@ -28,7 +28,7 @@ func TestReportRecordsExecutionLog(t *testing.T) {
 		Select: Select{Branch: BranchUniverse, Claim: b.ID(),
 			Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
 		Execution: Execution{Report: ReportTrace},
-	}, nil)
+	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
@@ -65,7 +65,7 @@ func TestReportLevelThreshold(t *testing.T) {
 		rs, err := u.Query(context.Background(), Query{
 			Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
 			Execution: Execution{Report: level},
-		}, nil)
+		}, Scope{Branch: BranchUniverse})
 		require.NoError(t, err)
 		_ = drain(t, rs)
 		n := 0
@@ -86,7 +86,7 @@ func TestReportOffIsNil(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
 		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
-	}, nil)
+	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	_ = drain(t, rs)
 	require.Nil(t, rs.Report(), "no report when Execution.Report is false")
@@ -100,7 +100,7 @@ func TestReportFilterCounts(t *testing.T) {
 		Select:    Select{Branch: BranchUniverse, Claim: b.ID()}, // full closure: root, a, b
 		Where:     &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 		Execution: Execution{Report: ReportTrace},
-	}, nil)
+	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
