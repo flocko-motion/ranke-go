@@ -8,8 +8,7 @@ import (
 )
 
 // Tests for the RQL reference executor (DefaultQuery over a Universe): forward
-// traversal, filtering, ordering, limiting, output shaping, scope injection,
-// and the reverse-walk refusal.
+// and reverse traversal, filtering, ordering, limiting, and output shaping.
 
 // queryFixture builds root(0) ← a:source(1) ← b:entity(2) in a memory
 // Universe and returns it with the three claims.
