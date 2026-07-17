@@ -1,12 +1,7 @@
 // package: ranke / query_report
 // type:    logic
-// job:     the RQL execution report — a structured, timestamped event log a query collects
-//
-//	across the whole call chain when Execution.Report is set (returned via ResultStream.Report)
-//
-// limits:  a passive collector carried in the context; every station logs into it, and a nil
-//
-//	collector (report off) makes every log a no-op, so the hot path pays nothing
+// job:     the RQL execution report — a structured event log a query collects across the call chain when Execution.Report is set
+// limits:  a passive collector carried in ctx; a nil collector (report off) makes every log a no-op
 package ranke
 
 import (
@@ -69,12 +64,8 @@ type QueryEvent struct {
 	Attrs    map[string]any // structured extras: layer/shard name, depth, edge/result counts, …
 }
 
-// reportCollector accumulates QueryEvents during one query. It is carried in
-// the context (reportContext / reportFrom), so every station on the call chain
-// — across Universe.Query boundaries, nested reads, and router fan-out — logs
-// into the same one. A nil *reportCollector is the "report off" case: every
-// method is a no-op, so when Execution.Report is false the query pays nothing.
-// All methods are safe for concurrent use (routers may fan out).
+// reportCollector accumulates a query's events, carried in ctx so every station
+// logs into one. nil = report off (all methods no-op). Safe for concurrent use.
 type reportCollector struct {
 	mu      sync.Mutex
 	started time.Time
@@ -86,9 +77,7 @@ func newReportCollector(started time.Time, level ReportLevel) *reportCollector {
 	return &reportCollector{started: started, level: level}
 }
 
-// enabled reports whether an event at level would be kept under the collector's
-// threshold. A nil / off collector returns false, so stations skip building
-// expensive detail (a lowered query string, per-claim attrs) they won't log.
+// enabled reports whether an event at level clears the threshold (nil = off).
 func (r *reportCollector) enabled(level ReportLevel) bool {
 	if r == nil {
 		return false
@@ -97,8 +86,7 @@ func (r *reportCollector) enabled(level ReportLevel) bool {
 	return t > 0 && reportRank(level) <= t
 }
 
-// log records a point event, subject to the threshold. A nil / below-threshold
-// collector is a no-op.
+// log records a point event if it clears the threshold.
 func (r *reportCollector) log(engine, op string, level ReportLevel, detail string, attrs map[string]any) {
 	if !r.enabled(level) {
 		return
@@ -115,10 +103,7 @@ func (r *reportCollector) log(engine, op string, level ReportLevel, detail strin
 	r.mu.Unlock()
 }
 
-// timed records an event that began at start, stamping its Duration. A nil
-// receiver is a no-op. Pair it with a start captured just before the work:
-//
-//	t := reportStart(rc); … ; rc.timed("native", "step", t, "", attrs)
+// timed records an event, stamping how long it took (since start).
 func (r *reportCollector) timed(engine, op string, level ReportLevel, start time.Time, detail string, attrs map[string]any) {
 	if !r.enabled(level) {
 		return
@@ -136,8 +121,7 @@ func (r *reportCollector) timed(engine, op string, level ReportLevel, start time
 	r.mu.Unlock()
 }
 
-// finalize snapshots the collected events into a QueryReport, stamping the
-// totals. A nil receiver returns nil (report was off).
+// finalize snapshots the events into a QueryReport with totals (nil = off).
 func (r *reportCollector) finalize(results int, truncated bool) *QueryReport {
 	if r == nil {
 		return nil
@@ -155,9 +139,7 @@ func (r *reportCollector) finalize(results int, truncated bool) *QueryReport {
 	}
 }
 
-// reportStart returns a start time for a timed step only when rc is live, so a
-// report-off query does no timekeeping. It's fine to pass the zero Time to
-// timed (which no-ops on a nil receiver anyway).
+// reportStart returns a timer start only when rc is live (else no timekeeping).
 func reportStart(rc *reportCollector) time.Time {
 	if rc == nil {
 		return time.Time{}
@@ -169,25 +151,20 @@ func reportStart(rc *reportCollector) time.Time {
 
 type reportKey struct{}
 
-// reportContext returns ctx carrying rc, so every station on the call chain
-// logs into the same collector.
+// reportContext returns ctx carrying rc for the whole call chain.
 func reportContext(ctx context.Context, rc *reportCollector) context.Context {
 	return context.WithValue(ctx, reportKey{}, rc)
 }
 
-// reportFrom returns the collector carried in ctx, or nil when reporting is off
-// — the signal a station uses to skip logging work entirely.
+// reportFrom returns the collector in ctx, or nil when reporting is off.
 func reportFrom(ctx context.Context) *reportCollector {
 	rc, _ := ctx.Value(reportKey{}).(*reportCollector)
 	return rc
 }
 
-// beginReport creates-or-reuses the collector for a query. When Execution.Report
-// is set and no collector is yet in ctx (this is the outermost participant), it
-// makes one, attaches it to a derived ctx, and returns created=true — that caller
-// owns finalising the report onto its ResultStream. An inner participant finds
-// the existing collector and returns created=false, so it logs but does not
-// finalise. When reporting is off it returns (ctx, nil, false).
+// beginReport creates the collector (returning created=true) if reporting is on
+// and none is in ctx yet; otherwise reuses the one in ctx (created=false). The
+// creator owns finalising it.
 func beginReport(ctx context.Context, level ReportLevel, started time.Time) (context.Context, *reportCollector, bool) {
 	if rc := reportFrom(ctx); rc != nil {
 		return ctx, rc, false
@@ -199,18 +176,14 @@ func beginReport(ctx context.Context, level ReportLevel, started time.Time) (con
 	return reportContext(ctx, rc), rc, true
 }
 
-// ReportEnabled reports whether the query on ctx is collecting events at level.
-// A storage adapter, router, or engine calls it to guard building expensive
-// report detail (a lowered query string, per-item attrs) before ReportEvent.
-// False when no report is active or level is below the requested threshold.
+// ReportEnabled reports whether ctx is collecting events at level — the guard a
+// backend uses before building expensive report detail.
 func ReportEnabled(ctx context.Context, level ReportLevel) bool {
 	return reportFrom(ctx).enabled(level)
 }
 
-// ReportEvent logs one execution event into the query report carried by ctx, if
-// any — a no-op when no report is active or level is below the threshold. This
-// is the hook every participant uses to record its part of a query: which layer
-// a router sent a read to, the Cypher a backend lowered to, a cache hit/miss.
+// ReportEvent logs one event into the report on ctx (no-op if off) — the hook a
+// router or engine uses to record its part of a query.
 func ReportEvent(ctx context.Context, engine, op string, level ReportLevel, detail string, attrs map[string]any) {
 	reportFrom(ctx).log(engine, op, level, detail, attrs)
 }

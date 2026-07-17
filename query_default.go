@@ -1,6 +1,6 @@
 // package: ranke / query
 // type:    logic
-// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a correct forward-closure walk with filter/order/limit/shape
+// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a forward-closure walk (reverse via closure inversion) with filter/order/limit/shape
 // limits:  performance-ignorant; a graph-native backend overrides with a native lowering (-> adapter/storage/neo4j)
 package ranke
 
@@ -15,6 +15,22 @@ import (
 	"time"
 )
 
+// validateSelect enforces the byte-store reference contract: a scope is
+// mandatory (use BranchUniverse for unconfined reads), and Claim must be the
+// resolved root. The reference cannot enumerate a branch's members (no tag
+// index over an opaque byte store), so it needs a root to walk from — the
+// archive layer resolves a branch to its head upstream. A tag-capable backend
+// (neo4j) has no such need and serves a nil-Claim branch read from _b_<branch>.
+func validateSelect(sel Select) error {
+	if sel.Branch == "" {
+		return errQueryNoScope
+	}
+	if sel.Claim == nil {
+		return errQueryNoRoot
+	}
+	return nil
+}
+
 // DefaultQuery is the reference implementation of Universe.Query for a backend
 // with no native query engine. It reads only through the public Universe API
 // (GetClaim + edges), so it works over any byte store. It is deliberately
@@ -24,12 +40,8 @@ import (
 // graph-native backend (neo4j) overrides Universe.Query.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
-	if q.Select.Branch == "" {
-		return nil, errQueryNoScope // scope is mandatory — use BranchUniverse for unconfined reads.
-	}
-	// Claim is the required walk root (the Archive resolves Branch → head into it).
-	if q.Select.Claim == nil {
-		return nil, errQueryNoRoot
+	if err := validateSelect(q.Select); err != nil {
+		return nil, err
 	}
 	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
 	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch, "root": q.Select.Claim.String()})
@@ -57,6 +69,9 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 func DefaultQueryFrom(ctx context.Context, u Universe, engine string, q Query,
 	traverse func(ctx context.Context) (reached []Claim, routes map[string][]Claim, err error)) (ResultStream, error) {
 	start := time.Now()
+	// Only the scope is universal: a native backend may resolve a branch read
+	// with no root (e.g. neo4j filters the _b_<branch> membership tag), so — unlike
+	// the byte-store reference — a nil Claim is not an error here; the traverse decides.
 	if q.Select.Branch == "" {
 		return nil, errQueryNoScope
 	}
@@ -116,224 +131,6 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 		report = rc.finalize(len(results), truncated)
 	}
 	return &sliceStream{results: results, report: report}, nil
-}
-
-// queryTraverse walks the Select from its root claim, one PathStep at a time,
-// and returns the reached claim set (deduped) plus, when needPaths is set, the
-// root→claim route for each. An empty Path is one implicit unbounded
-// provenance step — the full closure.
-func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
-	rootStart := reportStart(rc)
-	root, err := GetClaim(ctx, u, sel.Claim)
-	if err != nil {
-		return nil, nil, wrapDetail(errQuery, "root "+sel.Claim.String(), err)
-	}
-	rc.timed("native", "load-root", ReportInfo, rootStart, sel.Claim.String(), nil)
-
-	steps := sel.Path
-	if len(steps) == 0 {
-		steps = []PathStep{{}} // all edges, provenance, unbounded → full closure
-	}
-
-	// A reverse step needs incoming edges: invert the scope closure (from head,
-	// or the walk root when unconfined). Spanning only closure(head) confines it.
-	var incoming map[string][]incomingEdge
-	if stepsNeedReverse(steps) {
-		anchor := root
-		if head != nil && !head.Equal(sel.Claim) {
-			anchor, err = GetClaim(ctx, u, head)
-			if err != nil {
-				return nil, nil, wrapDetail(errQuery, "scope head "+head.String(), err)
-			}
-		}
-		idxStart := reportStart(rc)
-		incoming, err = buildIncoming(ctx, u, anchor, rc)
-		if err != nil {
-			return nil, nil, err
-		}
-		rc.timed("native", "reverse-index", ReportInfo, idxStart, "", map[string]any{"targets": len(incoming)})
-	}
-
-	frontier := []Claim{root}
-	routes := map[string][]Claim{root.ID().String(): {root}}
-	var reached []Claim
-	for i, step := range steps {
-		stepStart := reportStart(rc)
-		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, needPaths, rc)
-		if err != nil {
-			return nil, nil, err
-		}
-		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Depth, "reached": len(reached)})
-		frontier = reached
-	}
-	return reached, routes, nil
-}
-
-// stepsNeedReverse reports whether any step walks edges backward (uses or
-// connections), so the traversal must build a reverse index first.
-func stepsNeedReverse(steps []PathStep) bool {
-	for _, s := range steps {
-		if s.Dir == DirUses || s.Dir == DirConnections {
-			return true
-		}
-	}
-	return false
-}
-
-// incomingEdge is one reverse-adjacency entry: a claim that references the
-// target, and the type of the edge it did so with.
-type incomingEdge struct {
-	from     Claim
-	edgeType string
-}
-
-// buildIncoming materialises the forward closure from root and inverts its edges
-// into a target-id → referrers map — the reference's reverse index. Expensive (a
-// full closure sweep) but simple and correct; every referrer it records is
-// within the closure, so it doubles as the scope-membership set.
-func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollector) (map[string][]incomingEdge, error) {
-	incoming := map[string][]incomingEdge{}
-	seen := map[string]bool{root.ID().String(): true}
-	queue := []Claim{root}
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		cur := queue[0]
-		queue = queue[1:]
-		for _, e := range cur.Edges() {
-			ref := e.Reference()
-			k := ref.String()
-			incoming[k] = append(incoming[k], incomingEdge{from: cur, edgeType: e.Type()})
-			if seen[k] {
-				continue
-			}
-			seen[k] = true
-			child, err := GetClaim(ctx, u, ref)
-			if err != nil {
-				return nil, wrapDetail(errQuery, "reverse-index "+k, err)
-			}
-			rc.log("native", "fetch", ReportTrace, k, nil)
-			queue = append(queue, child)
-		}
-	}
-	return incoming, nil
-}
-
-// queryWalkStep expands the frontier along one PathStep: BFS following edges
-// whose type matches step.Edges, up to step.Depth hops (0 = unbounded),
-// collecting every visited claim whose node type matches step.Nodes (the
-// starting frontier counts as hop 0, per the paper's *0..depth semantics).
-// Direction selects which edges: DirProvenance (default) follows outgoing edges
-// forward; DirUses follows incoming edges (from the reverse index); DirConnections
-// does both. Reverse steps require incoming to be built (queryTraverse).
-func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
-	type item struct {
-		c   Claim
-		hop int
-	}
-	seen := map[string]bool{}
-	var queue []item
-	for _, f := range frontier {
-		if k := f.ID().String(); !seen[k] {
-			seen[k] = true
-			queue = append(queue, item{f, 0})
-		}
-	}
-
-	var out []Claim
-	outSeen := map[string]bool{}
-	collect := func(c Claim) {
-		k := c.ID().String()
-		if !outSeen[k] && matchTypeList(step.Nodes, c.Node().Type()) {
-			outSeen[k] = true
-			out = append(out, c)
-		}
-	}
-	enqueue := func(child, parent Claim, hop int) {
-		k := child.ID().String()
-		if seen[k] {
-			return
-		}
-		seen[k] = true
-		if needPaths {
-			pr := routes[parent.ID().String()]
-			route := make([]Claim, len(pr), len(pr)+1)
-			copy(route, pr)
-			routes[k] = append(route, child)
-		}
-		queue = append(queue, item{child, hop})
-	}
-
-	forward := step.Dir == "" || step.Dir == DirProvenance || step.Dir == DirConnections
-	reverse := step.Dir == DirUses || step.Dir == DirConnections
-
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		cur := queue[0]
-		queue = queue[1:]
-		collect(cur.c)
-		if step.Depth > 0 && cur.hop >= step.Depth {
-			continue
-		}
-		if forward {
-			for _, e := range cur.c.Edges() {
-				if !matchTypeList(step.Edges, e.Type()) {
-					continue
-				}
-				ref := e.Reference()
-				if seen[ref.String()] {
-					continue
-				}
-				child, err := GetClaim(ctx, u, ref)
-				if err != nil {
-					return nil, wrapDetail(errQuery, "traverse "+ref.String(), err)
-				}
-				rc.log("native", "fetch", ReportTrace, ref.String(), nil)
-				enqueue(child, cur.c, cur.hop+1)
-			}
-		}
-		if reverse {
-			// Incoming edges come from the reverse index, already within the
-			// scope closure — no fetch, and no way to leave the branch.
-			for _, ie := range incoming[cur.c.ID().String()] {
-				if !matchTypeList(step.Edges, ie.edgeType) {
-					continue
-				}
-				rc.log("native", "reverse", ReportTrace, ie.from.ID().String(), nil)
-				enqueue(ie.from, cur.c, cur.hop+1)
-			}
-		}
-	}
-	return out, nil
-}
-
-// matchTypeList reports whether typ satisfies a type-pattern list: a leading
-// "-" excludes, patterns are path.Match globs over "class/sub". No patterns, or
-// only negatives, means "match unless excluded".
-func matchTypeList(patterns []string, typ string) bool {
-	if len(patterns) == 0 {
-		return true
-	}
-	hasPositive, matchedPositive := false, false
-	for _, p := range patterns {
-		neg := strings.HasPrefix(p, "-")
-		pat := strings.TrimPrefix(p, "-")
-		ok, _ := path.Match(pat, typ)
-		if neg {
-			if ok {
-				return false
-			}
-			continue
-		}
-		hasPositive = true
-		if ok {
-			matchedPositive = true
-		}
-	}
-	return !hasPositive || matchedPositive
 }
 
 // --- Where evaluation ------------------------------------------------------
