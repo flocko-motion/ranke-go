@@ -42,6 +42,26 @@ func Run(t *testing.T, newU Factory) {
 	t.Run("absent lookups", func(t *testing.T) { testAbsentLookups(t, newU) })
 	t.Run("copy closure merges provenance", func(t *testing.T) { testCopyClosure(t, newU) })
 	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, newU) })
+	t.Run("sync reports readiness", func(t *testing.T) { testSync(t, newU) })
+}
+
+// testSync checks Sync delivers one result: an in-tree backend holds the whole
+// archive, so it reports synced up to the requested id.
+func testSync(t *testing.T, newU Factory) {
+	u := newU(t)
+	defer u.Close()
+	ctx := context.Background()
+	op, em, _, _, _ := sample(t)
+	if err := u.PutClaims(ctx, []ranke.Claim{op, em}); err != nil {
+		t.Fatalf("PutClaims: %v", err)
+	}
+	res := <-u.Sync(ctx, nil, em.ID())
+	if res.Err != nil {
+		t.Fatalf("Sync: %v", res.Err)
+	}
+	if res.SyncedTo == nil || res.SyncedTo.String() != em.ID().String() {
+		t.Fatalf("Sync SyncedTo = %v, want %v", res.SyncedTo, em.ID())
+	}
 }
 
 // testCapabilities verifies the adapter reports usable capabilities. Every

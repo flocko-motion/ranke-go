@@ -37,17 +37,27 @@ import (
 // client — Close is a no-op). New learns the bucket's capabilities with a
 // sentinel probe (see probeCaps). Pass ReadOnly for a bucket you may only read
 // (or one under object-lock/WORM) so the probe never writes.
+var (
+	errNilClient   = errors.New("adapter/s3.New: nil client")
+	errEmptyBucket = errors.New("adapter/s3.New: empty bucket")
+	errIO          = errors.New("adapter/s3: io")
+)
+
+// New returns an S3-backed Universe over the given client and bucket; options
+// configure read-only mode and capability probing (see the package doc).
 func New(client *s3.Client, bucket string, opts ...Option) (ranke.Universe, error) {
 	if client == nil {
-		return nil, errors.New("adapter/s3.New: nil client")
+		return nil, errNilClient
 	}
 	if bucket == "" {
-		return nil, errors.New("adapter/s3.New: empty bucket")
+		return nil, errEmptyBucket
 	}
 	cfg := config{concurrency: defaultConcurrency}
 	for _, o := range opts {
 		o(&cfg)
 	}
+	// Tier is not set here: NewBlobUniverse defaults a byte store to authoritative
+	// (S3 is a durable, verbatim source of truth), and no deployment overrides it.
 	return storage.NewBlobUniverse(&store{
 		client: client,
 		bucket: bucket,
@@ -153,7 +163,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	defer body.Close()
 	data, err := io.ReadAll(body)
 	if err != nil {
-		return nil, fmt.Errorf("read body %s: %w", key, err)
+		return nil, fmt.Errorf("%w: read body %s: %w", errIO, key, err)
 	}
 	return data, nil
 }
@@ -169,7 +179,7 @@ func (s *store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 		if isNotFound(err) {
 			return nil, ranke.ErrNotFound
 		}
-		return nil, fmt.Errorf("get %s: %w", key, err)
+		return nil, fmt.Errorf("%w: get %s: %w", errIO, key, err)
 	}
 	return out.Body, nil
 }
@@ -192,7 +202,7 @@ func (s *store) Put(ctx context.Context, key string, data []byte) error {
 		if isPreconditionFailed(err) {
 			return nil // already present — content-addressed, identical bytes
 		}
-		return fmt.Errorf("put %s: %w", key, err)
+		return fmt.Errorf("%w: put %s: %w", errIO, key, err)
 	}
 	return nil
 }
@@ -219,7 +229,7 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 		if isNotFound(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("head %s: %w", key, err)
+		return false, fmt.Errorf("%w: head %s: %w", errIO, key, err)
 	}
 	return true, nil
 }

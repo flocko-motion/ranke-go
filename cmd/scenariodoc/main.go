@@ -9,6 +9,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"go/parser"
@@ -19,6 +20,11 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+)
+
+var (
+	errDirName = errors.New("scenariodoc: dir name mismatch")
+	errParse   = errors.New("scenariodoc: parse")
 )
 
 func main() {
@@ -95,7 +101,7 @@ func extractScenario(dir, mainGo string) (Scenario, error) {
 	base := filepath.Base(dir)
 	m := dirRe.FindStringSubmatch(base)
 	if m == nil {
-		return Scenario{}, fmt.Errorf("dir name %q doesn't match NN_name pattern", base)
+		return Scenario{}, fmt.Errorf("%w: %q doesn't match NN_name pattern", errDirName, base)
 	}
 	scn := Scenario{
 		Number: m[1],
@@ -105,7 +111,7 @@ func extractScenario(dir, mainGo string) (Scenario, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, mainGo, nil, parser.ParseComments)
 	if err != nil {
-		return Scenario{}, fmt.Errorf("parse %s: %w", mainGo, err)
+		return Scenario{}, fmt.Errorf("%w: %s: %w", errParse, mainGo, err)
 	}
 
 	// Intro: comment groups whose End is before file.Package. Go

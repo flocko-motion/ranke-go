@@ -9,11 +9,18 @@ package mem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+)
+
+var (
+	errNilID    = errors.New("adapter/history/mem: nil id")
+	errRevRange = errors.New("adapter/history/mem: revision out of range")
+	errRange    = errors.New("adapter/history/mem: range out of bounds")
 )
 
 // New returns an in-memory History — lost on process exit.
@@ -28,7 +35,7 @@ type history struct {
 
 func (h *history) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/mem: nil id")
+		return ranke.HistoryItem{}, errNilID
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -50,7 +57,7 @@ func (h *history) GetAtRevision(_ context.Context, revision int) (ranke.HistoryI
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if revision < 0 || revision >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/mem: revision %d out of range [0,%d)", revision, len(h.items))
+		return ranke.HistoryItem{}, fmt.Errorf("%w: revision %d out of range [0,%d)", errRevRange, revision, len(h.items))
 	}
 	return h.items[revision], nil
 }
@@ -60,7 +67,7 @@ func (h *history) GetBulk(_ context.Context, fromRevision, toExcludingRevision i
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
-		return nil, fmt.Errorf("adapter/history/mem: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
+		return nil, fmt.Errorf("%w: range [%d,%d) out of bounds [0,%d)", errRange, fromRevision, toExcludingRevision, len(h.items))
 	}
 	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }

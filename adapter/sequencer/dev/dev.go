@@ -6,10 +6,18 @@ package dev
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+)
+
+var (
+	errNilArg       = errors.New("dev.NewSequencer: nil argument")
+	errNoSigningKey = errors.New("dev.NewSequencer: self contributor carries no signing key")
+	errNewSequencer = errors.New("dev.NewSequencer")
+	errSequencer    = errors.New("dev.Sequencer")
 )
 
 // mainBranch is the default branch AddClaims advances when no branch is named
@@ -50,17 +58,17 @@ type Sequencer struct {
 // mints.
 func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, self ranke.Contributor, clock Clock) (*Sequencer, error) {
 	if u == nil || hist == nil || self == nil || clock == nil {
-		return nil, fmt.Errorf("dev.NewSequencer: nil argument")
+		return nil, errNilArg
 	}
 	if self.SigningKey() == nil {
-		return nil, fmt.Errorf("dev.NewSequencer: self contributor carries no signing key")
+		return nil, errNoSigningKey
 	}
 	s := &Sequencer{u: u, hist: hist, self: self, clock: clock, heads: map[string]ranke.Id{}}
 
 	// The self contributor is an initial node — store it so branch-table
 	// claims attributed to it resolve.
 	if err := s.u.PutClaims(ctx, []ranke.Claim{self}); err != nil {
-		return nil, fmt.Errorf("dev.NewSequencer: store contributor: %w", err)
+		return nil, fmt.Errorf("%w: store contributor: %w", errNewSequencer, err)
 	}
 	// Empty branch table → archive head k₀, revision 0.
 	bt0, err := s.mintBranchTable(ctx, "")
@@ -68,7 +76,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 		return nil, err
 	}
 	if _, err := s.hist.Append(ctx, bt0.ID(), int(bt0.Node().Height()), 0); err != nil {
-		return nil, fmt.Errorf("dev.NewSequencer: append history: %w", err)
+		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
 	return s, nil
@@ -117,20 +125,20 @@ func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims
 	// claim and tracks the open-head frontier.
 	g, err := ranke.NewGraph(ctx, s.u)
 	if err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: new graph: %w", err)
+		return nil, fmt.Errorf("%w: new graph: %w", errSequencer, err)
 	}
 	if err := g.AddClaims(ctx, claims...); err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: populate: %w", err)
+		return nil, fmt.Errorf("%w: populate: %w", errSequencer, err)
 	}
 
 	// Steps 3–4 — verify the batch over its closure.
 	run := g.Verify()
 	run.Wait()
 	if err := run.Err(); err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: verify: %w", err)
+		return nil, fmt.Errorf("%w: verify: %w", errSequencer, err)
 	}
 	if fs := run.Failures(); len(fs) > 0 {
-		return nil, fmt.Errorf("dev.Sequencer: verify: %d failure(s), first: %v", len(fs), fs[0])
+		return nil, fmt.Errorf("%w: verify: %d failure(s), first: %v", errSequencer, len(fs), fs[0])
 	}
 
 	// Step 5 — seed. This Graph writes every added claim straight to 𝒰 (both
@@ -154,7 +162,7 @@ func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims
 			return nil, err
 		}
 		if err := g.AddClaims(ctx, hc); err != nil {
-			return nil, fmt.Errorf("dev.Sequencer: fold heads: %w", err)
+			return nil, fmt.Errorf("%w: fold heads: %w", errSequencer, err)
 		}
 		newHead = hc.ID()
 	}
@@ -168,10 +176,10 @@ func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims
 	}
 	revision, err := s.hist.Len(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: history length: %w", err)
+		return nil, fmt.Errorf("%w: history length: %w", errSequencer, err)
 	}
 	if _, err := s.hist.Append(ctx, bt.ID(), int(bt.Node().Height()), revision); err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: append history: %w", err)
+		return nil, fmt.Errorf("%w: append history: %w", errSequencer, err)
 	}
 	s.head = bt.ID()
 	return s.head, nil
@@ -186,7 +194,7 @@ func (s *Sequencer) consolidateGraph(ctx context.Context, g ranke.Graph) (ranke.
 	}
 	head, err := g.Consolidate(ctx, s.self, s.clock.Tick())
 	if err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: consolidate: %w", err)
+		return nil, fmt.Errorf("%w: consolidate: %w", errSequencer, err)
 	}
 	return head.ID(), nil
 }
@@ -199,7 +207,7 @@ func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ra
 	for _, h := range heads {
 		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: h, Type: ranke.EdgeTypeHead})
 		if err != nil {
-			return nil, fmt.Errorf("dev.Sequencer: head edge: %w", err)
+			return nil, fmt.Errorf("%w: head edge: %w", errSequencer, err)
 		}
 		edges = append(edges, e)
 	}
@@ -235,7 +243,7 @@ func (s *Sequencer) mintBranchTable(ctx context.Context, changed string) (ranke.
 			Fields:    map[string]string{ranke.FieldName: changed},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("dev.Sequencer: branch edge: %w", err)
+			return nil, fmt.Errorf("%w: branch edge: %w", errSequencer, err)
 		}
 		b = b.WithEdges(e)
 	}
@@ -244,10 +252,10 @@ func (s *Sequencer) mintBranchTable(ctx context.Context, changed string) (ranke.
 	b = b.WithAutoHeight(ctx, s.u)
 	table, err := b.Sign()
 	if err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: mint branch table: %w", err)
+		return nil, fmt.Errorf("%w: mint branch table: %w", errSequencer, err)
 	}
 	if err := s.u.PutClaims(ctx, []ranke.Claim{table}); err != nil {
-		return nil, fmt.Errorf("dev.Sequencer: store branch table: %w", err)
+		return nil, fmt.Errorf("%w: store branch table: %w", errSequencer, err)
 	}
 	return table, nil
 }

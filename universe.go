@@ -43,40 +43,82 @@ type Capabilities struct {
 	// Persistent: stored data survives a process restart (a durable medium).
 	// In-memory backends report false.
 	Persistent bool
-	// GQL: the backend offers a GQL (Cypher) query surface that a query
-	// endpoint can push down to (e.g. a graph-native store like neo4j). This is
-	// the optional graph-query language, NOT the native filtered query — that
-	// is a separate, always-available read.
-	GQL bool
-	// ReverseWalk: the backend can follow edges backward (find the claims that
-	// reference a given one) without sweeping a whole closure — it holds edges
-	// indexed both directions (a graph-native store), or maintains a reverse
-	// index. Forward-only byte stores report false, and a uses/connections
-	// query step against them is refused rather than answered by an O(closure)
-	// sweep. Composed per-primitive: a stack ORs over its layers (like GQL — any
-	// capable layer can answer), a partition ANDs over its shards (a referrer
-	// can live in any shard, so all must support it).
+	// ReverseWalk: the backend can follow edges backward NATIVELY/efficiently
+	// (e.g. neo4j). Any Universe can answer uses/connections via DefaultQuery's
+	// closure-inversion; this flag signals a cheap native path, not mere ability.
 	ReverseWalk bool
-	// RawClaims: the backend stores and serves each claim's verbatim canonical
-	// bytes via GetClaimsRaw. A structure-only cache that reconstructs claims
-	// from parts (neo4j) holds no canonical CBOR and reports false — a stack
-	// skips such a layer for raw reads instead of querying it for bytes it can
-	// never have.
+	// RawClaims: the backend stores claims as CBOR
 	RawClaims bool
 	// ExternalContent: the backend holds externalized content of ANY size —
-	// a content store (durable byte stores). A structure/query cache that never
-	// keeps externalized content (neo4j) reports false; a stack then asks it
-	// for content only up to ContentCap, and the next lower layer beyond.
 	ExternalContent bool
-	// ContentCap is the largest content blob (bytes) this backend may hold; 0
-	// means no cap (holds any size — implied by ExternalContent). A cache that
-	// keeps only small content reports its threshold (e.g. neo4j's 4 KiB), so a
-	// stack knows a blob larger than the cap cannot be here and descends
-	// without asking. Set from the backend's option (e.g. WithContentCap).
+	// ContentCap is the largest .content value (bytes) this backend may hold;
+	// 0 = no limit
 	ContentCap uint64
 	// Tags: holds mutable, pure-functional per-claim tags (branch membership
 	// etc.) and implements Tagger; opaque byte stores report false.
 	Tags bool
+	// Tier is the write-durability role this layer is configured in — how a
+	// stack writes to it. The deployment picks it (an adapter option) within what
+	// the adapter allows; the stack composes its write path from each layer's
+	// reported tier.
+	Tier StorageTier
+}
+
+// StorageTier is how a stack writes to a layer. The adapter constrains which
+// tiers it allows (from its nature — authoritative needs RawClaims &&
+// ExternalContent), the deployment picks one via an adapter option, and the
+// layer reports the choice as Capabilities.Tier.
+type StorageTier string
+
+const (
+	// StorageTierAuthoritative: the source of truth — a write MUST succeed here
+	// (else the whole write fails); holds the archive verbatim. Requires
+	// RawClaims && ExternalContent; a stack needs at least one.
+	StorageTierAuthoritative StorageTier = "authoritative"
+	// StorageTierEager: written synchronously, in parallel with the authoritative
+	// tier(s), best-effort — a failure does not fail the write; the layer
+	// re-syncs from the authoritative copy. The write-through queryable layer (neo4j).
+	StorageTierEager StorageTier = "eager"
+	// StorageTierBackground: written in a background goroutine the write does not
+	// wait for — populated eventually, best-effort.
+	StorageTierBackground StorageTier = "background"
+	// StorageTierLazy: not written on a write; populated on a read miss served
+	// from below (a read-through cache, e.g. redis).
+	StorageTierLazy StorageTier = "lazy"
+)
+
+// AllowsTier reports whether a layer with these capabilities may be configured
+// in tier t — the "adapters inform" half of the write model: the adapter's
+// nature constrains the choice, the deployment picks within it, the stack reads
+// the result. Authoritative is the archive's source of truth, so it demands
+// verbatim, unbounded storage (RawClaims && ExternalContent); a lossy
+// projection (neo4j) or a capped cache cannot hold it. Every other tier is a
+// pure routing role any layer can fill.
+func (c Capabilities) AllowsTier(t StorageTier) bool {
+	switch t {
+	case StorageTierAuthoritative:
+		return c.RawClaims && c.ExternalContent
+	case StorageTierEager, StorageTierBackground, StorageTierLazy:
+		return true
+	default:
+		return false
+	}
+}
+
+// SyncResult is the outcome of a Sync: SyncedTo is the branch-table claim now
+// fully readable (nil on error), Err any failure.
+type SyncResult struct {
+	SyncedTo Id
+	Err      error
+}
+
+// SyncedNow returns a closed channel with an immediate success — the trivial
+// Sync for a layer that holds the whole archive (nothing to assure).
+func SyncedNow(id Id) <-chan SyncResult {
+	ch := make(chan SyncResult, 1)
+	ch <- SyncResult{SyncedTo: id}
+	close(ch)
+	return ch
 }
 
 // Universe is 𝒰 from spec §4.5 — a content-addressed bag of claims
@@ -138,8 +180,8 @@ type Universe interface {
 	// Query answers a declarative RQL read (the paper's §Filtered Reads) — the
 	// primary read endpoint. scope is an injected visibility predicate (nil =
 	// unrestricted): mechanism applies it, policy supplies it. A byte store
-	// delegates to DefaultQuery (the reference forward-closure walk, which
-	// refuses uses/connections steps unless Capabilities.ReverseWalk); a
+	// delegates to DefaultQuery (the reference closure walk, which serves
+	// uses/connections by inverting the closure — correct but O(closure)); a
 	// graph-native backend overrides with a native lowering (e.g. Cypher). A
 	// query's meaning is unchanged by which layer answers it.
 	Query(ctx context.Context, q Query, scope Scope) (ResultStream, error)
@@ -181,6 +223,12 @@ type Universe interface {
 	// GetClaimTags returns each claim's tags positionally (nil when a claim has
 	// none), like GetClaims/GetClaimHeights.
 	GetClaimTags(ctx context.Context, claims []Id) ([]map[string]string, error)
+
+	// Sync fills the receiver for id's closure by copying whatever it is missing
+	// from src (claims + content). A stack calls it on its eager layer, passing
+	// the layers below as src — the stack only routes; the layer does the copy.
+	// A nil src means nothing to copy from, so the receiver is taken as synced.
+	Sync(ctx context.Context, src Universe, id Id) <-chan SyncResult
 
 	// Capabilities reports optional backend abilities (see Capabilities).
 	// Composites (stack, partition) derive theirs from their members'.
@@ -293,9 +341,9 @@ func GetClaimHeight(ctx context.Context, u Universe, id Id) (uint64, error) {
 type ContentKind int
 
 const (
-	ContentNone ContentKind = iota // no content
-	ContentInline                  // inline in the claim record
-	ContentExternal                // a separate Universe blob
+	ContentNone     ContentKind = iota // no content
+	ContentInline                      // inline in the claim record
+	ContentExternal                    // a separate Universe blob
 )
 
 // claimInlineReader recovers inline bytes a structure-only cache dropped: it

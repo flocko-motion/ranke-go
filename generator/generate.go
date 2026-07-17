@@ -7,6 +7,7 @@ package generator
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -16,6 +17,8 @@ import (
 	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 )
+
+var errGenerate = errors.New("generator")
 
 // Manifest is the map of a generated archive: the head to open it at, plus the
 // ids of the notable claims so a test can target a specific corner without
@@ -54,11 +57,11 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	// Contributor 0 is the operator the Sequencer signs branch tables with.
 	op, err := contributor(ctx, spec.Seed, 0, clock.Tick())
 	if err != nil {
-		return nil, fmt.Errorf("generator: operator: %w", err)
+		return nil, fmt.Errorf("%w: operator: %w", errGenerate, err)
 	}
 	seq, err := devseq.NewSequencer(ctx, u, hist, op, clock)
 	if err != nil {
-		return nil, fmt.Errorf("generator: sequencer: %w", err)
+		return nil, fmt.Errorf("%w: sequencer: %w", errGenerate, err)
 	}
 
 	b := &builder{ctx: ctx, u: u, spec: spec, clock: clock}
@@ -88,7 +91,7 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 		// 𝒰, which every contribution writes to regardless of branch.
 		head, err = seq.AddClaimsToBranch(ctx, branches[i%len(branches)], chunk)
 		if err != nil {
-			return nil, fmt.Errorf("generator: merge: %w", err)
+			return nil, fmt.Errorf("%w: merge: %w", errGenerate, err)
 		}
 		revisions++
 	}
@@ -185,7 +188,7 @@ func (b *builder) contributors(op ranke.Contributor) {
 	for i := 1; i < b.spec.Contributors; i++ {
 		c, err := contributor(b.ctx, b.spec.Seed, i, b.clock.Tick())
 		if err != nil {
-			b.fail(fmt.Errorf("contributor %d: %w", i, err))
+			b.fail(fmt.Errorf("%w: contributor %d: %w", errGenerate, i, err))
 			return
 		}
 		b.contribs = append(b.contribs, c)
@@ -245,11 +248,11 @@ func (b *builder) externalSource(who ranke.Contributor, i int) ranke.Claim {
 	blob := fill(b.spec.Seed, "ext", i, b.spec.LargeBlobBytes)
 	hash, err := ranke.HashContent(blob)
 	if err != nil {
-		b.fail(fmt.Errorf("external hash %d: %w", i, err))
+		b.fail(fmt.Errorf("%w: external hash %d: %w", errGenerate, i, err))
 		return nil
 	}
 	if err := b.u.PutContents(b.ctx, []ranke.ContentBlob{{Hash: hash, Content: blob}}); err != nil {
-		b.fail(fmt.Errorf("put external content %d: %w", i, err))
+		b.fail(fmt.Errorf("%w: put external content %d: %w", errGenerate, i, err))
 		return nil
 	}
 	c := b.add(ranke.NewClaim(ranke.TypeSource("blob"), who).
@@ -276,7 +279,7 @@ func (b *builder) diffChain() {
 	src := b.srcClaims[0] // the chain distils this source
 	de, err := ranke.NewEdge(ranke.EdgeConfig{Reference: src.ID(), Type: ranke.TypeDerivation("source")})
 	if err != nil {
-		b.fail(fmt.Errorf("diff-chain provenance edge: %w", err))
+		b.fail(fmt.Errorf("%w: diff-chain provenance edge: %w", errGenerate, err))
 		return
 	}
 	base := b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(0)).
@@ -297,7 +300,7 @@ func (b *builder) diffChain() {
 			Fields:    map[string]string{ranke.FieldName: "source"},
 		})
 		if err != nil {
-			b.fail(fmt.Errorf("diff-chain revision edge %d: %w", r, err))
+			b.fail(fmt.Errorf("%w: diff-chain revision edge %d: %w", errGenerate, r, err))
 			return
 		}
 		prev = b.add(ranke.NewClaim(ranke.TypeDerivation("summary"), b.who(r)).
@@ -328,7 +331,7 @@ func (b *builder) derivations() {
 			src := b.srcClaims[(i+d)%len(b.srcClaims)]
 			e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: src.ID(), Type: ranke.TypeDerivation("source")})
 			if err != nil {
-				b.fail(fmt.Errorf("derivation edge %d/%d: %w", i, d, err))
+				b.fail(fmt.Errorf("%w: derivation edge %d/%d: %w", errGenerate, i, d, err))
 				return
 			}
 			edges = append(edges, e)
@@ -357,7 +360,7 @@ func (b *builder) entities() {
 		src := b.srcClaims[i%len(b.srcClaims)]
 		de, err := ranke.NewEdge(ranke.EdgeConfig{Reference: src.ID(), Type: ranke.TypeDerivation("source")})
 		if err != nil {
-			b.fail(fmt.Errorf("entity provenance edge %d: %w", i, err))
+			b.fail(fmt.Errorf("%w: entity provenance edge %d: %w", errGenerate, i, err))
 			return
 		}
 		c := b.add(ranke.NewClaim(ranke.TypeEntity("person"), b.who(i)).
@@ -392,7 +395,7 @@ func (b *builder) relations() {
 		fromE, e2 := ranke.NewEdge(ranke.EdgeConfig{Reference: from, Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationFrom})
 		toE, e3 := ranke.NewEdge(ranke.EdgeConfig{Reference: to, Type: ranke.TypeRelation("knows"), RelationDirection: ranke.RelationTo})
 		if e1 != nil || e2 != nil || e3 != nil {
-			b.fail(fmt.Errorf("relation edges %d: %v/%v/%v", i, e1, e2, e3))
+			b.fail(fmt.Errorf("%w: relation edges %d: %v/%v/%v", errGenerate, i, e1, e2, e3))
 			return
 		}
 		c := b.add(ranke.NewClaim(ranke.TypeRelation("knows"), b.who(i)).
@@ -422,7 +425,7 @@ func (b *builder) expiries() {
 		target := b.contribs[1+(i%(len(b.contribs)-1))]
 		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/expiry"})
 		if err != nil {
-			b.fail(fmt.Errorf("expiry edge %d: %w", i, err))
+			b.fail(fmt.Errorf("%w: expiry edge %d: %w", errGenerate, i, err))
 			return
 		}
 		c := b.add(ranke.NewClaim("contribution/expiry", b.contribs[0]).
@@ -448,7 +451,7 @@ func (b *builder) deletes() {
 		target := b.srcClaims[i%len(b.srcClaims)]
 		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/delete"})
 		if err != nil {
-			b.fail(fmt.Errorf("delete edge %d: %w", i, err))
+			b.fail(fmt.Errorf("%w: delete edge %d: %w", errGenerate, i, err))
 			return
 		}
 		c := b.add(ranke.NewClaim("contribution/delete", b.contribs[0]).

@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,13 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
+)
+
+var (
+	errOpen     = errors.New("open archive")
+	errUsage    = errors.New("usage")
+	errShow     = errors.New("show")
+	errValidate = errors.New("validate")
 )
 
 func main() {
@@ -81,15 +89,15 @@ func exit(err error) {
 func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive, error) {
 	u, err := fs.New(filepath.Join(dir, "universe"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("open universe in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("%w: universe in %s: %w", errOpen, dir, err)
 	}
 	hist, err := histfile.New(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("open head timeline in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("%w: head timeline in %s: %w", errOpen, dir, err)
 	}
 	head, err := hist.Latest(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read latest head in %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("%w: latest head in %s: %w", errOpen, dir, err)
 	}
 	arc, err := ranke.NewArchive(ctx, u, head.GetId())
 	if err != nil {
@@ -102,7 +110,7 @@ func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive
 
 func cmdInfo(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("info: usage: ranke info <dir>")
+		return fmt.Errorf("%w: ranke info <dir>", errUsage)
 	}
 	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
@@ -124,7 +132,7 @@ func cmdInfo(ctx context.Context, args []string) error {
 
 func cmdBranches(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("branches: usage: ranke branches <dir>")
+		return fmt.Errorf("%w: ranke branches <dir>", errUsage)
 	}
 	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
@@ -155,14 +163,14 @@ func cmdShow(ctx context.Context, args []string) error {
 	case 2:
 		return showInArchive(ctx, args[0], args[1])
 	default:
-		return fmt.Errorf("show: usage: ranke show <file>  OR  ranke show <dir> <id>")
+		return fmt.Errorf("%w: ranke show <file>  OR  ranke show <dir> <id>", errUsage)
 	}
 }
 
 func showFile(path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("show: %w", err)
+		return fmt.Errorf("%w: %w", errShow, err)
 	}
 	idStr := filepath.Base(path)
 	id, idErr := ranke.ParseId(idStr)
@@ -187,11 +195,11 @@ func showInArchive(ctx context.Context, dir, idStr string) error {
 	}
 	id, err := ranke.ParseId(idStr)
 	if err != nil {
-		return fmt.Errorf("show: parse id %q: %w", idStr, err)
+		return fmt.Errorf("%w: parse id %q: %w", errShow, idStr, err)
 	}
 	c, err := a.GetClaim(ctx, id)
 	if err != nil {
-		return fmt.Errorf("show: fetch claim: %w", err)
+		return fmt.Errorf("%w: fetch claim: %w", errShow, err)
 	}
 	printClaim(c)
 	return nil
@@ -201,7 +209,7 @@ func showInArchive(ctx context.Context, dir, idStr string) error {
 
 func cmdValidate(ctx context.Context, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("validate: usage: ranke validate <dir>")
+		return fmt.Errorf("%w: ranke validate <dir>", errUsage)
 	}
 	u, a, err := openArchive(ctx, args[0])
 	if err != nil {
@@ -212,7 +220,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(branches) == 0 {
-		return fmt.Errorf("validate: archive has no branches")
+		return fmt.Errorf("%w: archive has no branches", errValidate)
 	}
 	totalFailed := 0
 	for _, b := range branches {
@@ -239,7 +247,7 @@ func cmdValidate(ctx context.Context, args []string) error {
 		}
 	}
 	if totalFailed > 0 {
-		return fmt.Errorf("validate: %d branch(es) failed", totalFailed)
+		return fmt.Errorf("%w: %d branch(es) failed", errValidate, totalFailed)
 	}
 	return nil
 }

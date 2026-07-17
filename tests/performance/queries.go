@@ -36,6 +36,11 @@ type namedQuery struct {
 	q    ranke.Query
 }
 
+// branchScoped reports whether the query confines to a named branch (resolved
+// via tags), as opposed to the unconfined $universe scope. A backend that holds
+// no tags runs only the unconfined queries.
+func (nq namedQuery) branchScoped() bool { return nq.q.Select.Branch != ranke.BranchUniverse }
+
 // queryBranch is the branch the branch-scoped perf queries confine to (always
 // present — the generator's first branch). Reads confined to a branch are the
 // typical case; $universe is the privileged, unconfined exception.
@@ -66,8 +71,18 @@ func perfQueries(m *generator.Manifest, root ranke.Id) []namedQuery {
 			Order:  &ranke.Order{Field: "height", Desc: true},
 			Limit:  ranke.Limit{Results: 20},
 		}},
+		// Reverse walk: reach the branch's sources (forward), then DirUses to the
+		// derivations that use them — unreachable going forward, so it exercises the
+		// backend's reverse path (native on neo4j; closure-inversion in the reference).
+		{"branch/uses-of-sources", ranke.Query{
+			Select: ranke.Select{Branch: queryBranch, Claim: root, Path: []ranke.PathStep{
+				{Nodes: []string{"source/*"}},
+				{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}},
+			}},
+		}},
 		// The one $universe query: an unconfined node-type search — exploring an
-		// unknown closure for a type. The atypical, most-expensive shape.
+		// unknown closure for a type. The atypical, most-expensive shape. Rooted at
+		// the universe head (no branch/tags), so it runs on every backend.
 		{"universe/type-search", ranke.Query{
 			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.Head},
 			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "entity/*"}},
@@ -137,6 +152,9 @@ func describeQuery(q ranke.Query) string {
 	} else {
 		for _, s := range q.Select.Path {
 			seg := "path("
+			if s.Dir != "" {
+				seg += "dir=" + string(s.Dir) + " "
+			}
 			if len(s.Edges) > 0 {
 				seg += "edges=" + strings.Join(s.Edges, ",") + " "
 			}
@@ -214,17 +232,25 @@ func describeCmp(c *ranke.Comparison) string {
 // defaults to 10. Each query is timed under its own phase ("4.1", "4.2", …) so
 // it appears as a row in the metered table (the pre-matrix listing maps the
 // numbers to names + RQL); a mem reference (non-metered) skips the phase.
-func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, reps int) ([]queryStat, error) {
+func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, reps int, taggable bool) ([]queryStat, error) {
 	if reps <= 0 {
 		reps = 10
 	}
-	root, err := queryRoot(ctx, u, m)
-	if err != nil {
-		return nil, err
+	// The branch-scoped queries root at a branch head (resolved via tags); a
+	// backend that holds no tags runs only the $universe query.
+	var root ranke.Id
+	if taggable {
+		var err error
+		if root, err = queryRoot(ctx, u, m); err != nil {
+			return nil, err
+		}
 	}
 	met, isMet := u.(*metered)
 	var stats []queryStat
 	for i, nq := range perfQueries(m, root) {
+		if !taggable && nq.branchScoped() {
+			continue // branch-scoped query needs tags this backend can't hold
+		}
 		if isMet {
 			met.setPhase(fmt.Sprintf("4.%d", i+1))
 		}

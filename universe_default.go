@@ -327,3 +327,24 @@ func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentR
 	}
 	return nil
 }
+
+// DefaultSync is the reference Sync: it fills dst for id's closure by copying
+// from src (claims + content), which walks the closure and skips what dst
+// already has, so only the gap is fetched. A nil src means there is nothing to
+// copy from, so dst is taken as already synced.
+func DefaultSync(ctx context.Context, dst, src Universe, id Id) <-chan SyncResult {
+	out := make(chan SyncResult, 1)
+	go func() {
+		defer close(out)
+		if src == nil {
+			out <- SyncResult{SyncedTo: id}
+			return
+		}
+		if err := dst.CopyClaims(ctx, src, []Id{id}, WithClosure(), WithContent()); err != nil {
+			out <- SyncResult{Err: err}
+			return
+		}
+		out <- SyncResult{SyncedTo: id}
+	}()
+	return out
+}

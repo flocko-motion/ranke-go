@@ -7,7 +7,6 @@ package ranke
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -457,7 +456,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 		return err
 	}
 	if ref.Node().Type() == NodeBranches {
-		return fmt.Errorf("%s claim references branch table %s", t.claim.Node().Type(), e.Reference())
+		return withDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
 	}
 	return nil
 }
@@ -466,7 +465,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 // (contribution/branches) — the root of the branch-table lineage.
 func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 	if t.claim.Node().Type() != NodeBranches {
-		return fmt.Errorf("archive head is %s, want %s", t.claim.Node().Type(), NodeBranches)
+		return withDetail(errNotBranchTable, "got "+t.claim.Node().Type())
 	}
 	return nil
 }

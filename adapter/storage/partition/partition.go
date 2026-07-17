@@ -20,6 +20,13 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
+var (
+	errNoShards = errors.New("partition: at least one shard required")
+	errNilShard = errors.New("partition: nil shard Universe")
+	errNilClaim = errors.New("partition: nil claim or id")
+	errNilHash  = errors.New("partition: nil content hash")
+)
+
 type partition struct {
 	shards []ranke.Universe
 }
@@ -28,11 +35,11 @@ type partition struct {
 // one shard is required; the shard set is fixed for the partition's lifetime.
 func NewPartition(shards ...ranke.Universe) (ranke.Universe, error) {
 	if len(shards) == 0 {
-		return nil, errors.New("partition: at least one shard required")
+		return nil, errNoShards
 	}
 	for _, s := range shards {
 		if s == nil {
-			return nil, errors.New("partition: nil shard Universe")
+			return nil, errNilShard
 		}
 	}
 	if len(shards) == 1 {
@@ -61,7 +68,7 @@ func (p *partition) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	groups := make([][]ranke.Claim, len(p.shards))
 	for _, c := range cs {
 		if c == nil || c.ID() == nil {
-			return errors.New("partition.PutClaims: nil claim or id")
+			return errNilClaim
 		}
 		s := p.shardOf(c.ID())
 		groups[s] = append(groups[s], c)
@@ -81,7 +88,7 @@ func (p *partition) PutContents(ctx context.Context, blobs []ranke.ContentBlob) 
 	groups := make([][]ranke.ContentBlob, len(p.shards))
 	for _, b := range blobs {
 		if b.Hash == nil {
-			return errors.New("partition.PutContents: nil hash")
+			return errNilHash
 		}
 		s := p.shardOf(b.Hash)
 		groups[s] = append(groups[s], b)
@@ -127,7 +134,7 @@ func (p *partition) GetContents(ctx context.Context, refs []ranke.ContentRef) ([
 	groups := make([][]int, len(p.shards))
 	for i, r := range refs {
 		if r.Hash == nil {
-			return nil, errors.New("partition.GetContents: nil hash")
+			return nil, errNilHash
 		}
 		s := p.shardOf(r.Hash)
 		groups[s] = append(groups[s], i)
@@ -189,7 +196,7 @@ func (p *partition) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool,
 
 func (p *partition) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	if hash == nil {
-		return nil, errors.New("partition.StreamContent: nil hash")
+		return nil, errNilHash
 	}
 	return p.shards[p.shardOf(hash)].StreamContent(ctx, hash, size)
 }
@@ -281,18 +288,33 @@ func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, tags 
 }
 
 func (p *partition) Capabilities() ranke.Capabilities {
-	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true, ReverseWalk: true, Tags: true}
-	for _, s := range p.shards {
+	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, ReverseWalk: true, RawClaims: true, ExternalContent: true, Tags: true}
+	for i, s := range p.shards {
 		sc := s.Capabilities()
 		c.Overwrite = c.Overwrite && sc.Overwrite
 		c.Delete = c.Delete && sc.Delete
 		c.Enumerate = c.Enumerate && sc.Enumerate
 		c.Persistent = c.Persistent && sc.Persistent
-		c.GQL = c.GQL && sc.GQL
 		c.ReverseWalk = c.ReverseWalk && sc.ReverseWalk
+		c.RawClaims = c.RawClaims && sc.RawClaims
+		c.ExternalContent = c.ExternalContent && sc.ExternalContent
 		c.Tags = c.Tags && sc.Tags
+		if i == 0 {
+			// Shards are one backend sharded by key, so they share a tier; adopt
+			// the first shard's. (A mixed-tier partition is a misconfiguration.)
+			c.Tier = sc.Tier
+		}
 	}
 	return c
+}
+
+// Sync is not implemented — no-op for now. A shard can be any Universe (even a
+// stack), so a real Sync must orchestrate across the shards. TODO.
+func (p *partition) Sync(_ context.Context, _ ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	// TODO: this is currently a no-op. Syncing a partition is not trivial, as shards are
+	// incomplete by nature it would be the responsibility of the partition layer to guarantee
+	// completeness.
+	return ranke.SyncedNow(id)
 }
 
 // Close closes every shard (best-effort: all attempted, errors joined).

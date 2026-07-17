@@ -2,86 +2,39 @@
 // type:    adapter
 // job:     compose ordered Universe layers into one read-through / write-through Universe — cache + durable tiers with self-healing repair (paper §Composing Universes)
 // limits:  no storage of its own (-> the layer Universes); naming/selecting layers is the caller's (-> ranke-db config)
-//
-// Package stack composes several ranke.Universe layers into one, top (cache)
-// to bottom (authoritative). A write descends from the top: each eager layer
-// stores it, each lazy layer passes it through untouched. A read descends to
-// the first layer that has the item and, on the way back up, fills the layers
-// it passed (every eager layer — which should hold everything — and every lazy
-// layer that opts into read-fill). That fill doubles as repair: because Put
-// overwrites (storage.BlobStore), a layer whose bytes were missing or corrupt
-// is restored from the good copy below. Corruption is a storage failure the
-// stack routes around and heals; a graph-level failure (bad signature) is the
-// same on every layer and is left to verification.
 package stack
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"sync"
 
 	"github.com/flocko-motion/ranke-go"
 )
 
-type mode int
-
-const (
-	eager mode = iota // stored on write
-	lazy              // passed through on write, filled on read
+var (
+	errNoLayers        = errors.New("stack: at least one layer required")
+	errNilLayer        = errors.New("stack: layer has a nil Universe")
+	errNoAuthoritative = errors.New("stack: at least one authoritative layer required")
+	errInvalidTier     = errors.New("stack: layer reports a tier its capabilities do not allow")
 )
 
-// Layer is one tier of a Stack: a Universe plus how the stack populates it.
-// Construct with Eager (write-through) or Lazy (read-through cache); never use
-// the zero value.
-type Layer struct {
-	u        ranke.Universe
-	mode     mode
-	readFill bool   // lazy: fill on a read miss served from below
-	maxSize  uint64 // content blobs larger than this are not stored here (0 = no cap)
+type layer struct {
+	u    ranke.Universe
+	caps ranke.Capabilities
 }
 
-// Option tunes a Layer.
-type Option func(*Layer)
+func (l layer) tier() ranke.StorageTier { return l.caps.Tier }
 
-// MaxContentSize caps the size, in bytes, of a content blob this layer stores
-// (0 = no cap). Claim records are tiny and always stored; this lets a small
-// cache tier hold short content (names, notes) while skipping large blobs.
-func MaxContentSize(bytes uint64) Option { return func(l *Layer) { l.maxSize = bytes } }
-
-// NoReadFill makes a lazy layer read-only: it is consulted on reads but never
-// populated by them (e.g. a tier another instance manages). No effect on an
-// eager layer, which is always restored.
-func NoReadFill() Option { return func(l *Layer) { l.readFill = false } }
-
-// Eager returns a write-through layer: every write stores it here, so it holds
-// the whole archive — a durable/authoritative tier.
-func Eager(u ranke.Universe, opts ...Option) Layer {
-	l := Layer{u: u, mode: eager}
-	for _, o := range opts {
-		o(&l)
-	}
-	return l
+// synchronous: written and awaited on the write path (authoritative + eager).
+func (l layer) synchronous() bool {
+	return l.caps.Tier == ranke.StorageTierAuthoritative || l.caps.Tier == ranke.StorageTierEager
 }
-
-// Lazy returns a read-through cache layer: writes pass through untouched, and a
-// read miss served from below fills it on the way back up (unless NoReadFill).
-func Lazy(u ranke.Universe, opts ...Option) Layer {
-	l := Layer{u: u, mode: lazy, readFill: true}
-	for _, o := range opts {
-		o(&l)
-	}
-	return l
-}
-
-// wantsFill reports whether a read should populate this layer from below: every
-// eager layer (it should hold everything) and every read-filling lazy layer.
-func (l Layer) wantsFill() bool { return l.mode == eager || l.readFill }
-
-// fitsContent reports whether content of the given size belongs in this layer.
-func (l Layer) fitsContent(size int) bool { return l.maxSize == 0 || uint64(size) <= l.maxSize }
 
 type stack struct {
-	layers []Layer
+	layers []layer
 }
 
 // couldHoldContent reports whether a layer with caps could hold a content blob
@@ -97,62 +50,107 @@ func holdsSomeContent(c ranke.Capabilities) bool {
 	return c.ExternalContent || c.ContentCap > 0
 }
 
-// NewStack composes layers into one Universe, ordered top (first, cache) to
-// bottom (last, authoritative). At least one eager (write-through) layer is
-// required — otherwise a write would persist nowhere.
-func NewStack(layers ...Layer) (ranke.Universe, error) {
-	if len(layers) == 0 {
-		return nil, errors.New("stack: at least one layer required")
+// NewStack composes layers top (first) to bottom (last), each carrying its own
+// Capabilities.Tier. At least one authoritative layer is required.
+func NewStack(us ...ranke.Universe) (ranke.Universe, error) {
+	if len(us) == 0 {
+		return nil, errNoLayers
 	}
-	eagers := 0
-	for _, l := range layers {
-		if l.u == nil {
-			return nil, errors.New("stack: layer has a nil Universe")
+	layers := make([]layer, len(us))
+	auth := 0
+	for i, u := range us {
+		if u == nil {
+			return nil, errNilLayer
 		}
-		if l.mode == eager {
-			eagers++
+		c := u.Capabilities()
+		if !c.AllowsTier(c.Tier) {
+			return nil, fmt.Errorf("%w: layer %d tier %q", errInvalidTier, i, c.Tier)
 		}
+		if c.Tier == ranke.StorageTierAuthoritative {
+			auth++
+		}
+		layers[i] = layer{u: u, caps: c}
 	}
-	if eagers == 0 {
-		return nil, errors.New("stack: at least one eager (write-through) layer required")
+	if auth == 0 {
+		return nil, errNoAuthoritative
 	}
 	return &stack{layers: layers}, nil
 }
 
+// PutClaims routes by tier: authoritative+eager in parallel (only an
+// authoritative failure fails the call), background async, lazy not written.
 func (s *stack) PutClaims(ctx context.Context, cs []ranke.Claim) error {
-	for _, l := range s.layers {
-		if l.mode != eager {
-			continue
-		}
-		if err := l.u.PutClaims(ctx, cs); err != nil {
-			return err
-		}
-	}
-	return nil
+	s.background(ctx, func(ctx context.Context, l layer) { _ = l.u.PutClaims(ctx, cs) })
+	return s.writeSync(ctx, func(ctx context.Context, l layer) error { return l.u.PutClaims(ctx, cs) })
 }
 
+// PutContents is PutClaims for content, sending each blob only to layers whose
+// cap can hold it (authoritative holds any size, so nothing is ever dropped).
 func (s *stack) PutContents(ctx context.Context, blobs []ranke.ContentBlob) error {
-	for _, l := range s.layers {
-		if l.mode != eager {
-			continue
+	fit := func(l layer) []ranke.ContentBlob {
+		if l.caps.ExternalContent {
+			return blobs // holds any size — no filtering
 		}
-		sel := blobs
-		if l.maxSize > 0 {
-			sel = nil
-			for _, b := range blobs {
-				if l.fitsContent(len(b.Content)) {
-					sel = append(sel, b)
-				}
+		var sel []ranke.ContentBlob
+		for _, b := range blobs {
+			if couldHoldContent(l.caps, uint64(len(b.Content))) {
+				sel = append(sel, b)
 			}
 		}
+		return sel
+	}
+	s.background(ctx, func(ctx context.Context, l layer) {
+		if sel := fit(l); len(sel) > 0 {
+			_ = l.u.PutContents(ctx, sel)
+		}
+	})
+	return s.writeSync(ctx, func(ctx context.Context, l layer) error {
+		sel := fit(l)
 		if len(sel) == 0 {
+			return nil
+		}
+		return l.u.PutContents(ctx, sel)
+	})
+}
+
+// writeSync runs put over the authoritative+eager layers in parallel, returning
+// only the authoritative layers' joined error (eager failures are swallowed).
+func (s *stack) writeSync(ctx context.Context, put func(context.Context, layer) error) error {
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		authErr error
+	)
+	for i := range s.layers {
+		l := s.layers[i]
+		if !l.synchronous() {
 			continue
 		}
-		if err := l.u.PutContents(ctx, sel); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := put(ctx, l); err != nil && l.tier() == ranke.StorageTierAuthoritative {
+				mu.Lock()
+				authErr = errors.Join(authErr, err)
+				mu.Unlock()
+			}
+		}()
 	}
-	return nil
+	wg.Wait()
+	return authErr
+}
+
+// background fires put at each background-tier layer on a detached context, in a
+// goroutine the caller does not wait for (errors discarded, fills eventually).
+func (s *stack) background(ctx context.Context, put func(context.Context, layer)) {
+	for i := range s.layers {
+		l := s.layers[i]
+		if l.tier() != ranke.StorageTierBackground {
+			continue
+		}
+		bg := context.WithoutCancel(ctx)
+		go put(bg, l)
+	}
 }
 
 func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
@@ -209,7 +207,7 @@ func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]b
 		if len(pending) == 0 {
 			break
 		}
-		caps := s.layers[li].u.Capabilities()
+		caps := s.layers[li].caps
 		// Cap-aware descent: only ask this layer about refs it could hold given
 		// its content cap; larger blobs (and all refs, if it holds no content)
 		// stay pending for a lower layer — no wasted query.
@@ -296,7 +294,7 @@ func (s *stack) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, err
 		if len(pending) == 0 {
 			break
 		}
-		if !holdsSomeContent(s.layers[li].u.Capabilities()) {
+		if !holdsSomeContent(s.layers[li].caps) {
 			continue // no content store at all — skip (HasContents lacks sizes to cap-filter)
 		}
 		has, err := s.layers[li].u.HasContents(ctx, pickIds(hashes, pending))
@@ -318,7 +316,7 @@ func (s *stack) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool, err
 
 func (s *stack) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	for li := range s.layers {
-		if !couldHoldContent(s.layers[li].u.Capabilities(), size) {
+		if !couldHoldContent(s.layers[li].caps, size) {
 			continue // cap-aware: this layer can't hold a blob this large — skip
 		}
 		ok, err := ranke.HasContent(ctx, s.layers[li].u, hash)
@@ -350,8 +348,8 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 }
 
 // Query resolves an RQL read through the stack's own read path (GetClaims,
-// which falls through the layers) via the reference executor. A reverse step
-// is refused unless the stack advertises ReverseWalk.
+// which falls through the layers) via the reference executor; reverse steps
+// work via closure inversion (ReverseWalk advertises a native path, not ability).
 func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	return ranke.DefaultQuery(ctx, s, q, scope)
 }
@@ -367,7 +365,7 @@ func (s *stack) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, err
 		// Capability-aware descent: a layer that keeps no verbatim canonical
 		// bytes (a structure-only cache like neo4j) can never serve raw claims,
 		// so skip it rather than spending a round-trip to be told ErrNotFound.
-		if !s.layers[li].u.Capabilities().RawClaims {
+		if !s.layers[li].caps.RawClaims {
 			continue
 		}
 		raw, err := s.layers[li].u.GetClaimsRaw(ctx, ids)
@@ -387,7 +385,7 @@ func (s *stack) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, err
 // content — no fall-through or read-fill, one layer owns them.
 func (s *stack) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
 	for li := range s.layers {
-		if !s.layers[li].u.Capabilities().Tags {
+		if !s.layers[li].caps.Tags {
 			continue
 		}
 		return s.layers[li].u.GetClaimTags(ctx, claims)
@@ -400,7 +398,7 @@ func (s *stack) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[stri
 func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
 	found := false
 	for li := range s.layers {
-		if !s.layers[li].u.Capabilities().Tags {
+		if !s.layers[li].caps.Tags {
 			continue
 		}
 		found = true
@@ -414,29 +412,23 @@ func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, tags map[
 	return nil
 }
 
-// Capabilities derives the stack's from its layers, per capability:
-//   - Overwrite: every eager layer can (repair must reach the durable tier);
-//   - Delete: every layer can (else a deleted key lingers in some layer);
-//   - Enumerate: some eager layer can (an eager layer holds the whole keyset);
-//   - Persistent: some eager layer is (the durable tier survives);
-//   - GQL: some layer offers it (a query routes to that layer);
-//   - RawClaims: some layer keeps verbatim bytes (raw reads route to it);
-//   - ExternalContent: some layer holds unbounded content (the stack does too);
-//   - ContentCap: 0 if some layer is unbounded, else the largest layer cap.
+// Capabilities derives the stack's from its layers: write-through properties
+// (Overwrite/Enumerate) from the written tiers, Persistent from an authoritative
+// layer, the rest from any layer. Tier is authoritative — a stack has one.
 func (s *stack) Capabilities() ranke.Capabilities {
 	overwrite, del := true, true
-	var enumerate, persistent, gql, reverseWalk, rawClaims, externalContent bool
+	var enumerate, persistent, reverseWalk, rawClaims, externalContent, tags bool
 	var contentCap uint64
 	for _, l := range s.layers {
-		c := l.u.Capabilities()
+		c := l.caps
 		if !c.Delete {
 			del = false
 		}
-		if c.GQL {
-			gql = true
-		}
 		if c.ReverseWalk {
 			reverseWalk = true
+		}
+		if c.Tags {
+			tags = true
 		}
 		if c.RawClaims {
 			rawClaims = true
@@ -447,16 +439,16 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		if c.ContentCap > contentCap {
 			contentCap = c.ContentCap
 		}
-		if l.mode == eager {
+		if l.synchronous() {
 			if !c.Overwrite {
 				overwrite = false
 			}
 			if c.Enumerate {
 				enumerate = true
 			}
-			if c.Persistent {
-				persistent = true
-			}
+		}
+		if c.Tier == ranke.StorageTierAuthoritative && c.Persistent {
+			persistent = true
 		}
 	}
 	if externalContent {
@@ -467,12 +459,42 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		Delete:          del,
 		Enumerate:       enumerate,
 		Persistent:      persistent,
-		GQL:             gql,
 		ReverseWalk:     reverseWalk,
 		RawClaims:       rawClaims,
 		ExternalContent: externalContent,
 		ContentCap:      contentCap,
+		Tags:            tags,
+		Tier:            ranke.StorageTierAuthoritative,
 	}
+}
+
+// Sync routes: it tells the first eager layer from the top to sync itself from
+// the layers below it (which it passes as the source) — the stack only picks the
+// layer and the source; the layer does the copying. With no eager layer the
+// authoritative tier serves reads directly, so it is already synced.
+func (s *stack) Sync(ctx context.Context, _ ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	ei := -1
+	for i := range s.layers {
+		if s.layers[i].tier() == ranke.StorageTierEager {
+			ei = i
+			break
+		}
+	}
+	if ei < 0 || ei == len(s.layers)-1 {
+		return ranke.SyncedNow(id)
+	}
+	below := make([]ranke.Universe, 0, len(s.layers)-ei-1)
+	for _, l := range s.layers[ei+1:] {
+		below = append(below, l.u)
+	}
+	src, err := NewStack(below...)
+	if err != nil {
+		out := make(chan ranke.SyncResult, 1)
+		out <- ranke.SyncResult{Err: err}
+		close(out)
+		return out
+	}
+	return s.layers[ei].u.Sync(ctx, src, id)
 }
 
 // Close closes every layer (best-effort: all are attempted, errors joined).
@@ -486,27 +508,26 @@ func (s *stack) Close() error {
 	return errors.Join(errs...)
 }
 
-// fillClaims writes claims served from a lower layer into every fill-wanting
-// layer above it — restoring eager layers and populating read-fill caches.
-// Best-effort: a cache write failure must not fail the read.
+// fillClaims writes claims served from below into every layer above (best-effort
+// repair), except it never seeds a verbatim layer from a lossy projection.
 func (s *stack) fillClaims(ctx context.Context, servedAt int, cs []ranke.Claim) {
+	verbatimSource := s.layers[servedAt].caps.RawClaims
 	for i := 0; i < servedAt; i++ {
-		if s.layers[i].wantsFill() {
-			_ = s.layers[i].u.PutClaims(ctx, cs)
+		if s.layers[i].caps.RawClaims && !verbatimSource {
+			continue // fidelity guard: don't seed a verbatim layer from a projection
 		}
+		_ = s.layers[i].u.PutClaims(ctx, cs)
 	}
 }
 
-// fillContents is fillClaims for content, honouring each layer's size cap.
+// fillContents is fillClaims for content, honouring each layer's cap; content is
+// hash-verified, so there is no fidelity hazard (any layer fills from any other).
 func (s *stack) fillContents(ctx context.Context, servedAt int, refs []ranke.ContentRef, datas [][]byte) {
 	for i := 0; i < servedAt; i++ {
 		l := s.layers[i]
-		if !l.wantsFill() {
-			continue
-		}
 		var blobs []ranke.ContentBlob
 		for j, r := range refs {
-			if l.fitsContent(len(datas[j])) {
+			if couldHoldContent(l.caps, uint64(len(datas[j]))) {
 				blobs = append(blobs, ranke.ContentBlob{Hash: r.Hash, Content: datas[j]})
 			}
 		}

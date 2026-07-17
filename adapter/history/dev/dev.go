@@ -6,10 +6,17 @@ package dev
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+)
+
+var (
+	errNilID    = errors.New("adapter/history/dev: nil id")
+	errRevRange = errors.New("adapter/history/dev: revision out of range")
+	errRange    = errors.New("adapter/history/dev: range out of bounds")
 )
 
 // Clock is the deterministic time source each timeline entry is stamped with.
@@ -39,7 +46,7 @@ func New(clock Clock) *History {
 // the append time from the clock (which it advances by one tick).
 func (h *History) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: nil id")
+		return ranke.HistoryItem{}, errNilID
 	}
 	item := ranke.NewHistoryItem(id, revision, height, h.clock.Tick())
 	h.items = append(h.items, item)
@@ -57,7 +64,7 @@ func (h *History) Latest(_ context.Context) (ranke.HistoryItem, error) {
 // GetAtRevision returns kᵢ; an out-of-range revision is an error.
 func (h *History) GetAtRevision(_ context.Context, revision int) (ranke.HistoryItem, error) {
 	if revision < 0 || revision >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/dev: revision %d out of range [0,%d)", revision, len(h.items))
+		return ranke.HistoryItem{}, fmt.Errorf("%w: revision %d out of range [0,%d)", errRevRange, revision, len(h.items))
 	}
 	return h.items[revision], nil
 }
@@ -65,7 +72,7 @@ func (h *History) GetAtRevision(_ context.Context, revision int) (ranke.HistoryI
 // GetBulk returns the half-open revision range [fromRevision, toExcludingRevision).
 func (h *History) GetBulk(_ context.Context, fromRevision, toExcludingRevision int) ([]ranke.HistoryItem, error) {
 	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
-		return nil, fmt.Errorf("adapter/history/dev: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
+		return nil, fmt.Errorf("%w: range [%d,%d) out of bounds [0,%d)", errRange, fromRevision, toExcludingRevision, len(h.items))
 	}
 	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }

@@ -31,18 +31,25 @@ import (
 // "file:..." URI. For an in-memory store use a temp file or a shared-cache
 // URI ("file:mem?mode=memory&cache=shared"); a bare ":memory:" gives each
 // pooled connection its own database and will not behave as one store.
+var (
+	errEmptyDSN = errors.New("adapter/sqlite.New: empty dsn")
+	errNew      = errors.New("adapter/sqlite.New")
+	errIO       = errors.New("adapter/sqlite: io")
+)
+
+// New opens a sqlite-backed Universe at dsn, creating its schema if absent.
 func New(dsn string) (ranke.Universe, error) {
 	if dsn == "" {
-		return nil, errors.New("adapter/sqlite.New: empty dsn")
+		return nil, errEmptyDSN
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("adapter/sqlite.New: open %s: %w", dsn, err)
+		return nil, fmt.Errorf("%w: open %s: %w", errNew, dsn, err)
 	}
 	ctx := context.Background()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("adapter/sqlite.New: connect %s: %w", dsn, err)
+		return nil, fmt.Errorf("%w: connect %s: %w", errNew, dsn, err)
 	}
 	writable := probeWritable(ctx, db)
 	if writable {
@@ -51,7 +58,7 @@ func New(dsn string) (ranke.Universe, error) {
 			data BLOB NOT NULL
 		)`); err != nil {
 			_ = db.Close()
-			return nil, fmt.Errorf("adapter/sqlite.New: create schema: %w", err)
+			return nil, fmt.Errorf("%w: create schema: %w", errNew, err)
 		}
 	}
 	caps := ranke.Capabilities{
@@ -99,7 +106,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, ranke.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", key, err)
+		return nil, fmt.Errorf("%w: read %s: %w", errIO, key, err)
 	}
 	return data, nil
 }
@@ -109,7 +116,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 // is what repairs a corrupted row in place. Callers dedup via Has.
 func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	if _, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO blobs (id, data) VALUES (?, ?)`, key, data); err != nil {
-		return fmt.Errorf("write %s: %w", key, err)
+		return fmt.Errorf("%w: write %s: %w", errIO, key, err)
 	}
 	return nil
 }
@@ -121,7 +128,7 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("stat %s: %w", key, err)
+		return false, fmt.Errorf("%w: stat %s: %w", errIO, key, err)
 	}
 	return true, nil
 }

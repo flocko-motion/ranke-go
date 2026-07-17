@@ -49,7 +49,7 @@ const defaultContentCap = 4 << 10 // 4 KiB
 // Connection, auth, and (unless WithDatabase is given) the target database
 // live on the driver.
 func New(driver neo4jdriver.DriverWithContext, opts ...Option) ranke.Universe {
-	u := &neo4jUniverse{driver: driver, contentCap: defaultContentCap}
+	u := &neo4jUniverse{driver: driver, contentCap: defaultContentCap, tier: ranke.StorageTierEager}
 	for _, o := range opts {
 		o(u)
 	}
@@ -77,10 +77,20 @@ func WithDatabase(name string) Option {
 	return func(u *neo4jUniverse) { u.database = name }
 }
 
+// WithTier sets the write role the cache serves in a stack (Capabilities.Tier).
+// Default is eager — the write-through queryable layer, written synchronously
+// (best-effort) alongside the source of truth so reads and RQL hit an
+// up-to-date graph. neo4j holds a lossy projection (no verbatim CBOR), so it
+// can never be authoritative; a deployment may still choose background or lazy.
+func WithTier(t ranke.StorageTier) Option {
+	return func(u *neo4jUniverse) { u.tier = t }
+}
+
 type neo4jUniverse struct {
 	driver     neo4jdriver.DriverWithContext
 	database   string
 	contentCap int
+	tier       ranke.StorageTier
 }
 
 // Compile-time proof the adapter satisfies the full Universe contract.
@@ -454,16 +464,22 @@ func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, t
 }
 
 // Capabilities: a graph DB can overwrite, delete, and enumerate, is durable,
-// exposes a GQL (Cypher) query surface, and holds branch tags.
+// and holds branch tags.
 func (u *neo4jUniverse) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
 		Overwrite:  true,
 		Delete:     true,
 		Enumerate:  true,
 		Persistent: true,
-		GQL:        true,
 		Tags:       true,
+		Tier:       u.tier,
 	}
+}
+
+// Sync projects id's closure from src into the graph (via CopyClaims).
+// TODO: native stub-check to skip revisions already fully projected.
+func (u *neo4jUniverse) Sync(ctx context.Context, src ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	return ranke.DefaultSync(ctx, u, src, id)
 }
 
 // Close is a no-op: the caller owns the driver's lifecycle.

@@ -214,6 +214,10 @@ func (m *metered) CopyContents(ctx context.Context, src ranke.Universe, refs []r
 	return m.inner.CopyContents(ctx, src, refs, opts...)
 }
 
+func (m *metered) Sync(ctx context.Context, src ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	return m.inner.Sync(ctx, src, id)
+}
+
 func (m *metered) Capabilities() ranke.Capabilities { return m.inner.Capabilities() }
 func (m *metered) Close() error                     { return m.inner.Close() }
 
@@ -331,15 +335,28 @@ func (m *metered) report() string {
 	// Table header + rule, aligned over the right-aligned value cells.
 	header := fmt.Sprintf("\n  %-17s %7s %7s %9s %9s %9s %9s %9s %9s",
 		"operation", "n", "items", "avg", "p50", "p90", "p99", "min", "max")
-	b.printf("%s\n  %s", header, strings.Repeat("─", len(header)-3))
+	ruleWidth := len(header) - 3 // drop the leading "\n  "
+	b.printf("%s\n  %s", header, strings.Repeat("─", ruleWidth))
+	// section prints a blank line then a "label ────" divider spanning the table,
+	// separating the grand total, the per-chapter sequence, and the per-operation
+	// summary so the three readings don't run together.
+	section := func(label string) {
+		dashes := ruleWidth - len(label) - 1
+		if dashes < 0 {
+			dashes = 0
+		}
+		b.printf("\n\n  %s %s", label, strings.Repeat("─", dashes))
+	}
 	line("TOTAL", distOf(m.samples))
-	// Per phase (write, verify, access …): reads and writes separately, so the
-	// cost of each chapter's walk is visible on its own.
+	// By chapter, in sequence: reads and writes separately, so the cost of each
+	// chapter's walk is visible on its own.
+	section("by chapter (in sequence)")
 	for _, p := range phaseOrder {
 		line(p+"/WRITE", distOf(byPhaseKind[p+"/WRITE"]))
 		line(p+"/READ", distOf(byPhaseKind[p+"/READ"]))
 	}
-	// Per operation, across all phases.
+	// By operation, aggregated across all chapters.
+	section("by operation (totals)")
 	for _, op := range ops {
 		line(op, distOf(byOp[op]))
 	}

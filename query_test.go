@@ -159,13 +159,15 @@ func TestQueryScope(t *testing.T) {
 	require.False(t, got[root.ID().String()], "scoped out")
 }
 
-// TestQueryReverseRefused: a byte store cannot walk backward, so a uses step is
-// refused with errReverseWalkUnsupported rather than sweeping the closure.
-func TestQueryReverseRefused(t *testing.T) {
-	u, _, _, b := queryFixture(t)
-	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Dir: DirUses}}}}
-	_, err := u.Query(context.Background(), q, nil)
-	require.ErrorIs(t, err, errReverseWalkUnsupported)
+// TestQueryReverseSupported: a byte store serves a reverse step via closure
+// inversion (not a refusal) — DirConnections from the head reaches its whole
+// closure, both directions, confined to it.
+func TestQueryReverseSupported(t *testing.T) {
+	u, root, a, b := queryFixture(t)
+	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Dir: DirConnections}}}}
+	rs, err := u.Query(context.Background(), q, nil)
+	require.NoError(t, err, "reverse walk is served via closure inversion, not refused")
+	require.Equal(t, idsOf(a, b, root), idSet(drain(t, rs)))
 }
 
 // TestQueryNoRoot: a Universe query needs a claim root (branch resolution is

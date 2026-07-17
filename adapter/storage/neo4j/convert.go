@@ -5,6 +5,7 @@
 package neo4j
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,6 +13,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/flocko-motion/ranke-go"
+)
+
+var (
+	errBadCreatedAt = errors.New("adapter/neo4j: bad created_at")
+	errBadEdgeRec   = errors.New("adapter/neo4j: bad edge record")
 )
 
 // A claim is deconstructed into neo4j's native typed graph: the node is
@@ -111,7 +117,7 @@ func (u *neo4jUniverse) inlineText(eligible bool, size uint64, external bool, ge
 func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []any) (ranke.ClaimParts, error) {
 	createdAt, err := time.Parse(iso8601Nano, asString(props["created_at"]))
 	if err != nil {
-		return ranke.ClaimParts{}, fmt.Errorf("adapter/neo4j: claim %s: bad created_at: %w", id, err)
+		return ranke.ClaimParts{}, fmt.Errorf("%w: claim %s: %w", errBadCreatedAt, id, err)
 	}
 	p := ranke.ClaimParts{
 		ID:        id,
@@ -144,7 +150,7 @@ func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []a
 	for _, raw := range edgeRecs {
 		er, ok := raw.(map[string]any)
 		if !ok {
-			return ranke.ClaimParts{}, fmt.Errorf("adapter/neo4j: bad edge record %T", raw)
+			return ranke.ClaimParts{}, fmt.Errorf("%w: %T", errBadEdgeRec, raw)
 		}
 		eprops, _ := er["props"].(map[string]any)
 		ref, err := ranke.ParseId(asString(er["ref"]))

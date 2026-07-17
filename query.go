@@ -63,9 +63,9 @@ type PathStep struct {
 }
 
 // Direction is which way a step follows an edge. Provenance (outgoing, toward
-// references) is always available; Uses/Connections require a backend that can
-// walk edges backward (Capabilities.ReverseWalk) — the reference executor
-// refuses them rather than sweep the whole closure.
+// references) is the cheap default; Uses/Connections walk edges backward —
+// native on a Capabilities.ReverseWalk backend, and the reference executor
+// serves them by sweeping and inverting the closure (correct but O(closure)).
 type Direction string
 
 const (

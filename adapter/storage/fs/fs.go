@@ -23,15 +23,20 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
+var (
+	errEmptyDir = errors.New("adapter/fs.New: empty directory path")
+	errIO       = errors.New("adapter/fs: io")
+)
+
 // New returns a Universe backed by a single flat directory. Claims and
 // content blobs share the namespace, addressed by their id strings as
 // filenames.
 func New(dir string) (ranke.Universe, error) {
 	if dir == "" {
-		return nil, errors.New("adapter/fs.New: empty directory path")
+		return nil, errEmptyDir
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("adapter/fs.New: mkdir %s: %w", dir, err)
+		return nil, fmt.Errorf("%w: mkdir %s: %w", errIO, dir, err)
 	}
 	return storage.NewBlobUniverse(&store{dir: dir, caps: detectCaps(dir)}), nil
 }
@@ -67,7 +72,7 @@ func (s *store) Get(_ context.Context, key string) ([]byte, error) {
 		if os.IsNotExist(err) {
 			return nil, ranke.ErrNotFound
 		}
-		return nil, fmt.Errorf("read %s: %w", key, err)
+		return nil, fmt.Errorf("%w: read %s: %w", errIO, key, err)
 	}
 	return data, nil
 }
@@ -116,11 +121,11 @@ func (s *store) Capabilities() ranke.Capabilities {
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write tmp %s: %w", tmp, err)
+		return fmt.Errorf("%w: write tmp %s: %w", errIO, tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+		return fmt.Errorf("%w: rename %s -> %s: %w", errIO, tmp, path, err)
 	}
 	return nil
 }

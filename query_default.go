@@ -1,12 +1,7 @@
 // package: ranke / query
 // type:    logic
-// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a
-//
-//	simple, performance-ignorant, correct forward-closure walk with filter/order/limit/shape
-//
-// limits:  forward (provenance) only — it refuses uses/connections (needs Capabilities.ReverseWalk);
-//
-//	a graph-native backend overrides Universe.Query with a native lowering instead
+// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a correct forward-closure walk with filter/order/limit/shape
+// limits:  performance-ignorant; a graph-native backend overrides with a native lowering (-> adapter/storage/neo4j)
 package ranke
 
 import (
@@ -118,33 +113,95 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool, 
 		steps = []PathStep{{}} // all edges, provenance, unbounded → full closure
 	}
 
+	// A reverse (uses/connections) step needs incoming edges, which a byte store
+	// has no index for. Build one by materialising the closure from the root and
+	// inverting its edges — O(closure), the reference's honest cost. That closure
+	// IS the query's scope, so the reverse walk is inherently confined to it (it
+	// can never climb into a branch-table header or a sibling branch).
+	var incoming map[string][]incomingEdge
+	if stepsNeedReverse(steps) {
+		idxStart := reportStart(rc)
+		incoming, err = buildIncoming(ctx, u, root, rc)
+		if err != nil {
+			return nil, nil, err
+		}
+		rc.timed("native", "reverse-index", ReportInfo, idxStart, "", map[string]any{"targets": len(incoming)})
+	}
+
 	frontier := []Claim{root}
 	routes := map[string][]Claim{root.ID().String(): {root}}
 	var reached []Claim
 	for i, step := range steps {
-		if step.Dir != "" && step.Dir != DirProvenance {
-			// Backward traversal needs edges indexed both ways; the byte-store
-			// reference has only forward edges, so it refuses rather than sweep
-			// the entire closure. A ReverseWalk-capable backend answers natively.
-			rc.log("native", "step", ReportError, "reverse walk unsupported", map[string]any{"index": i, "dir": string(step.Dir)})
-			return nil, nil, withDetail(errReverseWalkUnsupported, string(step.Dir))
-		}
 		stepStart := reportStart(rc)
-		reached, err = queryWalkStep(ctx, u, frontier, step, routes, needPaths, rc)
+		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, needPaths, rc)
 		if err != nil {
 			return nil, nil, err
 		}
-		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "depth": step.Depth, "reached": len(reached)})
+		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Depth, "reached": len(reached)})
 		frontier = reached
 	}
 	return reached, routes, nil
 }
 
-// queryWalkStep expands the frontier along one PathStep: BFS following outgoing
-// edges whose type matches step.Edges, up to step.Depth hops (0 = unbounded),
+// stepsNeedReverse reports whether any step walks edges backward (uses or
+// connections), so the traversal must build a reverse index first.
+func stepsNeedReverse(steps []PathStep) bool {
+	for _, s := range steps {
+		if s.Dir == DirUses || s.Dir == DirConnections {
+			return true
+		}
+	}
+	return false
+}
+
+// incomingEdge is one reverse-adjacency entry: a claim that references the
+// target, and the type of the edge it did so with.
+type incomingEdge struct {
+	from     Claim
+	edgeType string
+}
+
+// buildIncoming materialises the forward closure from root and inverts its edges
+// into a target-id → referrers map — the reference's reverse index. Expensive (a
+// full closure sweep) but simple and correct; every referrer it records is
+// within the closure, so it doubles as the scope-membership set.
+func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollector) (map[string][]incomingEdge, error) {
+	incoming := map[string][]incomingEdge{}
+	seen := map[string]bool{root.ID().String(): true}
+	queue := []Claim{root}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		for _, e := range cur.Edges() {
+			ref := e.Reference()
+			k := ref.String()
+			incoming[k] = append(incoming[k], incomingEdge{from: cur, edgeType: e.Type()})
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			child, err := GetClaim(ctx, u, ref)
+			if err != nil {
+				return nil, wrapDetail(errQuery, "reverse-index "+k, err)
+			}
+			rc.log("native", "fetch", ReportTrace, k, nil)
+			queue = append(queue, child)
+		}
+	}
+	return incoming, nil
+}
+
+// queryWalkStep expands the frontier along one PathStep: BFS following edges
+// whose type matches step.Edges, up to step.Depth hops (0 = unbounded),
 // collecting every visited claim whose node type matches step.Nodes (the
 // starting frontier counts as hop 0, per the paper's *0..depth semantics).
-func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
+// Direction selects which edges: DirProvenance (default) follows outgoing edges
+// forward; DirUses follows incoming edges (from the reverse index); DirConnections
+// does both. Reverse steps require incoming to be built (queryTraverse).
+func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
 	type item struct {
 		c   Claim
 		hop int
@@ -167,6 +224,23 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 			out = append(out, c)
 		}
 	}
+	enqueue := func(child, parent Claim, hop int) {
+		k := child.ID().String()
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		if needPaths {
+			pr := routes[parent.ID().String()]
+			route := make([]Claim, len(pr), len(pr)+1)
+			copy(route, pr)
+			routes[k] = append(route, child)
+		}
+		queue = append(queue, item{child, hop})
+	}
+
+	forward := step.Dir == "" || step.Dir == DirProvenance || step.Dir == DirConnections
+	reverse := step.Dir == DirUses || step.Dir == DirConnections
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -178,28 +252,33 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		if step.Depth > 0 && cur.hop >= step.Depth {
 			continue
 		}
-		for _, e := range cur.c.Edges() {
-			if !matchTypeList(step.Edges, e.Type()) {
-				continue
+		if forward {
+			for _, e := range cur.c.Edges() {
+				if !matchTypeList(step.Edges, e.Type()) {
+					continue
+				}
+				ref := e.Reference()
+				if seen[ref.String()] {
+					continue
+				}
+				child, err := GetClaim(ctx, u, ref)
+				if err != nil {
+					return nil, wrapDetail(errQuery, "traverse "+ref.String(), err)
+				}
+				rc.log("native", "fetch", ReportTrace, ref.String(), nil)
+				enqueue(child, cur.c, cur.hop+1)
 			}
-			ref := e.Reference()
-			k := ref.String()
-			if seen[k] {
-				continue
+		}
+		if reverse {
+			// Incoming edges come from the reverse index, already within the
+			// scope closure — no fetch, and no way to leave the branch.
+			for _, ie := range incoming[cur.c.ID().String()] {
+				if !matchTypeList(step.Edges, ie.edgeType) {
+					continue
+				}
+				rc.log("native", "reverse", ReportTrace, ie.from.ID().String(), nil)
+				enqueue(ie.from, cur.c, cur.hop+1)
 			}
-			seen[k] = true
-			child, err := GetClaim(ctx, u, ref)
-			if err != nil {
-				return nil, wrapDetail(errQuery, "traverse "+k, err)
-			}
-			rc.log("native", "fetch", ReportTrace, k, nil)
-			if needPaths {
-				parent := routes[cur.c.ID().String()]
-				route := make([]Claim, len(parent), len(parent)+1)
-				copy(route, parent)
-				routes[k] = append(route, child)
-			}
-			queue = append(queue, item{child, cur.hop + 1})
 		}
 	}
 	return out, nil

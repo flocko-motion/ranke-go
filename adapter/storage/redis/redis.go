@@ -32,6 +32,8 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
+var errNilClient = errors.New("adapter/redis.New: nil client")
+
 // defaultConcurrency is how many keys the bulk Universe ops transfer in
 // parallel by default — redis is a network hop, so throughput comes from
 // pipelining requests over the per-request latency.
@@ -42,9 +44,9 @@ const defaultConcurrency = 16
 // not own it (Close is a no-op).
 func New(client *goredis.Client, opts ...Option) (ranke.Universe, error) {
 	if client == nil {
-		return nil, errors.New("adapter/redis.New: nil client")
+		return nil, errNilClient
 	}
-	cfg := config{concurrency: defaultConcurrency}
+	cfg := config{concurrency: defaultConcurrency, tier: ranke.StorageTierLazy}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -52,13 +54,14 @@ func New(client *goredis.Client, opts ...Option) (ranke.Universe, error) {
 		client: client,
 		ttl:    cfg.ttl,
 		prefix: cfg.prefix,
-	}, storage.WithConcurrency(cfg.concurrency)), nil
+	}, storage.WithConcurrency(cfg.concurrency), storage.WithTier(cfg.tier)), nil
 }
 
 type config struct {
 	ttl         time.Duration
 	prefix      string
 	concurrency int
+	tier        ranke.StorageTier
 }
 
 // Option configures a redis store.
@@ -73,6 +76,13 @@ func WithTTL(d time.Duration) Option { return func(c *config) { c.ttl = d } }
 // WithKeyPrefix namespaces every key (e.g. "ranke:"), so one redis instance
 // can host several archives or coexist with other data. Default "".
 func WithKeyPrefix(p string) Option { return func(c *config) { c.prefix = p } }
+
+// WithTier sets the write role redis serves in a stack (Capabilities.Tier).
+// Default is lazy — a read-through cache, populated on a read miss served from
+// below and never written on the write path. A deployment that wants redis
+// written through (e.g. eager) can say so; redis holds verbatim claims, so any
+// tier is allowed.
+func WithTier(t ranke.StorageTier) Option { return func(c *config) { c.tier = t } }
 
 // WithConcurrency sets how many keys the bulk operations
 // (GetClaims/PutClaims/HasClaims/GetContents) transfer in parallel. n<=1
@@ -125,14 +135,13 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 
 // Capabilities: redis can overwrite (SET), delete (DEL), and enumerate (SCAN).
 // Persistent is false — this is a cache tier, not authoritative storage, even
-// if the server happens to run with AOF/RDB. It offers no GQL query engine.
+// if the server happens to run with AOF/RDB.
 func (s *store) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
 		Overwrite:  true,
 		Delete:     true,
 		Enumerate:  true,
 		Persistent: false,
-		GQL:        false,
 	}
 }
 

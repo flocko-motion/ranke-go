@@ -153,7 +153,9 @@ func TestCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Tags: true} // mem: not persistent, but tag-capable (routed per shard)
+	// mem: not persistent, but raw+external and tag-capable (routed per shard);
+	// all-mem shards make the partition an authoritative source of truth.
+	want := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true, Tier: ranke.StorageTierAuthoritative}
 	if got := p.Capabilities(); got != want {
 		t.Fatalf("all-mem partition caps = %+v, want %+v", got, want)
 	}

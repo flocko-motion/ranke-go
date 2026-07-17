@@ -24,18 +24,29 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
+var (
+	errEmptyPath = errors.New("adapter/history/file.New: empty path")
+	errNew       = errors.New("adapter/history/file.New")
+	errNilID     = errors.New("adapter/history/file: nil id")
+	errRevRange  = errors.New("adapter/history/file: revision out of range")
+	errRange     = errors.New("adapter/history/file: range out of bounds")
+	errMalformed = errors.New("adapter/history/file: malformed")
+	errParse     = errors.New("adapter/history/file: parse")
+	errIO        = errors.New("adapter/history/file: io")
+)
+
 // New returns a file-backed History persisting the timeline at path,
 // loading any existing timeline into memory.
 func New(path string) (ranke.History, error) {
 	if path == "" {
-		return nil, errors.New("adapter/history/file.New: empty path")
+		return nil, errEmptyPath
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("adapter/history/file.New: mkdir: %w", err)
+		return nil, fmt.Errorf("%w: mkdir: %w", errNew, err)
 	}
 	h := &history{path: path}
 	if err := h.load(); err != nil {
-		return nil, fmt.Errorf("adapter/history/file.New: load: %w", err)
+		return nil, fmt.Errorf("%w: load: %w", errNew, err)
 	}
 	return h, nil
 }
@@ -48,7 +59,7 @@ type history struct {
 
 func (h *history) Append(_ context.Context, id ranke.Id, height int, revision int) (ranke.HistoryItem, error) {
 	if id == nil {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/file: nil id")
+		return ranke.HistoryItem{}, errNilID
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -74,7 +85,7 @@ func (h *history) GetAtRevision(_ context.Context, revision int) (ranke.HistoryI
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if revision < 0 || revision >= len(h.items) {
-		return ranke.HistoryItem{}, fmt.Errorf("adapter/history/file: revision %d out of range [0,%d)", revision, len(h.items))
+		return ranke.HistoryItem{}, fmt.Errorf("%w: revision %d out of range [0,%d)", errRevRange, revision, len(h.items))
 	}
 	return h.items[revision], nil
 }
@@ -84,7 +95,7 @@ func (h *history) GetBulk(_ context.Context, fromRevision, toExcludingRevision i
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if fromRevision < 0 || toExcludingRevision > len(h.items) || fromRevision > toExcludingRevision {
-		return nil, fmt.Errorf("adapter/history/file: range [%d,%d) out of bounds [0,%d)", fromRevision, toExcludingRevision, len(h.items))
+		return nil, fmt.Errorf("%w: range [%d,%d) out of bounds [0,%d)", errRange, fromRevision, toExcludingRevision, len(h.items))
 	}
 	return append([]ranke.HistoryItem(nil), h.items[fromRevision:toExcludingRevision]...), nil
 }
@@ -115,23 +126,23 @@ func (h *history) load() error {
 		}
 		idStr, rest, ok := strings.Cut(line, " ")
 		if !ok {
-			return fmt.Errorf("adapter/history/file: malformed line %d: %q", len(items), line)
+			return fmt.Errorf("%w: line %d: %q", errMalformed, len(items), line)
 		}
 		heightStr, tsStr, ok := strings.Cut(rest, " ")
 		if !ok {
-			return fmt.Errorf("adapter/history/file: malformed line %d: %q", len(items), line)
+			return fmt.Errorf("%w: line %d: %q", errMalformed, len(items), line)
 		}
 		id, err := ranke.ParseId(idStr)
 		if err != nil {
-			return fmt.Errorf("adapter/history/file: parse id on line %d: %w", len(items), err)
+			return fmt.Errorf("%w: id on line %d: %w", errParse, len(items), err)
 		}
 		height, err := strconv.Atoi(heightStr)
 		if err != nil {
-			return fmt.Errorf("adapter/history/file: parse height on line %d: %w", len(items), err)
+			return fmt.Errorf("%w: height on line %d: %w", errParse, len(items), err)
 		}
 		ts, err := time.Parse(time.RFC3339Nano, tsStr)
 		if err != nil {
-			return fmt.Errorf("adapter/history/file: parse time on line %d: %w", len(items), err)
+			return fmt.Errorf("%w: time on line %d: %w", errParse, len(items), err)
 		}
 		// Revision is the entry's position in the file (entries are written in
 		// order); height is stored per line.
@@ -154,11 +165,11 @@ func (h *history) persist(items []ranke.HistoryItem) error {
 	}
 	tmp := h.path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("write tmp %s: %w", tmp, err)
+		return fmt.Errorf("%w: write tmp %s: %w", errIO, tmp, err)
 	}
 	if err := os.Rename(tmp, h.path); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s -> %s: %w", tmp, h.path, err)
+		return fmt.Errorf("%w: rename %s -> %s: %w", errIO, tmp, h.path, err)
 	}
 	return nil
 }

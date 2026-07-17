@@ -227,8 +227,15 @@ func (u *memoryUniverse) CopyContents(ctx context.Context, src Universe, refs []
 
 // Capabilities: a map can overwrite, delete, and enumerate, and serves raw
 // claim CBOR and content blobs; it is not persistent (lost on process exit).
+// It holds the archive verbatim, so it defaults to the authoritative tier (an
+// in-memory source of truth — durable only for the process lifetime).
 func (u *memoryUniverse) Capabilities() Capabilities {
-	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true}
+	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true, Tier: StorageTierAuthoritative}
+}
+
+// Sync fills from src (a no-op when src is nil — memory already holds it).
+func (u *memoryUniverse) Sync(ctx context.Context, src Universe, id Id) <-chan SyncResult {
+	return DefaultSync(ctx, u, src, id)
 }
 
 func (u *memoryUniverse) Close() error { return nil }

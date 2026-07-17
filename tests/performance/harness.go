@@ -175,10 +175,11 @@ func openNeo4j() (ranke.Universe, func(), error) {
 	}, nil
 }
 
-// stacked composes openers top→bottom into one Universe: every layer but the
-// last is a Lazy cache, the last is the Eager durable/authoritative tier. If
-// any component is unavailable (ErrUnavailable) the whole stack is, and any
-// already-opened components are cleaned up.
+// stacked composes openers top→bottom into one Universe. Each adapter already
+// carries its own write tier (Capabilities.Tier) — neo4j eager, redis lazy,
+// mem/s3 authoritative — so the stack routes by what the layers report; there
+// is nothing to wrap here. If any component is unavailable (ErrUnavailable) the
+// whole stack is, and any already-opened components are cleaned up.
 func stacked(openers ...func() (ranke.Universe, func(), error)) func() (ranke.Universe, func(), error) {
 	return func() (ranke.Universe, func(), error) {
 		var cleanups []func()
@@ -187,19 +188,15 @@ func stacked(openers ...func() (ranke.Universe, func(), error)) func() (ranke.Un
 				cleanups[i]()
 			}
 		}
-		layers := make([]stack.Layer, 0, len(openers))
-		for i, open := range openers {
+		layers := make([]ranke.Universe, 0, len(openers))
+		for _, open := range openers {
 			u, cl, err := open()
 			if err != nil {
 				cleanupAll()
 				return nil, nil, err
 			}
 			cleanups = append(cleanups, cl)
-			if i == len(openers)-1 {
-				layers = append(layers, stack.Eager(u)) // durable authoritative tier
-			} else {
-				layers = append(layers, stack.Lazy(u)) // cache tier
-			}
+			layers = append(layers, u)
 		}
 		st, err := stack.NewStack(layers...)
 		if err != nil {
@@ -267,7 +264,7 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 		return fmt.Errorf("graph overview: %w", err)
 	}
 	printOverview(w, spec, refM, ov)
-	refStats, err := runQuerySet(ctx, refU, refM, 1)
+	refStats, err := runQuerySet(ctx, refU, refM, 1, refU.Capabilities().Tags)
 	if err != nil {
 		return fmt.Errorf("mem reference queries: %w", err)
 	}
@@ -307,6 +304,14 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	u := newMetered(u0)
 	defer func() { _ = u.Close() }()
 
+	// Tags (branch membership) are a mutable per-claim overlay only some backends
+	// hold. A bare byte store (fs, sqlite, s3, redis) holds none — normal — so it
+	// skips the tag chapter and the branch-scoped chapters (branch access, the
+	// branch queries), running the chapters it can: write, verify, universe access
+	// and the $universe query. In production such a store sits under a tag-capable
+	// layer (a stack), which is where the branch chapters are measured.
+	taggable := u0.Capabilities().Tags
+
 	// Banner up front, so a slow backend announces what it is working on before
 	// the work starts.
 	rule := strings.Repeat("═", 88)
@@ -342,13 +347,17 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	// and each branch table with its revision (_br) — the overlay branch-scoped
 	// reads and the browser's tag view rely on. The first operation measured on
 	// the freshly-written archive; a real deployment runs it after a contribution.
-	progress("tag")
-	u.setPhase("1-tag")
-	ctag := time.Now()
-	if _, err := ranke.TagArchive(ctx, arc); err != nil {
-		return 0, fmt.Errorf("%s: tag: %w", name, err)
+	// Skipped on a backend that holds no tags (see taggable above).
+	var tagDur time.Duration
+	if taggable {
+		progress("tag")
+		u.setPhase("1-tag")
+		ctag := time.Now()
+		if _, err := ranke.TagArchive(ctx, arc); err != nil {
+			return 0, fmt.Errorf("%s: tag: %w", name, err)
+		}
+		tagDur = time.Since(ctag)
 	}
-	tagDur := time.Since(ctag)
 
 	// Chapter 2 — verify.
 	progress("verify")
@@ -368,26 +377,36 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 
 	// Chapter 3 — random access: branch (in-closure) vs universe (direct). Sample
-	// the ids from the "main" branch's own closure — with several branches a
-	// manifest claim may live on another branch, so a branch read of it would
-	// (correctly) miss.
-	branch, err := arc.GetBranch(ctx, "main")
-	if err != nil {
-		return 0, fmt.Errorf("%s: get branch: %w", name, err)
+	// the ids from the "main" branch's own closure when the backend is taggable
+	// (with several branches a manifest claim may live on another branch, so a
+	// branch read of it would correctly miss); otherwise sample from the universe
+	// head's closure, since only the universe (direct) read runs. Chapter 3a
+	// (branch access) is skipped on a non-taggable backend.
+	accessRoot := m.Head
+	var branch ranke.Branch
+	if taggable {
+		branch, err = arc.GetBranch(ctx, "main")
+		if err != nil {
+			return 0, fmt.Errorf("%s: get branch: %w", name, err)
+		}
+		accessRoot = branch.Head()
 	}
-	ids, err := accessIDs(ctx, u, branch.Head(), cfg.Access)
+	ids, err := accessIDs(ctx, u, accessRoot, cfg.Access)
 	if err != nil {
 		return 0, fmt.Errorf("%s: access ids: %w", name, err)
 	}
-	progress("access:branch")
-	u.setPhase("3a-branch")
-	c3a := time.Now()
-	for _, id := range ids {
-		if _, err := branch.GetClaim(ctx, id); err != nil {
-			return 0, fmt.Errorf("%s: branch access: %w", name, err)
+	var branchDur time.Duration
+	if taggable {
+		progress("access:branch")
+		u.setPhase("3a-branch")
+		c3a := time.Now()
+		for _, id := range ids {
+			if _, err := branch.GetClaim(ctx, id); err != nil {
+				return 0, fmt.Errorf("%s: branch access: %w", name, err)
+			}
 		}
+		branchDur = time.Since(c3a)
 	}
-	branchDur := time.Since(c3a)
 
 	progress("access:universe")
 	u.setPhase("3b-universe")
@@ -403,7 +422,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	// so it shows as a table row) and its result set hashed for the cross-backend
 	// determinism check against the mem reference.
 	progress("queries")
-	qstats, err := runQuerySet(ctx, u, m, cfg.QueryReps)
+	qstats, err := runQuerySet(ctx, u, m, cfg.QueryReps, taggable)
 	if err != nil {
 		return 0, fmt.Errorf("%s: query: %w", name, err)
 	}
@@ -416,12 +435,20 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	if showProgress {
 		fmt.Fprint(w, "\r\033[K") // clear the progress line; results replace it
 	}
+	// ms renders a duration; na shows "n/a" for a chapter this backend can't run
+	// (a byte store holds no tags — so no tag or branch-scoped chapter).
 	ms := func(d time.Duration) string { return d.Round(time.Millisecond).String() }
+	na := func(d time.Duration) string {
+		if !taggable {
+			return "n/a"
+		}
+		return ms(d)
+	}
 	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, run.Verified(), len(ids))
 	fmt.Fprintf(w, "  write            %-9s (%dw %dr)\n", ms(writeDur), w1, r1)
-	fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", ms(tagDur), w1t, r1t)
+	fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", na(tagDur), w1t, r1t)
 	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
-	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r3a)
+	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", na(branchDur), r3a)
 	fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r3b)
 
 	// Determinism: each query's ordered result set must hash-match the mem
