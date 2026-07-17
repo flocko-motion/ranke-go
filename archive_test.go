@@ -218,6 +218,30 @@ func TestArchiveBranchReads(t *testing.T) {
 	require.Equal(t, "main", all[0].Name())
 }
 
+// TestArchiveQueryResolvesBranch: Archive.Query resolves Select.Branch to its
+// head, defaults Claim, and confines to that closure.
+func TestArchiveQueryResolvesBranch(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	em := srcClaim(t, root, "seed")
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
+	putClaims(t, u, root, em, bth)
+
+	arc, err := NewArchive(ctx, u, bth.ID())
+	require.NoError(t, err)
+
+	// "main" → head em (Claim defaulted); closure is {em, root}.
+	rs, err := arc.Query(ctx, Query{Select: Select{Branch: "main"}})
+	require.NoError(t, err)
+	require.Equal(t, idsOf(em, root), idSet(drain(t, rs)))
+
+	// $archive → head bth; closure adds the branch table itself.
+	rs, err = arc.Query(ctx, Query{Select: Select{Branch: BranchArchive}})
+	require.NoError(t, err)
+	require.Equal(t, idsOf(bth, em, root), idSet(drain(t, rs)))
+}
+
 // TestArchiveBranchDiffChain: a branch table that is a contribution/diff
 // over a predecessor inherits the predecessor's branches and adds its own —
 // the materialisation the Archive performs newest-over-oldest.
