@@ -40,7 +40,7 @@ type graphOverview struct {
 // through the universe-scoped closure query, the same traversal verification
 // uses, so the claim total matches the matrix's verified count.
 func computeOverview(ctx context.Context, u ranke.Universe, m *generator.Manifest) (*graphOverview, error) {
-	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.Head}}, nil)
+	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.Head}}, ranke.Scope{Branch: ranke.BranchUniverse})
 	if err != nil {
 		return nil, err
 	}

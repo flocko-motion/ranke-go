@@ -49,7 +49,7 @@ func idSet(rs []QueryResult) map[string]bool {
 // root — here b reaches a (derivation) and root (contributor), and a reaches root.
 func TestQueryFullClosure(t *testing.T) {
 	u, root, a, b := queryFixture(t)
-	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, nil)
+	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{
@@ -66,7 +66,7 @@ func TestQueryPathTypedDepth(t *testing.T) {
 		Claim:  b.ID(),
 		Path:   []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}},
 	}}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{a.ID().String(): true}, got)
@@ -79,7 +79,7 @@ func TestQueryWhereType(t *testing.T) {
 		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 	}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{a.ID().String(): true}, got)
@@ -93,7 +93,7 @@ func TestQueryWhereHeight(t *testing.T) {
 		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
 		Where:  &Where{Field: "height", Test: &Comparison{Ge: 1}},
 	}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{a.ID().String(): true, b.ID().String(): true}, got)
@@ -108,7 +108,7 @@ func TestQueryOrderLimit(t *testing.T) {
 		Order:  &Order{Field: "height", Desc: true},
 		Limit:  Limit{Results: 1},
 	}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
@@ -124,7 +124,7 @@ func TestQueryOutputContent(t *testing.T) {
 		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
 		Output: Output{Content: 4, Overflow: OverflowCutoff},
 	}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
@@ -138,7 +138,7 @@ func TestQueryOutputPath(t *testing.T) {
 		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
 		Output: Output{Detail: DetailPath},
 	}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
@@ -147,25 +147,13 @@ func TestQueryOutputPath(t *testing.T) {
 	require.True(t, got[0].Path[1].ID().Equal(a.ID()))
 }
 
-// TestQueryScope: an injected scope predicate filters results — mechanism
-// applying what policy would decide.
-func TestQueryScope(t *testing.T) {
-	u, root, a, b := queryFixture(t)
-	scope := func(c Claim) bool { return !c.ID().Equal(root.ID()) }
-	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, scope)
-	require.NoError(t, err)
-	got := idSet(drain(t, rs))
-	require.Equal(t, map[string]bool{a.ID().String(): true, b.ID().String(): true}, got)
-	require.False(t, got[root.ID().String()], "scoped out")
-}
-
 // TestQueryReverseSupported: a byte store serves a reverse step via closure
 // inversion (not a refusal) — DirConnections from the head reaches its whole
 // closure, both directions, confined to it.
 func TestQueryReverseSupported(t *testing.T) {
 	u, root, a, b := queryFixture(t)
 	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Dir: DirConnections}}}}
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err, "reverse walk is served via closure inversion, not refused")
 	require.Equal(t, idsOf(a, b, root), idSet(drain(t, rs)))
 }
@@ -174,7 +162,7 @@ func TestQueryReverseSupported(t *testing.T) {
 // upstream).
 func TestQueryNoRoot(t *testing.T) {
 	u := NewMemoryUniverse()
-	_, err := u.Query(context.Background(), Query{Select: Select{Branch: "main"}}, nil)
+	_, err := u.Query(context.Background(), Query{Select: Select{Branch: "main"}}, Scope{})
 	require.ErrorIs(t, err, errQueryNoRoot)
 }
 
@@ -184,7 +172,7 @@ func TestQueryReport(t *testing.T) {
 	rs, err := u.Query(context.Background(), Query{
 		Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
 		Execution: Execution{Report: ReportInfo},
-	}, nil)
+	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
 	rep := rs.Report()

@@ -178,9 +178,10 @@ type Universe interface {
 	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
 
 	// Query answers a declarative RQL read (the paper's §Filtered Reads) — the
-	// primary read endpoint. scope is an injected visibility predicate (nil =
-	// unrestricted): mechanism applies it, policy supplies it. A byte store
-	// delegates to DefaultQuery (the reference closure walk, which serves
+	// primary read endpoint. scope is the resolved branch context (see Scope):
+	// the Archive resolves q.Select.Branch into it and passes it here, so the
+	// Universe executes with the head/height/revision already known. A byte
+	// store delegates to DefaultQuery (the reference closure walk, which serves
 	// uses/connections by inverting the closure — correct but O(closure)); a
 	// graph-native backend overrides with a native lowering (e.g. Cypher). A
 	// query's meaning is unchanged by which layer answers it.

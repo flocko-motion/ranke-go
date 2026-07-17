@@ -143,11 +143,15 @@ type Execution struct {
 	Report ReportLevel
 }
 
-// Scope is an injected visibility predicate applied to every candidate claim:
-// mechanism (this library) applies it, policy (the server layer) supplies it,
-// so the ADT enforces what the server decides without knowing about users or
-// grants. A nil Scope admits everything.
-type Scope func(Claim) bool
+// Scope is the branch context a query runs in — the Archive's resolution of
+// q.Select.Branch. Head confines to closure(Head) (nil = unconfined); the rest
+// lets a native backend prune by tag/height (a byte store uses only Head).
+type Scope struct {
+	Head     Id     // closure anchor; nil = unconfined ($universe)
+	Branch   string // resolved branch name — a native prune key
+	Height   uint64 // branch-head height
+	Revision int    // archive spine revision (_br)
+}
 
 // ResultStream streams query results, one at a time, in the query's order.
 // After Next returns false, check Err; Report is non-nil only when

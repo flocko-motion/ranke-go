@@ -8,6 +8,7 @@ import (
 	"context"
 	"io"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -30,6 +31,9 @@ type Archive interface {
 	HasBranch(ctx context.Context, name string) (bool, error)
 	GetBranch(ctx context.Context, name string) (Branch, error)
 	GetBranches(ctx context.Context) ([]Branch, error)
+
+	// Query answers an RQL read: resolve q.Select.Branch to a Scope, delegate to 𝒰.
+	Query(ctx context.Context, q Query) (ResultStream, error)
 
 	Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error)
 }
@@ -101,6 +105,52 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 		return nil, err
 	}
 	return c.GetContent(ctx, a.u)
+}
+
+// Query resolves the branch scope (its only job) and delegates to 𝒰.
+func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
+	scope, err := a.resolveScope(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	if q.Select.Claim == nil {
+		q.Select.Claim = scope.Head // default to the scope head ($universe has none → errQueryNoRoot)
+	}
+	return a.u.Query(ctx, q, scope)
+}
+
+// resolveScope maps Branch to its Scope: a name via its head, $archive via the
+// table head, $universe unconfined (Head nil — caller must pin Select.Claim).
+func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
+	switch q.Select.Branch {
+	case "":
+		return Scope{}, errQueryNoScope
+	case BranchUniverse:
+		return Scope{Branch: BranchUniverse}, nil
+	case BranchArchive:
+		return Scope{Head: a.bth.ID(), Branch: BranchArchive, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}, nil
+	default:
+		br, err := a.GetBranch(ctx, q.Select.Branch)
+		if err != nil {
+			return Scope{}, err
+		}
+		head := br.Head()
+		hc, err := GetClaim(ctx, a.u, head)
+		if err != nil {
+			return Scope{}, wrapDetail(errQuery, "branch head "+head.String(), err)
+		}
+		return Scope{Head: head, Branch: q.Select.Branch, Height: hc.Node().Height(), Revision: revisionOf(a.bth)}, nil
+	}
+}
+
+// revisionOf reads the spine revision
+func revisionOf(c Claim) int {
+	if v := c.Tag(SpineRevKey); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // --- Branches ---

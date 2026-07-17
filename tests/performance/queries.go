@@ -111,7 +111,13 @@ func queryRoot(ctx context.Context, u ranke.Universe, m *generator.Manifest) (ra
 // backend whose engine reorders or drops results diverges from the reference.
 func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string, results int, dur time.Duration, err error) {
 	start := time.Now()
-	rs, err := u.Query(ctx, q, nil)
+	// Resolve the scope the way an Archive would: a branch query is confined to
+	// its head's closure (root == branch head here); $universe is unconfined.
+	scope := ranke.Scope{Branch: q.Select.Branch}
+	if q.Select.Branch != ranke.BranchUniverse {
+		scope.Head = q.Select.Claim
+	}
+	rs, err := u.Query(ctx, q, scope)
 	if err != nil {
 		return "", 0, 0, err
 	}

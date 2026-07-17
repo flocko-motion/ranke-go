@@ -474,7 +474,7 @@ func accessIDs(ctx context.Context, u ranke.Universe, root ranke.Id, n int) ([]r
 	if n <= 0 || root == nil {
 		return nil, nil
 	}
-	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: root}}, nil)
+	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: root}}, ranke.Scope{Branch: ranke.BranchUniverse})
 	if err != nil {
 		return nil, err
 	}

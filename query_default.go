@@ -27,11 +27,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	if q.Select.Branch == "" {
 		return nil, errQueryNoScope // scope is mandatory — use BranchUniverse for unconfined reads.
 	}
-	// The reference executor has no archive context, so it cannot default Claim
-	// to a scope's head; the archive layer resolves that upstream and passes the
-	// root here. It then walks from Claim regardless of scope — a Tags-capable
-	// backend uses Branch to prune (e.g. neo4j via branch tags); this walk is the
-	// meaning that lowering must reproduce.
+	// Claim is the required walk root (the Archive resolves Branch → head into it).
 	if q.Select.Claim == nil {
 		return nil, errQueryNoRoot
 	}
@@ -44,18 +40,15 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	}
 
 	needPaths := q.Output.Detail == DetailPath
-	reached, routes, err := queryTraverse(ctx, u, q.Select, needPaths, rc)
+	reached, routes, err := queryTraverse(ctx, u, q.Select, scope.Head, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter: injected visibility scope, then the Where tree.
+	// Filter by the Where tree (scope confinement happened during the walk).
 	filterStart := reportStart(rc)
 	var filtered []Claim
 	for _, c := range reached {
-		if scope != nil && !scope(c) {
-			continue
-		}
 		if !evalWhere(q.Where, c) {
 			continue
 		}
@@ -100,7 +93,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 // and returns the reached claim set (deduped) plus, when needPaths is set, the
 // root→claim route for each. An empty Path is one implicit unbounded
 // provenance step — the full closure.
-func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
+func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
 	rootStart := reportStart(rc)
 	root, err := GetClaim(ctx, u, sel.Claim)
 	if err != nil {
@@ -113,15 +106,19 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, needPaths bool, 
 		steps = []PathStep{{}} // all edges, provenance, unbounded → full closure
 	}
 
-	// A reverse (uses/connections) step needs incoming edges, which a byte store
-	// has no index for. Build one by materialising the closure from the root and
-	// inverting its edges — O(closure), the reference's honest cost. That closure
-	// IS the query's scope, so the reverse walk is inherently confined to it (it
-	// can never climb into a branch-table header or a sibling branch).
+	// A reverse step needs incoming edges: invert the scope closure (from head,
+	// or the walk root when unconfined). Spanning only closure(head) confines it.
 	var incoming map[string][]incomingEdge
 	if stepsNeedReverse(steps) {
+		anchor := root
+		if head != nil && !head.Equal(sel.Claim) {
+			anchor, err = GetClaim(ctx, u, head)
+			if err != nil {
+				return nil, nil, wrapDetail(errQuery, "scope head "+head.String(), err)
+			}
+		}
 		idxStart := reportStart(rc)
-		incoming, err = buildIncoming(ctx, u, root, rc)
+		incoming, err = buildIncoming(ctx, u, anchor, rc)
 		if err != nil {
 			return nil, nil, err
 		}

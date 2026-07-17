@@ -48,10 +48,20 @@ func queryOpsFixture(t *testing.T) (Universe, map[string]Claim) {
 	return u, all
 }
 
-// queryIDs runs q (no scope) and returns the reached id set.
+// testScope resolves q's scope the way an Archive would (test helper): a branch
+// query confines to its root's closure, $universe is unconfined.
+func testScope(q Query) Scope {
+	s := Scope{Branch: q.Select.Branch}
+	if q.Select.Branch != BranchUniverse {
+		s.Head = q.Select.Claim
+	}
+	return s
+}
+
+// queryIDs runs q and returns the reached id set.
 func queryIDs(t *testing.T, u Universe, q Query) map[string]bool {
 	t.Helper()
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	return idSet(drain(t, rs))
 }
@@ -228,14 +238,14 @@ func TestQueryClosureGapIsError(t *testing.T) {
 	ent := entityClaim(t, root, "person", "Alice", em)
 	putClaims(t, u, root, ent) // em deliberately NOT stored — a gap under ent
 
-	_, err := u.Query(ctx, Query{Select: Select{Branch: BranchUniverse, Claim: ent.ID()}}, nil)
+	_, err := u.Query(ctx, Query{Select: Select{Branch: BranchUniverse, Claim: ent.ID()}}, Scope{Branch: BranchUniverse})
 	require.Error(t, err, "a missing referenced claim aborts the closure walk")
 }
 
 // mustQuery runs q (no scope) and fails on error.
 func mustQuery(t *testing.T, u Universe, q Query) ResultStream {
 	t.Helper()
-	rs, err := u.Query(context.Background(), q, nil)
+	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
 	return rs
 }
