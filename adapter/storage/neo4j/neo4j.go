@@ -2,32 +2,6 @@
 // type:    adapter
 // job:     a graph-native CACHE Universe on neo4j — stores claim structure (nodes, edges) so closure/membership run as native Cypher instead of edge walks
 // limits:  pure cache — no canonical CBOR, no external content, inline content only up to a cap (default 4 KiB); stack over a durable Universe (-> adapter/s3, adapter/fs) that holds the bytes and serves content misses
-//
-// Package neo4j is the first pure-caching ranke Universe. It deconstructs each
-// claim into neo4j's native typed graph — a node labelled with the claim's type
-// (e.g. `source/email`) and its edges as relationships typed by the edge type
-// (e.g. `derivation/source`) — so closure and membership run as native Cypher,
-// and the graph is legible in the neo4j Browser. (Requires Neo4j ≥ 5.26 for the
-// dynamic label/type projection.)
-//
-// It deliberately does NOT store the canonical CBOR, external content, or
-// inline content beyond WithContentCap (default 4 KiB). Inline content of a
-// text encoding rides along as a legible `content` property on the node (or
-// relationship); binary, over-cap, and external content are left to the durable
-// Universe this cache is stacked over — nothing is stored outside a claim's own
-// node. A claim's id depends only on content_hash + content_size — never the
-// content bytes — so claims reconstruct id-faithfully via ranke.AssembleClaim,
-// with content this cache lacks reconstructing as external.
-//
-// New takes an already-configured neo4j driver so the adapter stays free of
-// connection/credential concerns: production wires a real driver, tests point
-// one at a container.
-//
-// Each claim's committed height (§4.1) is stored as a node property — an
-// engrained property like content_hash — and served natively by
-// GetClaimHeights, the field that later unlocks cheap branch-scoped closures
-// (a membership cache keyed by height). Branch-membership metadata itself is
-// the next step; today closure is a variable-length path over :REFERENCES.
 package neo4j
 
 import (

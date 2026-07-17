@@ -347,11 +347,9 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 	return ranke.DefaultGetClaimHeights(ctx, s, ids)
 }
 
-// Query resolves an RQL read through the stack's own read path (GetClaims,
-// which falls through the layers) via the reference executor; reverse steps
-// work via closure inversion (ReverseWalk advertises a native path, not ability).
+// Query hands the read to the top layer
 func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	return ranke.DefaultQuery(ctx, s, q, scope)
+	return s.layers[0].u.Query(ctx, q, scope)
 }
 
 // GetClaimsRaw returns the stored CBOR, tried layer by layer top-down: the
