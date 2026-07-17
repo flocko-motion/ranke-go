@@ -112,10 +112,17 @@ func queryRoot(ctx context.Context, u ranke.Universe, m *generator.Manifest) (ra
 func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string, results int, dur time.Duration, err error) {
 	start := time.Now()
 	// Resolve the scope the way an Archive would: a branch query is confined to
-	// its head's closure (root == branch head here); $universe is unconfined.
+	// its head's closure (root == branch head here); $universe is unconfined. Height
+	// completes it — a native backend confines by _b_<branch> <= Height, so it must
+	// be the branch head's height (the reference confines by Head and ignores it).
 	scope := ranke.Scope{Branch: q.Select.Branch}
 	if q.Select.Branch != ranke.BranchUniverse {
 		scope.Head = q.Select.Claim
+		hc, err := u.GetClaims(ctx, []ranke.Id{scope.Head})
+		if err != nil {
+			return "", 0, 0, err
+		}
+		scope.Height = hc[0].Node().Height()
 	}
 	rs, err := u.Query(ctx, q, scope)
 	if err != nil {
