@@ -23,8 +23,8 @@ import (
 func printQueryList(w io.Writer, stats []queryStat) {
 	rule := strings.Repeat("═", 88)
 	fmt.Fprintf(w, "\n%s\n  chapter 4 — queries (same for every backend; timings appear as 4.N table rows)\n%s\n", rule, rule)
-	for i, s := range stats {
-		fmt.Fprintf(w, "  4.%-2d %-24s %-46s %d results\n", i+1, s.name, s.rql, s.results)
+	for _, s := range stats {
+		fmt.Fprintf(w, "  %-4s %-24s %-46s %d results\n", s.id, s.name, s.rql, s.results)
 	}
 	fmt.Fprintf(w, "%s\n", rule)
 }
@@ -109,20 +109,28 @@ func queryRoot(ctx context.Context, u ranke.Universe, m *generator.Manifest) (ra
 // order-sensitive hash of the reached ids, the result count, and how long the
 // query-plus-drain took. The hash commits to identity in emitted order, so a
 // backend whose engine reorders or drops results diverges from the reference.
-func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string, results int, dur time.Duration, err error) {
-	start := time.Now()
-	// Resolve the scope the way an Archive would: a branch query is confined to
-	// its head's closure (root == branch head here); $universe is unconfined. Height
-	// completes it — a native backend confines by _b_<branch> <= Height, so it must
-	// be the branch head's height (the reference confines by Head and ignores it).
+// queryScope resolves the scope an Archive would apply: a branch query is
+// confined to its head's closure (root == branch head), $universe is unconfined.
+// Height completes it — a native backend confines by _b_<branch> <= Height, so
+// it must be the branch head's height (the reference confines by Head, ignores it).
+func queryScope(ctx context.Context, u ranke.Universe, q ranke.Query) (ranke.Scope, error) {
 	scope := ranke.Scope{Branch: q.Select.Branch}
 	if q.Select.Branch != ranke.BranchUniverse {
 		scope.Head = q.Select.Claim
 		hc, err := u.GetClaims(ctx, []ranke.Id{scope.Head})
 		if err != nil {
-			return "", 0, 0, err
+			return ranke.Scope{}, err
 		}
 		scope.Height = hc[0].Node().Height()
+	}
+	return scope, nil
+}
+
+func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string, results int, dur time.Duration, err error) {
+	start := time.Now()
+	scope, err := queryScope(ctx, u, q)
+	if err != nil {
+		return "", 0, 0, err
 	}
 	rs, err := u.Query(ctx, q, scope)
 	if err != nil {
@@ -148,6 +156,7 @@ func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string
 // queryStat is one named query's outcome on a backend: latency over the reps
 // and the result-set hash (compared to the mem reference for determinism).
 type queryStat struct {
+	id            string // stable phase id ("4.1", "4.2", …) — the table-row label
 	name          string
 	rql           string // one-line RQL rendering (shown under --rql)
 	min, avg, max time.Duration
@@ -240,12 +249,13 @@ func describeCmp(c *ranke.Comparison) string {
 	return "?"
 }
 
-// runQuerySet runs every query in the set reps times against u, returning the
-// per-query latency stats (with the result-set hash) in query order. reps ≤ 0
-// defaults to 10. Each query is timed under its own phase ("4.1", "4.2", …) so
-// it appears as a row in the metered table (the pre-matrix listing maps the
-// numbers to names + RQL); a mem reference (non-metered) skips the phase.
-func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, reps int, taggable bool) ([]queryStat, error) {
+// runQuerySet runs the query set reps times against u, returning the per-query
+// latency stats (with the result-set hash) in query order. reps ≤ 0 defaults to
+// 10. Each query is timed under its own phase ("4.1", "4.2", …) so it appears as
+// a row in the metered table. step, when non-empty, runs only the matching query
+// ("4.5"; "4" runs all). When report is set, each query's full execution report
+// is printed to w.
+func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, reps int, taggable bool, step string, report bool, w io.Writer) ([]queryStat, error) {
 	if reps <= 0 {
 		reps = 10
 	}
@@ -261,11 +271,15 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 	met, isMet := u.(*metered)
 	var stats []queryStat
 	for i, nq := range perfQueries(m, root) {
+		phaseID := fmt.Sprintf("4.%d", i+1)
+		if step != "" && step != "4" && step != phaseID {
+			continue // --step selects one query (or "4" for the whole chapter)
+		}
 		if !taggable && nq.branchScoped() {
 			continue // branch-scoped query needs tags this backend can't hold
 		}
 		if isMet {
-			met.setPhase(fmt.Sprintf("4.%d", i+1))
+			met.setPhase(phaseID)
 		}
 		var mn, mx, sum time.Duration
 		var hash string
@@ -285,10 +299,70 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 			sum += d
 		}
 		stats = append(stats, queryStat{
-			name: nq.name, rql: describeQuery(nq.q),
+			id: phaseID, name: nq.name, rql: describeQuery(nq.q),
 			min: mn, avg: sum / time.Duration(reps), max: mx,
 			results: results, hash: hash,
 		})
+		if report {
+			if isMet {
+				met.setPhase("report") // keep the report run's ops out of the "4.N" timing
+			}
+			if err := printQueryReport(ctx, w, u, phaseID, nq); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return stats, nil
+}
+
+// printQueryReport runs nq once with full execution reporting on and prints the
+// per-station event log to w — the --report view, shown in the queries section.
+func printQueryReport(ctx context.Context, w io.Writer, u ranke.Universe, label string, nq namedQuery) error {
+	scope, err := queryScope(ctx, u, nq.q)
+	if err != nil {
+		return err
+	}
+	q := nq.q
+	q.Execution.Report = ranke.ReportDebug
+	rs, err := u.Query(ctx, q, scope)
+	if err != nil {
+		return err
+	}
+	for rs.Next() {
+	}
+	if e := rs.Err(); e != nil {
+		_ = rs.Close()
+		return e
+	}
+	rep := rs.Report()
+	_ = rs.Close()
+
+	fmt.Fprintf(w, "\n  %s %s — %s\n", label, nq.name, describeQuery(nq.q))
+	if rep == nil {
+		fmt.Fprintf(w, "    (backend produced no report)\n")
+		return nil
+	}
+	fmt.Fprintf(w, "    elapsed %s  %d results%s\n", rep.Elapsed.Round(time.Microsecond), rep.Results, truncMark(rep.Truncated))
+	for _, e := range rep.Events {
+		dur := ""
+		if e.Duration > 0 {
+			dur = " (" + e.Duration.Round(time.Microsecond).String() + ")"
+		}
+		fmt.Fprintf(w, "    %10s  %-9s %-14s%s", e.At.Round(time.Microsecond), e.Engine, e.Op, dur)
+		if e.Detail != "" {
+			fmt.Fprintf(w, "  %s", e.Detail)
+		}
+		if len(e.Attrs) > 0 {
+			fmt.Fprintf(w, "  %v", e.Attrs)
+		}
+		fmt.Fprintln(w)
+	}
+	return nil
+}
+
+func truncMark(t bool) string {
+	if t {
+		return " (truncated)"
+	}
+	return ""
 }

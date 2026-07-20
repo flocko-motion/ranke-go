@@ -43,6 +43,22 @@ type Config struct {
 	Progress  bool     // show an in-place per-chapter progress line (interactive CLI; off under go test)
 	QueryReps int      // times each RQL query is timed in chapter 4; 0 = 10
 	Native    bool     // connect neo4j/redis to a host-native instance (localhost) instead of spawning podman pods
+	Step      string   // run only this step (e.g. "2-verify", "3.1", "4.5"); "" = all. setup+tag always run.
+	Report    bool     // print each query's full execution report in the queries section
+}
+
+// stepSelected reports whether the measured step with this phase id runs under
+// cfg.Step. Empty Step runs all; otherwise Step must equal the id or its numeric
+// prefix (the part before "-"), so "3.1" matches "3.1-branch" and "2" matches
+// "2-verify". setup and tag are prerequisites gated separately.
+func (cfg Config) stepSelected(id string) bool {
+	if cfg.Step == "" || cfg.Step == id {
+		return true
+	}
+	if i := strings.IndexByte(id, '-'); i >= 0 && cfg.Step == id[:i] {
+		return true
+	}
+	return false
 }
 
 // forceNativeServices, set by RunMatrix from Config.Native, routes the
@@ -264,7 +280,7 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 		return fmt.Errorf("graph overview: %w", err)
 	}
 	printOverview(w, spec, refM, ov)
-	refStats, err := runQuerySet(ctx, refU, refM, 1, refU.Capabilities().Tags)
+	refStats, err := runQuerySet(ctx, refU, refM, 1, refU.Capabilities().Tags, cfg.Step, false, w)
 	if err != nil {
 		return fmt.Errorf("mem reference queries: %w", err)
 	}
@@ -326,11 +342,11 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		}
 	}
 
-	// Setup — write: generate the test archive into the backend (via the dev
-	// sequencer). Timed as ingest, but it is setup; the perf tests below measure
-	// operations ON the resulting archive, the first of which is tagging.
-	progress("write")
-	u.setPhase("0-write")
+	// Setup — write: generate the archive into the backend (via the dev
+	// sequencer). Timed as ingest, but it is setup — the steps below measure
+	// operations ON the resulting archive. Always run; every step needs it.
+	progress("setup")
+	u.setPhase("setup")
 	c1 := time.Now()
 	m, err := generator.Generate(ctx, u, spec)
 	if err != nil {
@@ -343,13 +359,18 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		return 0, fmt.Errorf("%s: open archive: %w", name, err)
 	}
 
-	// Chapter 1 — tag: stamp each claim with its branch membership (_b_<branch>)
-	// and each branch table with its revision (_br) — the overlay branch-scoped
-	// reads and the browser's tag view rely on. The first operation measured on
-	// the freshly-written archive; a real deployment runs it after a contribution.
-	// Skipped on a backend that holds no tags (see taggable above).
+	// --step runs only the named step; setup always runs, and tag runs whenever
+	// the target needs branch membership (tag, branch access, or a branch query).
+	runVerify := cfg.stepSelected("2-verify")
+	runBranch := taggable && cfg.stepSelected("3.1-branch")
+	runUniverse := cfg.stepSelected("3.2-universe")
+	runQueries := cfg.Step == "" || strings.HasPrefix(cfg.Step, "4")
+	needTag := taggable && (cfg.Step == "" || cfg.stepSelected("1-tag") || runBranch || runQueries)
+
+	// tag: stamp each claim's branch membership (_b_<branch>) and each branch
+	// table's revision (_br) — what the branch-scoped reads rely on.
 	var tagDur time.Duration
-	if taggable {
+	if needTag {
 		progress("tag")
 		u.setPhase("1-tag")
 		ctag := time.Now()
@@ -359,100 +380,114 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		tagDur = time.Since(ctag)
 	}
 
-	// Chapter 2 — verify.
-	progress("verify")
-	u.setPhase("2-verify")
-	c2 := time.Now()
-	run, err := arc.Verify(ctx, ranke.WithExternalContent())
-	if err != nil {
-		return 0, fmt.Errorf("%s: verify: %w", name, err)
-	}
-	run.Wait()
-	verifyDur := time.Since(c2)
-	if err := run.Err(); err != nil {
-		return 0, fmt.Errorf("%s: verify: %w", name, err)
-	}
-	if fs := run.Failures(); len(fs) > 0 {
-		return 0, fmt.Errorf("%s: %d verify failure(s), first: %v", name, len(fs), fs[0])
-	}
-
-	// Chapter 3 — random access: branch (in-closure) vs universe (direct). Sample
-	// the ids from the "main" branch's own closure when the backend is taggable
-	// (with several branches a manifest claim may live on another branch, so a
-	// branch read of it would correctly miss); otherwise sample from the universe
-	// head's closure, since only the universe (direct) read runs. Chapter 3a
-	// (branch access) is skipped on a non-taggable backend.
-	accessRoot := m.Head
-	var branch ranke.Branch
-	if taggable {
-		branch, err = arc.GetBranch(ctx, "main")
+	// verify: walk the provenance DAG and check every claim.
+	var run ranke.VerificationRun
+	var verifyDur time.Duration
+	if runVerify {
+		progress("verify")
+		u.setPhase("2-verify")
+		c2 := time.Now()
+		run, err = arc.Verify(ctx, ranke.WithExternalContent())
 		if err != nil {
-			return 0, fmt.Errorf("%s: get branch: %w", name, err)
+			return 0, fmt.Errorf("%s: verify: %w", name, err)
 		}
-		accessRoot = branch.Head()
+		run.Wait()
+		verifyDur = time.Since(c2)
+		if err := run.Err(); err != nil {
+			return 0, fmt.Errorf("%s: verify: %w", name, err)
+		}
+		if fs := run.Failures(); len(fs) > 0 {
+			return 0, fmt.Errorf("%s: %d verify failure(s), first: %v", name, len(fs), fs[0])
+		}
 	}
-	ids, err := accessIDs(ctx, u, accessRoot, cfg.Access)
-	if err != nil {
-		return 0, fmt.Errorf("%s: access ids: %w", name, err)
-	}
-	var branchDur time.Duration
-	if taggable {
-		progress("access:branch")
-		u.setPhase("3a-branch")
-		c3a := time.Now()
-		for _, id := range ids {
-			if _, err := branch.GetClaim(ctx, id); err != nil {
-				return 0, fmt.Errorf("%s: branch access: %w", name, err)
+
+	// access: branch (in-closure) vs universe (direct), over ids sampled from the
+	// branch closure (taggable) or the universe head's closure otherwise.
+	var ids []ranke.Id
+	var branchDur, universeDur time.Duration
+	if runBranch || runUniverse {
+		accessRoot := m.Head
+		var branch ranke.Branch
+		if runBranch {
+			branch, err = arc.GetBranch(ctx, "main")
+			if err != nil {
+				return 0, fmt.Errorf("%s: get branch: %w", name, err)
 			}
+			accessRoot = branch.Head()
 		}
-		branchDur = time.Since(c3a)
-	}
-
-	progress("access:universe")
-	u.setPhase("3b-universe")
-	c3b := time.Now()
-	for _, id := range ids {
-		if _, err := ranke.GetClaim(ctx, u, id); err != nil {
-			return 0, fmt.Errorf("%s: universe access: %w", name, err)
+		if ids, err = accessIDs(ctx, u, accessRoot, cfg.Access); err != nil {
+			return 0, fmt.Errorf("%s: access ids: %w", name, err)
+		}
+		if runBranch {
+			progress("access:branch")
+			u.setPhase("3.1-branch")
+			c3a := time.Now()
+			for _, id := range ids {
+				if _, err := branch.GetClaim(ctx, id); err != nil {
+					return 0, fmt.Errorf("%s: branch access: %w", name, err)
+				}
+			}
+			branchDur = time.Since(c3a)
+		}
+		if runUniverse {
+			progress("access:universe")
+			u.setPhase("3.2-universe")
+			c3b := time.Now()
+			for _, id := range ids {
+				if _, err := ranke.GetClaim(ctx, u, id); err != nil {
+					return 0, fmt.Errorf("%s: universe access: %w", name, err)
+				}
+			}
+			universeDur = time.Since(c3b)
 		}
 	}
-	universeDur := time.Since(c3b)
 
-	// Chapter 4 — RQL queries: each timed a few times (under its own "4.N" phase,
-	// so it shows as a table row) and its result set hashed for the cross-backend
-	// determinism check against the mem reference.
-	progress("queries")
-	qstats, err := runQuerySet(ctx, u, m, cfg.QueryReps, taggable)
-	if err != nil {
-		return 0, fmt.Errorf("%s: query: %w", name, err)
+	// queries: each timed a few times (under its own "4.N" phase) and its result
+	// set hashed for the cross-backend determinism check against the mem reference.
+	var qstats []queryStat
+	if runQueries {
+		progress("queries")
+		if qstats, err = runQuerySet(ctx, u, m, cfg.QueryReps, taggable, cfg.Step, cfg.Report, w); err != nil {
+			return 0, fmt.Errorf("%s: query: %w", name, err)
+		}
 	}
 
-	r1, w1 := u.phaseIO("0-write")
-	r1t, w1t := u.phaseIO("1-tag")
-	r2, _ := u.phaseIO("2-verify")
-	r3a, _ := u.phaseIO("3a-branch")
-	r3b, _ := u.phaseIO("3b-universe")
 	if showProgress {
 		fmt.Fprint(w, "\r\033[K") // clear the progress line; results replace it
 	}
-	// ms renders a duration; na shows "n/a" for a chapter this backend can't run
-	// (a byte store holds no tags — so no tag or branch-scoped chapter).
 	ms := func(d time.Duration) string { return d.Round(time.Millisecond).String() }
-	na := func(d time.Duration) string {
-		if !taggable {
-			return "n/a"
-		}
-		return ms(d)
+	verified := 0
+	if run != nil {
+		verified = run.Verified()
 	}
-	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, run.Verified(), len(ids))
-	fmt.Fprintf(w, "  write            %-9s (%dw %dr)\n", ms(writeDur), w1, r1)
-	fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", na(tagDur), w1t, r1t)
-	fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r2)
-	fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", na(branchDur), r3a)
-	fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r3b)
+	// full shows the "n/a" rows only on a full run — under --step the untouched
+	// steps are simply omitted, not marked unavailable.
+	full := cfg.Step == ""
+	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, verified, len(ids))
+	sr, sw := u.phaseIO("setup")
+	fmt.Fprintf(w, "  setup            %-9s (%dw %dr)\n", ms(writeDur), sw, sr)
+	if needTag {
+		r, wr := u.phaseIO("1-tag")
+		fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", ms(tagDur), wr, r)
+	} else if full && !taggable {
+		fmt.Fprintf(w, "  tag              n/a\n")
+	}
+	if runVerify {
+		r, _ := u.phaseIO("2-verify")
+		fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r)
+	}
+	if runBranch {
+		r, _ := u.phaseIO("3.1-branch")
+		fmt.Fprintf(w, "  access:branch    %-9s (%dr)  in-closure\n", ms(branchDur), r)
+	} else if full && !taggable {
+		fmt.Fprintf(w, "  access:branch    n/a\n")
+	}
+	if runUniverse {
+		r, _ := u.phaseIO("3.2-universe")
+		fmt.Fprintf(w, "  access:universe  %-9s (%dr)  direct\n", ms(universeDur), r)
+	}
 
-	// Determinism: each query's ordered result set must hash-match the mem
-	// reference. The timings themselves are the "4.N" rows in the table below.
+	// Determinism: each query's ordered result set must hash-match the mem reference.
 	var diverged []string
 	for _, qs := range qstats {
 		if want, ok := refHashes[qs.name]; ok && want != qs.hash {
@@ -461,9 +496,9 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 	fmt.Fprintf(w, "%s\n", u.report())
 	if len(diverged) > 0 {
-		return run.Verified(), fmt.Errorf("%s: query result set(s) diverge from the mem reference (must be deterministic): %v", name, diverged)
+		return verified, fmt.Errorf("%s: query result set(s) diverge from the mem reference (must be deterministic): %v", name, diverged)
 	}
-	return run.Verified(), nil
+	return verified, nil
 }
 
 // accessIDs samples n claim ids (with replacement) from the closure reachable
