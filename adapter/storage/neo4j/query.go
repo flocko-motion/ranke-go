@@ -193,26 +193,72 @@ func (u *neo4jUniverse) claimsFromRecords(records []*neo4jdriver.Record) ([]rank
 	return out, nil
 }
 
-// traversalCypher builds the reachability query for the Select: chain one
-// variable-length segment per PathStep (direction, depth, edge/node type
-// filters), and return the final endpoint's claim ids. Matches DefaultQuery's
-// walk (a 0-length segment includes its start, so the root can pass through).
-// When needPaths (path shape), it returns each matched route (nodes(path), root
-// →endpoint) ordered shortest-first, so the caller keeps the reference's
-// BFS-first route per endpoint.
+// traversalCypher lowers the Select's Path (direction, depth, edge/node filters
+// per step). A reachability read (no path shape) is a per-step frontier pipeline
+// (frontierCypher); a path shape reconstructs one continuous route per endpoint
+// (pathCypher). Both treat a 0-length segment as including its start, so the root
+// can pass through — matching DefaultQuery's walk.
 func traversalCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
 	steps := q.Select.Path
 	if len(steps) == 0 {
 		steps = []ranke.PathStep{{}} // implicit: all edges, provenance, unbounded → full closure
 	}
 	params := map[string]any{"root": q.Select.Claim.String()}
+	if needPaths {
+		return pathCypher(q, scope, steps, params)
+	}
+	return frontierCypher(q, scope, steps, params)
+}
 
-	// Bind the path only for routes (path shape) or per-hop reverse confinement;
-	// otherwise plain reachability (no path=) is O(nodes), not O(paths).
-	usePath := needPaths || (confined(scope) && hasReverseStep(steps))
+// frontierCypher lowers a reachability read as a per-step frontier pipeline: each
+// PathStep is its own MATCH … WITH DISTINCT stage, so relationship-uniqueness
+// resets at every step boundary (a step may re-walk an edge an earlier step
+// used). This mirrors the reference's independent per-step expansion — e.g. a
+// forward step reaching a source does not block a later reverse step from walking
+// that same edge back to the deriver.
+func frontierCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params map[string]any) (string, map[string]any) {
+	conf := confined(scope)
+	if conf {
+		params["bkey"] = ranke.BranchTagKey(scope.Branch)
+		params["height"] = scope.Height
+	}
+	final := "n" + strconv.Itoa(len(steps))
+	var b strings.Builder
+	b.WriteString("MATCH (n0 {id: $root})\nWITH n0")
+	for i, step := range steps {
+		rv, nv := "r"+strconv.Itoa(i), "n"+strconv.Itoa(i+1)
+		seg := segmentPattern("n"+strconv.Itoa(i), rv, nv, step)
+		conds := segmentFilters(step, rv, nv, i, params)
+		if conf { // confine every node on the segment (bounds reverse steps to members)
+			pv := "p" + strconv.Itoa(i)
+			seg = pv + " = " + seg
+			conds = append(conds, "all(x IN nodes("+pv+") WHERE x[$bkey] <= $height)")
+		}
+		if i == len(steps)-1 { // endpoint: valid node + the where tree
+			conds = append(conds, "size(labels("+nv+")) > 0")
+			ctr := 0
+			if wc := whereClause(q.Where, nv, params, &ctr); wc != "true" {
+				conds = append(conds, wc)
+			}
+		}
+		b.WriteString("\nMATCH " + seg)
+		if len(conds) > 0 {
+			b.WriteString("\nWHERE " + strings.Join(conds, "\n  AND "))
+		}
+		b.WriteString("\nWITH DISTINCT " + nv)
+	}
+	return b.String() +
+		"\nRETURN " + returnCols(q.Output.Detail, final) +
+		orderLimitClause(q.Order, q.Limit.Results, final), params
+}
 
+// pathCypher lowers a path-shape read as one continuous path, so a route can be
+// reconstructed per endpoint. Relationship-uniqueness spans the whole path here:
+// a route that re-crosses an edge is not a route. (Reachability uses the frontier
+// lowering instead — that is where a step may reuse an earlier step's edge.)
+func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params map[string]any) (string, map[string]any) {
 	var pat, where strings.Builder
-	pat.WriteString("(n0 {id: $root})") // the node/rel chain; the MATCH form is chosen below
+	pat.WriteString("(n0 {id: $root})")
 	addWhere := func(cond string) {
 		if where.Len() > 0 {
 			where.WriteString("\n  AND ")
@@ -221,101 +267,87 @@ func traversalCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, 
 	}
 	for i, step := range steps {
 		rv, nv := "r"+strconv.Itoa(i), "n"+strconv.Itoa(i+1)
-		bound := ""
-		if step.Depth > 0 {
-			bound = strconv.Itoa(step.Depth)
-		}
-		switch step.Dir {
-		case ranke.DirUses:
-			pat.WriteString("<-[" + rv + "*0.." + bound + "]-(" + nv + ")")
-		case ranke.DirConnections:
-			pat.WriteString("-[" + rv + "*0.." + bound + "]-(" + nv + ")")
-		default: // provenance (outgoing)
-			pat.WriteString("-[" + rv + "*0.." + bound + "]->(" + nv + ")")
-		}
-		// Edge-type filter over this segment's relationships (empty = all edges).
-		if pos, neg := splitPatterns(step.Edges); len(pos) > 0 || len(neg) > 0 {
-			if len(pos) > 0 {
-				k := "ep" + strconv.Itoa(i)
-				params[k] = pos
-				addWhere("all(x IN " + rv + " WHERE any(re IN $" + k + " WHERE type(x) =~ re))")
-			}
-			if len(neg) > 0 {
-				k := "en" + strconv.Itoa(i)
-				params[k] = neg
-				addWhere("all(x IN " + rv + " WHERE none(re IN $" + k + " WHERE type(x) =~ re))")
-			}
-		}
-		// Node-type filter on this segment's endpoint (empty = any type).
-		if pos, neg := splitPatterns(step.Nodes); len(pos) > 0 || len(neg) > 0 {
-			if len(pos) > 0 {
-				k := "np" + strconv.Itoa(i)
-				params[k] = pos
-				addWhere("any(l IN labels(" + nv + ") WHERE any(re IN $" + k + " WHERE l =~ re))")
-			}
-			if len(neg) > 0 {
-				k := "nn" + strconv.Itoa(i)
-				params[k] = neg
-				addWhere("none(l IN labels(" + nv + ") WHERE any(re IN $" + k + " WHERE l =~ re))")
-			}
+		// The chain omits the repeated head node between segments (a single pattern).
+		pat.WriteString(segmentPattern("", rv, nv, step))
+		for _, c := range segmentFilters(step, rv, nv, i, params) {
+			addWhere(c)
 		}
 	}
 	final := "n" + strconv.Itoa(len(steps))
 	addWhere("size(labels(" + final + ")) > 0")
-
-	// Where tree, lowered onto the endpoint node.
 	ctr := 0
 	if wc := whereClause(q.Where, final, params, &ctr); wc != "true" {
 		addWhere(wc)
 	}
-
-	// Branch confinement: with a path binding confine every hop (bounds reverse
-	// steps); otherwise a forward walk stays in-closure, so confining the end is enough.
 	if confined(scope) {
 		params["bkey"] = ranke.BranchTagKey(scope.Branch)
 		params["height"] = scope.Height
-		if usePath {
-			addWhere("all(x IN nodes(path) WHERE x[$bkey] <= $height)")
-		} else {
-			addWhere(final + "[$bkey] <= $height")
-		}
+		addWhere("all(x IN nodes(path) WHERE x[$bkey] <= $height)")
 	}
-	// Choose the MATCH form. A single-segment path shape uses allShortestPaths so
-	// neo4j visits each node once (O(nodes)) instead of enumerating every route;
-	// a reachability read binds no path (O(nodes)); anything else binds the path.
-	var match string
-	switch {
-	case needPaths && len(steps) == 1:
+	// A single-segment path uses allShortestPaths (O(nodes), not per-route).
+	match := "MATCH path=" + pat.String()
+	if len(steps) == 1 {
 		match = "MATCH path = allShortestPaths(" + pat.String() + ")"
-	case usePath:
-		match = "MATCH path=" + pat.String()
-	default:
-		match = "MATCH " + pat.String()
 	}
-	body := match + "\nWHERE " + where.String()
-	if needPaths {
-		// Canonical route per endpoint (shortest, then (created_at,id) total order),
-		// kept via head(collect(...)); each route node carries its full data so the
-		// route claims rebuild from this query; then order+limit endpoints.
-		return body +
-			"\nWITH " + final + ", path ORDER BY length(path), [x IN nodes(path) | x.created_at + x.id]" +
-			"\nWITH " + final + ", head(collect([x IN nodes(path) | " + nodeData("x") + "])) AS route" +
-			orderLimitClause(q.Order, q.Limit.Results, final) +
-			"\nRETURN route", params
-	}
-	return body + "\nWITH DISTINCT " + final +
-		"\nRETURN " + returnCols(q.Output.Detail, final) +
-		orderLimitClause(q.Order, q.Limit.Results, final), params
+	return match + "\nWHERE " + where.String() +
+		"\nWITH " + final + ", path ORDER BY length(path), [x IN nodes(path) | x.created_at + x.id]" +
+		"\nWITH " + final + ", head(collect([x IN nodes(path) | " + nodeData("x") + "])) AS route" +
+		orderLimitClause(q.Order, q.Limit.Results, final) +
+		"\nRETURN route", params
 }
 
-// hasReverseStep reports whether any step walks edges backward.
-func hasReverseStep(steps []ranke.PathStep) bool {
-	for _, s := range steps {
-		if s.Dir == ranke.DirUses || s.Dir == ranke.DirConnections {
-			return true
+// segmentPattern renders one PathStep as a variable-length Cypher segment in its
+// direction. prev is the anchor node name, or "" to omit it (chaining inside a
+// single continuous pattern, where the previous segment already wrote the node).
+func segmentPattern(prev, rv, nv string, step ranke.PathStep) string {
+	bound := ""
+	if step.Depth > 0 {
+		bound = strconv.Itoa(step.Depth)
+	}
+	head := "(" + prev + ")"
+	if prev == "" {
+		head = ""
+	}
+	switch step.Dir {
+	case ranke.DirUses:
+		return head + "<-[" + rv + "*0.." + bound + "]-(" + nv + ")"
+	case ranke.DirConnections:
+		return head + "-[" + rv + "*0.." + bound + "]-(" + nv + ")"
+	default: // provenance (outgoing)
+		return head + "-[" + rv + "*0.." + bound + "]->(" + nv + ")"
+	}
+}
+
+// segmentFilters returns the edge-type (over rv) and endpoint node-type (over nv)
+// conditions for one step; an empty list means "any". Regex params are recorded
+// under per-step keys in params.
+func segmentFilters(step ranke.PathStep, rv, nv string, i int, params map[string]any) []string {
+	var conds []string
+	if pos, neg := splitPatterns(step.Edges); len(pos) > 0 || len(neg) > 0 {
+		if len(pos) > 0 {
+			k := "ep" + strconv.Itoa(i)
+			params[k] = pos
+			conds = append(conds, "all(x IN "+rv+" WHERE any(re IN $"+k+" WHERE type(x) =~ re))")
+		}
+		if len(neg) > 0 {
+			k := "en" + strconv.Itoa(i)
+			params[k] = neg
+			conds = append(conds, "all(x IN "+rv+" WHERE none(re IN $"+k+" WHERE type(x) =~ re))")
 		}
 	}
-	return false
+	if pos, neg := splitPatterns(step.Nodes); len(pos) > 0 || len(neg) > 0 {
+		if len(pos) > 0 {
+			k := "np" + strconv.Itoa(i)
+			params[k] = pos
+			conds = append(conds, "any(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+		}
+		if len(neg) > 0 {
+			k := "nn" + strconv.Itoa(i)
+			params[k] = neg
+			conds = append(conds, "none(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+		}
+	}
+	return conds
 }
 
 // splitPatterns turns a type-pattern list into positive and negative regex

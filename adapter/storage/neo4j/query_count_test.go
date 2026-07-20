@@ -2,8 +2,10 @@ package neo4j
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/generator"
@@ -24,15 +26,27 @@ func testEnv(k, d string) string {
 	return d
 }
 
+// neo4jReachable reports whether a neo4j serves at the default (or env-named)
+// HTTP endpoint — a fast probe, so tests run against a running instance with no
+// env var and skip cleanly when none is up.
+func neo4jReachable() bool {
+	client := http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(testEnv("RANKE_NEO4J_HTTP", "http://127.0.0.1:7474") + "/")
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // openTestNeo4j connects to a live neo4j, flushes, seeds a small graph, and
 // returns the *neo4jUniverse (so tests can read its query counter) and head id.
 func openTestNeo4j(t *testing.T) (*neo4jUniverse, ranke.Id) {
 	t.Helper()
-	bolt := os.Getenv("RANKE_NEO4J_BOLT")
-	if bolt == "" {
-		t.Skip("set RANKE_NEO4J_BOLT")
+	if os.Getenv("RANKE_NEO4J_BOLT") == "" && !neo4jReachable() {
+		t.Skip("no neo4j reachable (services/neo4j.sh native up)")
 	}
-	driver, err := neo4jdriver.NewDriverWithContext(bolt,
+	driver, err := neo4jdriver.NewDriverWithContext(testEnv("RANKE_NEO4J_BOLT", "bolt://127.0.0.1:7687"),
 		neo4jdriver.BasicAuth(testEnv("RANKE_NEO4J_USER", testNeo4jUser), testEnv("RANKE_NEO4J_PASS", testNeo4jPass), ""))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = driver.Close(context.Background()) })
