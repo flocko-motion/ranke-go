@@ -36,7 +36,7 @@ var ErrUnavailable = errors.New("backend unavailable")
 
 // Config parameterises a matrix run — the knobs cmd/test exposes as flags.
 type Config struct {
-	Size      int      // generator size (SpecForSize); ~5×Size claims
+	Size      int      // target claim count (SpecForNodes); a dimension, not exact
 	Seed      int64    // generator seed — fixes every id
 	Access    int      // chapter-3 random accesses
 	Backends  []string // backend names to run; empty = all
@@ -266,7 +266,7 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	if err != nil {
 		return err
 	}
-	spec := generator.SpecForSize(cfg.Seed, cfg.Size)
+	spec := generator.SpecForNodes(cfg.Seed, cfg.Size)
 	ctx := context.Background()
 
 	// showProgress labels the otherwise-silent between-block phases (reference

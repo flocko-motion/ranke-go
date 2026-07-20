@@ -123,6 +123,21 @@ func SpecForSize(seed int64, size int) Spec {
 	}
 }
 
+// spineClaims is the near-constant branch-table/head overhead SpecForNodes
+// subtracts before dividing, so a node target lands near the real claim count.
+const spineClaims = 350
+
+// SpecForNodes scales an archive to roughly nodes total claims — a dimension,
+// not an exact count. SpecForSize's content claims run ~5× its unit; the
+// sequencer then adds spineClaims of branch-table spine, so we subtract that
+// before dividing to land near nodes across the useful range (1k → ~1k,
+// 1m → ~1m). This is what the CLI's --size (1k, 1m, …) feeds.
+func SpecForNodes(seed int64, nodes int) Spec {
+	s := SpecForSize(seed, clampMin((nodes-spineClaims)/5, 1))
+	s.Size = nodes // the headline reflects the requested node count, not the unit
+	return s
+}
+
 func clampMin(v, min int) int {
 	if v < min {
 		return min

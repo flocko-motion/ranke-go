@@ -17,7 +17,7 @@ import (
 // any backend fails to verify. `make test/performance/N` sets RANKE_PERF_SIZE.
 func TestPerformanceMatrix(t *testing.T) {
 	cfg := Config{
-		Size:        envInt(t, "RANKE_PERF_SIZE", 100),
+		Size:        envInt(t, "RANKE_PERF_SIZE", 800), // target claims (SpecForNodes)
 		Seed:        1,
 		Access:      envInt(t, "RANKE_PERF_ACCESS", 50),
 		Correctness: true, // the test's whole point: every backend matches the mem reference

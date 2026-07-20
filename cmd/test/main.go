@@ -5,13 +5,38 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/flocko-motion/ranke-go/tests/performance"
 )
+
+var errBadSize = errors.New("--size: not a claim count")
+
+// parseCount reads a target claim count, accepting a k (thousand) or m (million)
+// suffix and a decimal mantissa: "5000", "1k", "1.5m". Case-insensitive.
+func parseCount(s string) (int, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	mult := 1.0
+	if n := len(s); n > 0 {
+		switch s[n-1] {
+		case 'k':
+			mult, s = 1e3, s[:n-1]
+		case 'm':
+			mult, s = 1e6, s[:n-1]
+		}
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || f < 1 {
+		return 0, fmt.Errorf("%w: %q", errBadSize, s)
+	}
+	return int(f * mult), nil
+}
 
 func main() {
 	root := &cobra.Command{
@@ -28,10 +53,10 @@ func main() {
 
 func performanceCmd() *cobra.Command {
 	var (
-		size     int
-		seed     int64
-		access   int
-		backends []string
+		sizeStr     string
+		seed        int64
+		access      int
+		backends    []string
 		native      bool
 		step        string
 		report      bool
@@ -49,6 +74,10 @@ func performanceCmd() *cobra.Command {
 			"A backend that can't run here (no podman, no RANKE_NEO4J_*/RANKE_REDIS_*)\n" +
 			"is skipped, not failed.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			size, err := parseCount(sizeStr)
+			if err != nil {
+				return err
+			}
 			cfg := performance.Config{
 				Size:     size,
 				Seed:     seed,
@@ -64,7 +93,7 @@ func performanceCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.IntVar(&size, "size", 100, "generator size (~5×size claims)")
+	f.StringVar(&sizeStr, "size", "1k", "target claim count; accepts k/m suffixes (e.g. 1k, 1.5m)")
 	f.Int64Var(&seed, "seed", 1, "generator seed (fixes every id)")
 	f.IntVar(&access, "access", 50, "chapter-3 random accesses")
 	f.StringSliceVar(&backends, "backends", nil, "backends to run, comma-separated (mem,fs,sqlite,s3,redis,neo4j/mem,neo4j/redis/s3); default all")
