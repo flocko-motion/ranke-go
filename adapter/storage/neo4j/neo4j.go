@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
+	"sync/atomic"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -65,6 +67,7 @@ type neo4jUniverse struct {
 	database   string
 	contentCap int
 	tier       ranke.StorageTier
+	queries    atomic.Int64 // count of Cypher round-trips (tests assert one per RQL)
 }
 
 // Compile-time proof the adapter satisfies the full Universe contract.
@@ -80,6 +83,7 @@ var (
 // query runs a Cypher statement in an auto-commit transaction, scoped to the
 // configured database when set.
 func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[string]any) (*neo4jdriver.EagerResult, error) {
+	u.queries.Add(1)
 	if u.database != "" {
 		return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params,
 			neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase(u.database))
@@ -94,21 +98,29 @@ func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[str
 // as a legible `content` property; a claim's extension fields ride as their own
 // properties (SET += fields), so the browser shows and can query them. Requires
 // Neo4j ≥ 5.26 (dynamic labels/types via $()). A null property is simply unset.
-const cypherPutClaims = `
+const cypherPutNodes = `
 UNWIND $claims AS c
 MERGE (n {id: c.id})
 SET n:$(c.type)
 SET n += c.fields
 SET n.encoding = c.encoding, n.created_at = c.created_at, n.height = c.height,
     n.content_hash = c.content_hash, n.content_size = c.content_size,
-    n.content = c.content
-WITH n, c
-UNWIND c.edges AS e
-MERGE (t {id: e.reference})
-MERGE (n)-[r:$(e.type) {edge_id: e.edge_id}]->(t)
+    n.content = c.content`
+
+// edgeCypher writes all edges of one relationship type. Neo4j evaluates a dynamic
+// relationship type ($(...)) once per query rather than per UNWIND row, so the
+// type is a literal here and edges are grouped by type (one query per type).
+func edgeCypher(relType string) string {
+	lit := "`" + strings.ReplaceAll(relType, "`", "``") + "`"
+	return `
+UNWIND $edges AS e
+MATCH (n {id: e.src})
+MERGE (tgt {id: e.reference})
+MERGE (n)-[r:` + lit + ` {edge_id: e.edge_id}]->(tgt)
 SET r += e.fields
 SET r.encoding = e.encoding, r.direction = e.direction, r.content_hash = e.content_hash,
     r.content_size = e.content_size, r.content = e.content`
+}
 
 // PutClaims projects each claim into neo4j's native typed graph: a node
 // labelled with the claim's type, its edges as relationships typed by the edge
@@ -122,14 +134,29 @@ func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 		return nil
 	}
 	claims := make([]map[string]any, 0, len(cs))
+	byType := map[string][]map[string]any{} // edge type → its edge params (each with src)
 	for _, c := range cs {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		claims = append(claims, u.claimParam(c))
+		np := u.claimParam(c)
+		edges, _ := np["edges"].([]map[string]any)
+		delete(np, "edges") // the node query does not carry edges
+		claims = append(claims, np)
+		src := np["id"].(string)
+		for _, ep := range edges {
+			ep["src"] = src
+			byType[ep["type"].(string)] = append(byType[ep["type"].(string)], ep)
+		}
 	}
-	if _, err := u.query(ctx, cypherPutClaims, map[string]any{"claims": claims}); err != nil {
-		return fmt.Errorf("%w: put claims: %w", errQuery, err)
+	if _, err := u.query(ctx, cypherPutNodes, map[string]any{"claims": claims}); err != nil {
+		return fmt.Errorf("%w: put nodes: %w", errQuery, err)
+	}
+	// One query per edge type (dynamic rel types aren't per-row, see edgeCypher).
+	for relType, edges := range byType {
+		if _, err := u.query(ctx, edgeCypher(relType), map[string]any{"edges": edges}); err != nil {
+			return fmt.Errorf("%w: put edges (%s): %w", errQuery, relType, err)
+		}
 	}
 	return nil
 }

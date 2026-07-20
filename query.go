@@ -14,9 +14,9 @@ import "time"
 // which layer answers it.
 type Query struct {
 	Select    Select
-	Where     *Where // nil = no filter
+	Where     *Where     // nil = no filter
 	Output    Output
-	Order     *Order // nil = default order, (created_at, id)
+	Order     []OrderKey // sort keys in priority order; empty = natural (created_at, id)
 	Limit     Limit
 	Execution Execution
 }
@@ -91,23 +91,63 @@ type Comparison struct {
 	Glob string // shell-style wildcard (path.Match)
 }
 
-// Output shapes each result.
+// Output shapes each result along orthogonal axes: Shape (single item or path),
+// Detail (how much each entity carries), Form (as written or resolved), Encoding
+// (json | cbor), and optional inline Content.
 type Output struct {
-	Detail   Detail
-	Content  int64    // max inlined content bytes per claim; 0 = none
-	Overflow Overflow // how content past Content is handled
+	Shape    Shape          // single | path
+	Detail   Detail         // id | graph | claims
+	Form     Form           // original | materialized
+	Content  *Content       // nil = no inline content
+	Encoding ResultEncoding // serialized form of each claim (json | cbor)
 }
 
-// Detail sets how much each result carries.
+// Content bounds inline claim content: up to Max bytes, with Overflow handling
+// anything larger.
+type Content struct {
+	Max      int64
+	Overflow Overflow
+}
+
+// Form is whether a claim is returned as written or resolved via its diff chain.
+// Materialized (the resolved graph) is a graph-native backend's cheapest output;
+// original is the id-defining form, served from the byte layer.
+type Form string
+
+const (
+	FormMaterialized Form = "materialized" // resolved via the diff chain (default; empty == materialized)
+	FormOriginal     Form = "original"     // as written (the stored/canonical claim)
+)
+
+// ResultEncoding is the serialized form of each result's claim, orthogonal to
+// Output.Form (either form can be JSON or CBOR).
+type ResultEncoding string
+
+const (
+	ResultJSON ResultEncoding = "json" // default; content base64 in the raw form
+	ResultCBOR ResultEncoding = "cbor" // binary; the original form is the id-defining bytes
+)
+
+// Shape is whether each result is a single item or a path (the chain to it).
+type Shape string
+
+const (
+	ShapeSingle Shape = "single" // individual claims (default; empty == single)
+	ShapePath   Shape = "path"   // the route to each claim
+)
+
+// Detail is how much each entity carries. A claim is a graph *part* (a node and
+// all its outgoing edges, which may point outside the result), so it carries more
+// than graph — which is closed (only edges among the returned nodes).
 type Detail string
 
 const (
-	DetailID    Detail = "id"    // just the id
-	DetailClaim Detail = "claim" // the reached claim (default)
-	DetailPath  Detail = "path"  // the whole route to it
+	DetailID     Detail = "id"     // identities only
+	DetailGraph  Detail = "graph"  // closed graph: nodes + edges among them
+	DetailClaims Detail = "claims" // claim parts: node + all outgoing edges (default; empty == claims)
 )
 
-// Overflow is how content larger than Output.Content is handled.
+// Overflow is how content larger than Content.Max is handled.
 type Overflow string
 
 const (
@@ -116,11 +156,29 @@ const (
 	OverflowReference Overflow = "reference" // return a hash stub in its place
 )
 
-// Order is a named sort; without it, results order by (created_at, id).
-type Order struct {
-	Field string
-	Desc  bool
+// OrderKey is one sort key. Keys apply in priority order; ties fall back to the
+// natural (created_at, id) order.
+type OrderKey struct {
+	Field   string
+	Compare Collation // how values compare; empty = lexical
+	Dir     SortDir   // asc | desc; empty = asc
 }
+
+// Collation is how ordered values compare.
+type Collation string
+
+const (
+	CompareLexical Collation = "lexical" // string comparison (default)
+	CompareNumeric Collation = "numeric" // numeric comparison
+)
+
+// SortDir is a sort direction.
+type SortDir string
+
+const (
+	SortAsc  SortDir = "asc"  // ascending (default)
+	SortDesc SortDir = "desc" // descending
+)
 
 // Limit bounds a read.
 type Limit struct {
@@ -167,9 +225,11 @@ type ResultStream interface {
 
 // QueryResult is one reached claim, shaped per Output.
 type QueryResult struct {
+	// Id is always set. Claim is nil for DetailID (no reconstruction needed).
+	Id    Id
 	Claim Claim
 	// Path is the full route to the claim (root first), set only when
-	// Output.Detail is DetailPath.
+	// Output.Shape is ShapePath.
 	Path []Claim
 	// Content is the claim's inlined content, present only when
 	// Output.Content > 0; truncated per Output.Overflow when it exceeds the cap.

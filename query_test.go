@@ -104,7 +104,7 @@ func TestQueryOrderLimit(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	q := Query{
 		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
-		Order:  &Order{Field: "height", Desc: true},
+		Order:  []OrderKey{{Field: "height", Compare: CompareNumeric, Dir: SortDesc}},
 		Limit:  Limit{Results: 1},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
@@ -121,7 +121,7 @@ func TestQueryOutputContent(t *testing.T) {
 	q := Query{
 		Select: Select{Branch: BranchUniverse, Claim: a.ID()},
 		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
-		Output: Output{Content: 4, Overflow: OverflowCutoff},
+		Output: Output{Content: &Content{Max: 4, Overflow: OverflowCutoff}},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
@@ -130,12 +130,12 @@ func TestQueryOutputContent(t *testing.T) {
 	require.Equal(t, []byte("aard"), got[0].Content, "content cut off at the cap")
 }
 
-// TestQueryOutputPath: DetailPath returns the route root→claim.
+// TestQueryOutputPath: ShapePath returns the route root→claim.
 func TestQueryOutputPath(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
 		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
-		Output: Output{Detail: DetailPath},
+		Output: Output{Shape: ShapePath},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)

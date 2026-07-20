@@ -1,0 +1,85 @@
+package neo4j
+
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/generator"
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/stretchr/testify/require"
+)
+
+// Default credentials for a local test neo4j (overridable via RANKE_NEO4J_*).
+const (
+	testNeo4jUser = "neo4j"
+	testNeo4jPass = "rankeperfpass"
+)
+
+func testEnv(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
+// openTestNeo4j connects to a live neo4j, flushes, seeds a small graph, and
+// returns the *neo4jUniverse (so tests can read its query counter) and head id.
+func openTestNeo4j(t *testing.T) (*neo4jUniverse, ranke.Id) {
+	t.Helper()
+	bolt := os.Getenv("RANKE_NEO4J_BOLT")
+	if bolt == "" {
+		t.Skip("set RANKE_NEO4J_BOLT")
+	}
+	driver, err := neo4jdriver.NewDriverWithContext(bolt,
+		neo4jdriver.BasicAuth(testEnv("RANKE_NEO4J_USER", testNeo4jUser), testEnv("RANKE_NEO4J_PASS", testNeo4jPass), ""))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = driver.Close(context.Background()) })
+	_, err = neo4jdriver.ExecuteQuery(context.Background(), driver, "MATCH (n) DETACH DELETE n", nil,
+		neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase("neo4j"))
+	require.NoError(t, err)
+	u := New(driver, WithDatabase("neo4j"), WithContentCap(4096)).(*neo4jUniverse)
+
+	ctx := context.Background()
+	mem := ranke.NewMemoryUniverse()
+	man, err := generator.Generate(ctx, mem, generator.SpecForSize(1, 30))
+	require.NoError(t, err)
+	require.NoError(t, u.CopyClaims(ctx, mem, []ranke.Id{man.Head}, ranke.WithClosure()))
+	return u, man.Head
+}
+
+// TestOneQueryPerRQL asserts every RQL shape resolves in exactly one Cypher
+// round-trip — no reconstruction re-fetch, no fallback.
+func TestOneQueryPerRQL(t *testing.T) {
+	u, head := openTestNeo4j(t)
+	ctx := context.Background()
+	scope := ranke.Scope{Branch: ranke.BranchUniverse}
+	sel := ranke.Select{Branch: ranke.BranchUniverse, Claim: head}
+	selPath := ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}}
+
+	cases := map[string]ranke.Query{
+		"single/id":     {Select: sel, Output: ranke.Output{Detail: ranke.DetailID}},
+		"single/graph":  {Select: sel, Output: ranke.Output{Detail: ranke.DetailGraph}},
+		"single/claims": {Select: sel, Output: ranke.Output{Detail: ranke.DetailClaims}},
+		"single/where":  {Select: sel, Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}}},
+		"single/order":  {Select: sel, Order: []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}}, Limit: ranke.Limit{Results: 10}},
+		"path/claims":   {Select: selPath, Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailClaims}},
+		"path/closure":  {Select: sel, Output: ranke.Output{Shape: ranke.ShapePath}}, // unbounded → allShortestPaths
+	}
+	for name, q := range cases {
+		t.Run(name, func(t *testing.T) {
+			before := u.queries.Load()
+			rs, err := u.Query(ctx, q, scope)
+			require.NoError(t, err)
+			n := 0
+			for rs.Next() {
+				n++
+			}
+			require.NoError(t, rs.Err())
+			require.NoError(t, rs.Close())
+			got := u.queries.Load() - before
+			require.Equal(t, int64(1), got, "expected exactly 1 Cypher query, got %d (%d results)", got, n)
+		})
+	}
+}

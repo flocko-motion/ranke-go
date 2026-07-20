@@ -1,7 +1,7 @@
 // package: ranke / query walk
 // type:    logic
 // job:     the reference RQL traversal — walk a Select's Path from its root (forward, and reverse via a built closure-inversion index), returning the reached set and each claim's canonical route
-// limits:  reachability only; filter/order/limit/shape live in query_default.go. Route ties break on the (created_at, id) total order so DetailPath is byte-identical to a Cypher lowering
+// limits:  reachability only; filter/order/limit/shape live in query_default.go. Route ties break on the (created_at, id) total order so a path shape is byte-identical to a Cypher lowering
 package ranke
 
 import (
@@ -120,7 +120,7 @@ func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollec
 // reverse index); DirConnections does both. Reverse steps require incoming to be
 // built (queryTraverse). A node reached by several equal-length routes keeps the
 // canonical one — minimal under (length, then (created_at, id) per node), the
-// same total order as the default sort — so DetailPath is deterministic and a
+// same total order as the default sort — so a path shape is deterministic and a
 // Cypher lowering can reproduce it byte-for-byte with a matching ORDER BY.
 func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
 	seen := map[string]bool{}
@@ -232,7 +232,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 
 // lessRoute reports whether route a sorts before b under the query total order:
 // shorter first, then node-by-node on (created_at, id) — the same key the
-// default sort and the Cypher DetailPath ORDER BY use, so all three agree.
+// default sort and the Cypher path ORDER BY use, so all three agree.
 func lessRoute(a, b []Claim) bool {
 	if len(a) != len(b) {
 		return len(a) < len(b)

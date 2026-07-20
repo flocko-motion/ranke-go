@@ -87,7 +87,7 @@ func perfQueries(m *generator.Manifest, root ranke.Id) []namedQuery {
 		}},
 		{"branch/order-height-20", ranke.Query{
 			Select: sel(),
-			Order:  &ranke.Order{Field: "height", Desc: true},
+			Order:  []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}},
 			Limit:  ranke.Limit{Results: 20},
 		}},
 		// Reverse walk: reach the branch's sources (forward), then DirUses to the
@@ -211,12 +211,12 @@ func describeQuery(q ranke.Query) string {
 	if q.Where != nil {
 		parts = append(parts, "where "+describeWhere(q.Where))
 	}
-	if q.Order != nil {
+	for _, k := range q.Order {
 		dir := "asc"
-		if q.Order.Desc {
+		if k.Dir == ranke.SortDesc {
 			dir = "desc"
 		}
-		parts = append(parts, "order("+q.Order.Field+" "+dir+")")
+		parts = append(parts, "order("+k.Field+" "+dir+")")
 	}
 	if q.Limit.Results > 0 {
 		parts = append(parts, fmt.Sprintf("limit=%d", q.Limit.Results))

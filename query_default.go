@@ -51,7 +51,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		defer cancel()
 	}
 
-	needPaths := q.Output.Detail == DetailPath
+	needPaths := q.Output.Shape == ShapePath
 	reached, routes, err := queryTraverse(ctx, u, q.Select, scope.Head, needPaths, rc)
 	if err != nil {
 		return nil, err
@@ -59,34 +59,8 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
 }
 
-// DefaultQueryFrom is DefaultQuery with the traversal supplied by the caller — a
-// backend lowers Select→its own query (e.g. Cypher), then this applies the
-// reference filter/sort/limit/shape, so the result set matches DefaultQuery.
-// traverse runs under the report context and returns the reached set (+ routes
-// for DetailPath); engine names the backend in the report. Confinement and root
-// resolution are the traverse's job (it knows the backend); this only needs the
-// scope to be present.
-func DefaultQueryFrom(ctx context.Context, u Universe, engine string, q Query,
-	traverse func(ctx context.Context) (reached []Claim, routes map[string][]Claim, err error)) (ResultStream, error) {
-	start := time.Now()
-	// Only the scope is universal: a native backend may resolve a branch read
-	// with no root (e.g. neo4j filters the _b_<branch> membership tag), so — unlike
-	// the byte-store reference — a nil Claim is not an error here; the traverse decides.
-	if q.Select.Branch == "" {
-		return nil, errQueryNoScope
-	}
-	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
-	rc.log(engine, "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch})
-	reached, routes, err := traverse(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
-}
-
 // finishReached is the reference post-traversal pipeline (Where, sort, limit,
-// shape) over an already-generated set — shared by DefaultQuery and
-// DefaultQueryFrom so every engine's results are identical. Finalises the report
+// shape) over an already-generated set. Finalises the report
 // if this call created it.
 func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, routes map[string][]Claim, rc *reportCollector, createdReport bool) (ResultStream, error) {
 	filterStart := reportStart(rc)
@@ -101,7 +75,7 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 
 	sortStart := reportStart(rc)
 	sortResults(filtered, q.Order)
-	rc.timed("native", "sort", ReportInfo, sortStart, "", map[string]any{"ordered": q.Order != nil})
+	rc.timed("native", "sort", ReportInfo, sortStart, "", map[string]any{"ordered": len(q.Order) > 0})
 
 	truncated := false
 	if q.Limit.Results > 0 && len(filtered) > q.Limit.Results {
@@ -112,14 +86,14 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 		rc.log("native", "limit", ReportInfo, "", map[string]any{"results": q.Limit.Results, "truncated": true})
 	}
 
-	needPaths := q.Output.Detail == DetailPath
+	needPaths := q.Output.Shape == ShapePath
 	results := make([]QueryResult, 0, len(filtered))
 	for _, c := range filtered {
-		r := QueryResult{Claim: c}
+		r := QueryResult{Id: c.ID(), Claim: c}
 		if needPaths {
 			r.Path = routes[c.ID().String()]
 		}
-		if q.Output.Content > 0 {
+		if q.Output.Content != nil {
 			r.Content = queryContent(ctx, u, c, q.Output)
 		}
 		results = append(results, r)
@@ -335,35 +309,65 @@ func toStringValue(v any) string {
 
 // --- ordering, content, stream ---------------------------------------------
 
-// sortResults orders claims by the query's Order, or by (created_at, id) when
-// none is given. Claims lacking the ordered field sort last.
-func sortResults(claims []Claim, order *Order) {
+// sortResults orders claims by the order keys (priority order), then the natural
+// (created_at, id) order for ties. A claim lacking a key's field sorts last.
+func sortResults(claims []Claim, keys []OrderKey) {
 	sort.SliceStable(claims, func(i, j int) bool {
 		ci, cj := claims[i], claims[j]
-		if order == nil {
-			ti, tj := ci.Node().CreatedAt(), cj.Node().CreatedAt()
-			if !ti.Equal(tj) {
-				return ti.Before(tj)
+		for _, k := range keys {
+			vi, oki := queryFieldValue(ci, k.Field)
+			vj, okj := queryFieldValue(cj, k.Field)
+			if oki != okj {
+				return oki // present before absent, regardless of direction
 			}
-			return ci.ID().String() < cj.ID().String()
+			if !oki {
+				continue // both lack this key — try the next
+			}
+			c := compareValues(vi, vj, k.Compare)
+			if c == 0 {
+				continue
+			}
+			if k.Dir == SortDesc {
+				return c > 0
+			}
+			return c < 0
 		}
-		vi, oki := queryFieldValue(ci, order.Field)
-		vj, okj := queryFieldValue(cj, order.Field)
-		if oki != okj {
-			return oki // present before absent, regardless of direction
+		// Natural order: (created_at, id) — a total order for stable ties.
+		ti, tj := ci.Node().CreatedAt(), cj.Node().CreatedAt()
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
 		}
-		if !oki {
-			return ci.ID().String() < cj.ID().String()
-		}
-		c, ok := compareOrdered(vi, vj)
-		if !ok {
-			c = strings.Compare(toStringValue(vi), toStringValue(vj))
-		}
-		if order.Desc {
-			return c > 0
-		}
-		return c < 0
+		return ci.ID().String() < cj.ID().String()
 	})
+}
+
+// compareValues compares two field values under the collation: numeric coerces to
+// float (falling back to string when either isn't numeric); lexical and the empty
+// default compare as strings, the empty default first trying numeric-aware order.
+func compareValues(a, b any, col Collation) int {
+	switch col {
+	case CompareNumeric:
+		if af, aok := asFloat(a); aok {
+			if bf, bok := asFloat(b); bok {
+				switch {
+				case af < bf:
+					return -1
+				case af > bf:
+					return 1
+				default:
+					return 0
+				}
+			}
+		}
+		return strings.Compare(toStringValue(a), toStringValue(b))
+	case CompareLexical:
+		return strings.Compare(toStringValue(a), toStringValue(b))
+	default:
+		if c, ok := compareOrdered(a, b); ok {
+			return c
+		}
+		return strings.Compare(toStringValue(a), toStringValue(b))
+	}
 }
 
 // queryContent loads up to Output.Content bytes of a claim's content, applying
@@ -379,14 +383,14 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	if err != nil {
 		return nil
 	}
-	data, err := io.ReadAll(io.LimitReader(rdr, out.Content+1))
+	data, err := io.ReadAll(io.LimitReader(rdr, out.Content.Max+1))
 	if err != nil {
 		return nil
 	}
-	if int64(len(data)) <= out.Content {
+	if int64(len(data)) <= out.Content.Max {
 		return data
 	}
-	switch out.Overflow {
+	switch out.Content.Overflow {
 	case OverflowOmit:
 		return nil
 	case OverflowReference:
@@ -401,7 +405,7 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 		}
 		return []byte(hash.String())
 	default: // OverflowCutoff
-		return data[:out.Content]
+		return data[:out.Content.Max]
 	}
 }
 
@@ -437,6 +441,15 @@ func (s *sliceStream) Close() error         { return nil }
 func GetFromClosure(ctx context.Context, u Universe, branch string, heads []Id, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
+	}
+	// Fast path: the tagger stamps every branch member with the _b_<branch> tag,
+	// so a present tag proves membership in O(1). A missing tag is inconclusive
+	// (the backend may be untagged), so it falls through to the reference walk,
+	// which honours reachability directly. Only for a real branch.
+	if branch != "" && branch != BranchUniverse && branch != BranchArchive {
+		if c, err := GetClaim(ctx, u, id); err == nil && c.Tag(BranchTagKey(branch)) != "" {
+			return c, nil
+		}
 	}
 	seen := map[string]struct{}{}
 	queue := make([]Id, 0, len(heads))

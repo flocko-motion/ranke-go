@@ -170,7 +170,7 @@ func TestQueryOverflowOmit(t *testing.T) {
 	q := Query{
 		Select: Select{Branch: BranchUniverse, Claim: a["s1"].ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
-		Output: Output{Content: 3, Overflow: OverflowOmit},
+		Output: Output{Content: &Content{Max: 3, Overflow: OverflowOmit}},
 	}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 1)
@@ -183,7 +183,7 @@ func TestQueryOverflowReference(t *testing.T) {
 	q := Query{
 		Select: Select{Branch: BranchUniverse, Claim: a["s1"].ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
-		Output: Output{Content: 3, Overflow: OverflowReference},
+		Output: Output{Content: &Content{Max: 3, Overflow: OverflowReference}},
 	}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 1)
@@ -200,7 +200,7 @@ func TestQueryOverflowReference(t *testing.T) {
 // root first and the height-3 hub last, with heights non-decreasing throughout.
 func TestQueryOrderHeightAscending(t *testing.T) {
 	u, a := queryOpsFixture(t)
-	q := Query{Select: Select{Branch: BranchUniverse, Claim: a["hub"].ID()}, Order: &Order{Field: "height"}}
+	q := Query{Select: Select{Branch: BranchUniverse, Claim: a["hub"].ID()}, Order: []OrderKey{{Field: "height"}}}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 6)
 	require.True(t, got[0].Claim.ID().Equal(a["root"].ID()), "height-0 root first")
