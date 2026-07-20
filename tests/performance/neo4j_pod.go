@@ -32,15 +32,34 @@ type Neo4jConn struct {
 	Password string
 }
 
-// neo4jConn obtains a Neo4j to test against. It uses an already-running
-// instance — the --native host install (forceNativeServices) or one named by
-// RANKE_NEO4J_BOLT/HTTP — and never tears it down; otherwise it spawns an
-// ephemeral pod (needs podman). Returns ErrUnavailable when neither is possible.
+// neo4jConn obtains a Neo4j to test against. It uses an already-running instance
+// — the --native host install (forceNativeServices), one named by
+// RANKE_NEO4J_BOLT/HTTP, or one simply serving at the default local address —
+// and never tears it down; otherwise it spawns an ephemeral pod (needs podman).
+// Returns ErrUnavailable when neither is possible.
 func neo4jConn() (*Neo4jConn, func(), error) {
-	if forceNativeServices || os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != "" {
+	if forceNativeServices || neo4jRequested() || neo4jReachable() {
 		return neo4jExternal()
 	}
 	return neo4jPod()
+}
+
+// neo4jRequested reports whether an external Neo4j was named explicitly via env.
+func neo4jRequested() bool {
+	return os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != ""
+}
+
+// neo4jReachable reports whether a Neo4j already serves at the default (or
+// env-named) HTTP endpoint — a fast single-shot probe, so tests run against a
+// running instance with no env var and skip cleanly when none is up.
+func neo4jReachable() bool {
+	client := http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(envOr("RANKE_NEO4J_HTTP", "http://127.0.0.1:7474") + "/")
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // neo4jExternal points at an already-running Neo4j — the host-native install on

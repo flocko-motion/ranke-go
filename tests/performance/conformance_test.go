@@ -2,7 +2,6 @@ package performance
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -107,8 +106,8 @@ func (s *CompareSuite) query(u ranke.Universe, q ranke.Query) []string {
 // TestConformanceMemVsNeo4j checks the neo4j/mem stack against the mem reference:
 // same archive, same queries, identical results. Needs a neo4j (RANKE_NEO4J_BOLT).
 func TestConformanceMemVsNeo4j(t *testing.T) {
-	if os.Getenv("RANKE_NEO4J_BOLT") == "" {
-		t.Skip("needs a neo4j (set RANKE_NEO4J_BOLT)")
+	if !neo4jRequested() && !neo4jReachable() {
+		t.Skip("no neo4j reachable (start one: services/neo4j.sh native up)")
 	}
 	suite.Run(t, &CompareSuite{
 		nameA: "mem", openA: openMem,
@@ -121,12 +120,28 @@ func TestConformanceMemVsNeo4j(t *testing.T) {
 // the one branch/closure query. It isolates branch-membership tagging — the
 // _b_<branch> set neo4j scans must equal the reference's closure walk.
 func TestConformanceBranchClosure(t *testing.T) {
-	if os.Getenv("RANKE_NEO4J_BOLT") == "" {
-		t.Skip("needs a neo4j (set RANKE_NEO4J_BOLT)")
+	if !neo4jRequested() && !neo4jReachable() {
+		t.Skip("no neo4j reachable (start one: services/neo4j.sh native up)")
 	}
 	suite.Run(t, &CompareSuite{
 		nameA: "mem", openA: openMem,
 		nameB: "neo4j/mem", openB: stacked(openNeo4j, openMem),
 		size: 2, only: "branch/closure",
+	})
+}
+
+// TestConformanceReverseWalk guards the forward-then-reverse path (uses-of-
+// sources) at a size dense enough that a source is reached only via the deriver
+// that cites it — the case a single-trail Cypher lowering would drop but the
+// per-step frontier keeps. It passes at the small default size, so it needs the
+// larger graph to be meaningful.
+func TestConformanceReverseWalk(t *testing.T) {
+	if !neo4jRequested() && !neo4jReachable() {
+		t.Skip("no neo4j reachable (start one: services/neo4j.sh native up)")
+	}
+	suite.Run(t, &CompareSuite{
+		nameA: "mem", openA: openMem,
+		nameB: "neo4j/mem", openB: stacked(openNeo4j, openMem),
+		size: 55, only: "branch/uses-of-sources",
 	})
 }

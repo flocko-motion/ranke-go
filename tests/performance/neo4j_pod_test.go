@@ -10,15 +10,14 @@ import (
 )
 
 // TestNeo4j validates the neo4j test infrastructure end to end: obtain a real
-// Neo4j — an external/host instance when RANKE_NEO4J_BOLT/_HTTP is set, else an
-// ephemeral podman pod — confirm it serves, and release it. Opt-in: it runs
-// only when pointed at a host instance (RANKE_NEO4J_BOLT/_HTTP) or asked to
-// spawn a pod (RANKE_PERF_NEO4J), since Neo4j is slow to boot. Skips cleanly
-// otherwise, so it never fails in a podman-less sandbox with no host instance.
+// Neo4j — a host instance already serving (named by RANKE_NEO4J_BOLT/_HTTP or
+// simply reachable at the default local address), else an ephemeral podman pod —
+// confirm it serves, and release it. It runs against any reachable instance with
+// no env var; a pod is opt-in (RANKE_PERF_NEO4J) since Neo4j is slow to boot.
+// Skips cleanly otherwise, so it never fails in a podman-less sandbox.
 func TestNeo4j(t *testing.T) {
-	external := os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != ""
-	if !external && os.Getenv("RANKE_PERF_NEO4J") == "" {
-		t.Skip("point at a host Neo4j via RANKE_NEO4J_BOLT/_HTTP, or set RANKE_PERF_NEO4J=1 to boot a pod")
+	if !neo4jRequested() && !neo4jReachable() && os.Getenv("RANKE_PERF_NEO4J") == "" {
+		t.Skip("no neo4j reachable (services/neo4j.sh native up), or set RANKE_PERF_NEO4J=1 to boot a pod")
 	}
 	conn, cleanup, err := neo4jConn()
 	if errors.Is(err, ErrUnavailable) {
