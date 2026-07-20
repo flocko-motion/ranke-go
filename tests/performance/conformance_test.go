@@ -20,6 +20,8 @@ type CompareSuite struct {
 	suite.Suite
 	nameA, nameB string
 	openA, openB func() (ranke.Universe, func(), error)
+	size         int    // generator size (0 → 5, the default matrix size)
+	only         string // when set, run only the query with this name (focus mode)
 
 	ctx      context.Context
 	a, b     ranke.Universe
@@ -31,7 +33,11 @@ type CompareSuite struct {
 
 func (s *CompareSuite) SetupSuite() {
 	s.ctx = context.Background()
-	spec := generator.SpecForSize(1, 5)
+	size := s.size
+	if size == 0 {
+		size = 5
+	}
+	spec := generator.SpecForSize(1, size)
 	s.a, s.cleanupA, s.m, s.head = s.build(spec, s.openA)
 	var headB ranke.Id
 	s.b, s.cleanupB, _, headB = s.build(spec, s.openB)
@@ -70,6 +76,9 @@ func (s *CompareSuite) build(spec generator.Spec, open func() (ranke.Universe, f
 // is a sub-test, so all divergences surface in one run.
 func (s *CompareSuite) TestQueries() {
 	for _, nq := range perfQueries(s.m, s.head) {
+		if s.only != "" && nq.name != s.only {
+			continue
+		}
 		s.Run(nq.name, func() {
 			idsA := s.query(s.a, nq.q)
 			idsB := s.query(s.b, nq.q)
@@ -82,7 +91,7 @@ func (s *CompareSuite) TestQueries() {
 // query runs q against u (resolving the branch scope like an Archive would) and
 // returns the reached ids in emitted order.
 func (s *CompareSuite) query(u ranke.Universe, q ranke.Query) []string {
-	scope, err := queryScope(s.ctx, u, q)
+	scope, err := queryScope(s.ctx, u, q, s.m.Head)
 	s.Require().NoError(err)
 	rs, err := u.Query(s.ctx, q, scope)
 	s.Require().NoError(err)
@@ -104,5 +113,20 @@ func TestConformanceMemVsNeo4j(t *testing.T) {
 	suite.Run(t, &CompareSuite{
 		nameA: "mem", openA: openMem,
 		nameB: "neo4j/mem", openB: stacked(openNeo4j, openMem),
+	})
+}
+
+// TestConformanceBranchClosure is the minimal focus case: the smallest archive
+// that still has multiple revisions and a shared claim across branches, and just
+// the one branch/closure query. It isolates branch-membership tagging — the
+// _b_<branch> set neo4j scans must equal the reference's closure walk.
+func TestConformanceBranchClosure(t *testing.T) {
+	if os.Getenv("RANKE_NEO4J_BOLT") == "" {
+		t.Skip("needs a neo4j (set RANKE_NEO4J_BOLT)")
+	}
+	suite.Run(t, &CompareSuite{
+		nameA: "mem", openA: openMem,
+		nameB: "neo4j/mem", openB: stacked(openNeo4j, openMem),
+		size: 2, only: "branch/closure",
 	})
 }

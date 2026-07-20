@@ -10,15 +10,14 @@ package ranke
 // separate reserved keys from claim fields.
 const ReservedPrefix = "_"
 
-// --- Tags: the tagger's mutable per-claim overlay. All keys sit under the "_b"
-// family, so a single "_b*" clear scopes exactly to them. ---
+// --- Tags: the tagger's per-claim overlay, all under the "_b" family. A
+// member's _b_<branch> records the table-height it first joined at — a permanent
+// fact in an immutable graph, so it is write-once: added, never cleared. ---
 
 const (
 	// SpineRevKey records the spine revision a branch-table claim sits at — the
 	// commit marker written last per revision.
 	SpineRevKey = "_br"
-	// BranchTagGlob clears the whole tag family in one SetClaimsTags call.
-	BranchTagGlob = "_b*"
 )
 
 // BranchTagKey marks a claim as a member of branch b's closure, valued with the

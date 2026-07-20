@@ -121,6 +121,9 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 
 // resolveScope maps Branch to its Scope: a name via its head, $archive via the
 // table head, $universe unconfined (Head nil — caller must pin Select.Claim).
+// Height is always the branch-table height (the tag scale): a member's
+// _b_<branch> is the table height it joined at, so tag <= Height filters both
+// membership and point-in-time in one comparison.
 func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 	switch q.Select.Branch {
 	case "":
@@ -134,12 +137,7 @@ func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 		if err != nil {
 			return Scope{}, err
 		}
-		head := br.Head()
-		hc, err := GetClaim(ctx, a.u, head)
-		if err != nil {
-			return Scope{}, wrapDetail(errQuery, "branch head "+head.String(), err)
-		}
-		return Scope{Head: head, Branch: q.Select.Branch, Height: hc.Node().Height(), Revision: revisionOf(a.bth)}, nil
+		return Scope{Head: br.Head(), Branch: q.Select.Branch, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}, nil
 	}
 }
 

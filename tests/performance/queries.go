@@ -130,13 +130,14 @@ func queryRoot(ctx context.Context, u ranke.Universe, m *generator.Manifest) (ra
 // backend whose engine reorders or drops results diverges from the reference.
 // queryScope resolves the scope an Archive would apply: a branch query is
 // confined to its head's closure (root == branch head), $universe is unconfined.
-// Height completes it — a native backend confines by _b_<branch> <= Height, so
-// it must be the branch head's height (the reference confines by Head, ignores it).
-func queryScope(ctx context.Context, u ranke.Universe, q ranke.Query) (ranke.Scope, error) {
+// Height is the archive's branch-table height (archiveHead = the archive head,
+// same as resolveScope), the scale the _b_<branch> tags use: a native backend
+// confines by tag <= Height; the reference confines by Head and ignores it.
+func queryScope(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (ranke.Scope, error) {
 	scope := ranke.Scope{Branch: q.Select.Branch}
 	if q.Select.Branch != ranke.BranchUniverse {
 		scope.Head = q.Select.Claim
-		hc, err := u.GetClaims(ctx, []ranke.Id{scope.Head})
+		hc, err := u.GetClaims(ctx, []ranke.Id{archiveHead})
 		if err != nil {
 			return ranke.Scope{}, err
 		}
@@ -145,9 +146,9 @@ func queryScope(ctx context.Context, u ranke.Universe, q ranke.Query) (ranke.Sco
 	return scope, nil
 }
 
-func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query) (hash string, results int, dur time.Duration, err error) {
+func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (hash string, results int, dur time.Duration, err error) {
 	start := time.Now()
-	scope, err := queryScope(ctx, u, q)
+	scope, err := queryScope(ctx, u, q, archiveHead)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -304,7 +305,7 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 		var hash string
 		var results int
 		for j := 0; j < reps; j++ {
-			h, n, d, err := runQuery(ctx, u, nq.q)
+			h, n, d, err := runQuery(ctx, u, nq.q, m.Head)
 			if err != nil {
 				return nil, err
 			}
@@ -326,7 +327,7 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 			if isMet {
 				met.setPhase("report") // keep the report run's ops out of the "4.N" timing
 			}
-			if err := printQueryReport(ctx, w, u, phaseID, nq); err != nil {
+			if err := printQueryReport(ctx, w, u, phaseID, nq, m.Head); err != nil {
 				return nil, err
 			}
 		}
@@ -336,8 +337,8 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 
 // printQueryReport runs nq once with full execution reporting on and prints the
 // per-station event log to w — the --report view, shown in the queries section.
-func printQueryReport(ctx context.Context, w io.Writer, u ranke.Universe, label string, nq namedQuery) error {
-	scope, err := queryScope(ctx, u, nq.q)
+func printQueryReport(ctx context.Context, w io.Writer, u ranke.Universe, label string, nq namedQuery, archiveHead ranke.Id) error {
+	scope, err := queryScope(ctx, u, nq.q, archiveHead)
 	if err != nil {
 		return err
 	}

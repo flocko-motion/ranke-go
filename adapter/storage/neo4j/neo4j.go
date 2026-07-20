@@ -2,6 +2,7 @@
 // type:    adapter
 // job:     a graph-native CACHE Universe on neo4j — stores claim structure (nodes, edges) so closure/membership run as native Cypher instead of edge walks
 // limits:  pure cache — no canonical CBOR, no external content, inline content only up to a cap (default 4 KiB); stack over a durable Universe (-> adapter/s3, adapter/fs) that holds the bytes and serves content misses
+// dev:     a real neo4j runs IN your container — `services/neo4j.sh native up` (bolt://127.0.0.1:7687, user neo4j / pass rankeperfpass); the adapter tests skip unless RANKE_NEO4J_BOLT is set
 package neo4j
 
 import (

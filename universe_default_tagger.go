@@ -10,8 +10,8 @@ import (
 	"strconv"
 )
 
-// The tag keys this tagger owns (SpineRevKey, BranchTagKey, BranchTagGlob) are
-// defined in universe_taxonomy.go, the central reserved-namespace registry.
+// The tag keys this tagger owns (SpineRevKey, BranchTagKey) are defined in
+// universe_taxonomy.go, the central reserved-namespace registry.
 
 // TagArchiveOptions tunes TagArchive.
 type TagArchiveOptions struct {
@@ -127,15 +127,14 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 				return nil, err
 			}
 		}
-		// 2.2: add the spine revision on the branch-table claim, then flush the
-		// revision at once — clearing _b* first (so a hidden branch's stale tags
-		// go) and writing each claim's accumulated set. _br is the commit marker.
+		// 2.2: mark the spine revision, then flush the accumulated tags additively
+		// — never clearing, so a shared claim keeps other branches' _b_<branch>.
 		s := bt.ID().String()
 		if tags[s] == nil {
 			tags[s] = map[string]string{}
 		}
 		tags[s][SpineRevKey] = revisionStr
-		if err := u.SetClaimsTags(ctx, []string{BranchTagGlob}, tags); err != nil {
+		if err := u.SetClaimsTags(ctx, nil, tags); err != nil {
 			return nil, err
 		}
 	}
