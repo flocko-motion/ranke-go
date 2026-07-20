@@ -45,6 +45,10 @@ type Config struct {
 	Native    bool     // connect neo4j/redis to a host-native instance (localhost) instead of spawning podman pods
 	Step      string   // run only this step (e.g. "2-verify", "3.1", "4.5"); "" = all. setup+tag always run.
 	Report    bool     // print each query's full execution report in the queries section
+	// Correctness runs the queries once on the mem reference and checks every
+	// backend's result sets against it (the determinism analysis). Off by
+	// default — it is the slow pre-matrix pass; the overview still prints.
+	Correctness bool
 }
 
 // stepSelected reports whether the measured step with this phase id runs under
@@ -265,11 +269,26 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	spec := generator.SpecForSize(cfg.Seed, cfg.Size)
 	ctx := context.Background()
 
-	// Generate the reference archive once into mem (the standard every backend
-	// must match). From this single deterministic graph we (1) print an overview
-	// of its shape — so the scale of a --size N run is legible before the matrix
-	// — and (2) compute each query's reference result-set hash; a backend whose
-	// results diverge is a determinism failure.
+	// showProgress labels the otherwise-silent between-block phases (reference
+	// generate, reference queries, opening each backend) with an in-place line —
+	// interactive CLI only; a piped/NO_COLOR/go-test run stays clean.
+	showProgress := cfg.Progress && useColor
+	progress := func(stage string) {
+		if showProgress {
+			fmt.Fprintf(w, "\r  \033[90m⏳ %-52s\033[0m\033[K", stage)
+		}
+	}
+	clearProgress := func() {
+		if showProgress {
+			fmt.Fprint(w, "\r\033[K")
+		}
+	}
+
+	// Generate the reference archive once into mem — a fast, always-available,
+	// deterministic standard. It powers the overview (graph shape, printed
+	// upfront) always, and — under --correctness — the determinism baseline every
+	// backend's query results are checked against.
+	progress("generating reference archive")
 	refU := mem.New()
 	refM, err := generator.Generate(ctx, refU, spec)
 	if err != nil {
@@ -279,19 +298,34 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	if err != nil {
 		return fmt.Errorf("graph overview: %w", err)
 	}
+	clearProgress()
 	printOverview(w, spec, refM, ov)
-	refStats, err := runQuerySet(ctx, refU, refM, 1, refU.Capabilities().Tags, cfg.Step, false, w)
-	if err != nil {
-		return fmt.Errorf("mem reference queries: %w", err)
+
+	// The query list needs no run; result counts + determinism hashes do, so the
+	// reference query pass (the slowest pre-matrix step) runs only under
+	// --correctness. Without it, backends still time their queries — they just
+	// aren't checked against a baseline.
+	refHashes := map[string]string{}
+	var refStats []queryStat
+	if cfg.Correctness {
+		progress("running reference queries (result counts + determinism hashes)")
+		refStats, err = runQuerySet(ctx, refU, refM, 1, refU.Capabilities().Tags, cfg.Step, false, w)
+		if err != nil {
+			return fmt.Errorf("mem reference queries: %w", err)
+		}
+		clearProgress()
+		for _, s := range refStats {
+			refHashes[s.name] = s.hash
+		}
+	} else {
+		refStats = queryList(refM, cfg.Step)
 	}
-	printQueryList(w, refStats)
-	refHashes := make(map[string]string, len(refStats))
-	for _, s := range refStats {
-		refHashes[s.name] = s.hash
-	}
+	printQueryList(w, refStats, cfg.Correctness)
 
 	for _, be := range backends {
+		progress("opening " + be.Name)
 		u0, cleanup, err := be.Open()
+		clearProgress()
 		if errors.Is(err, ErrUnavailable) {
 			rule := strings.Repeat("═", 88)
 			fmt.Fprintf(w, "\n%s\n  %-14s  SKIP — %v\n%s\n", rule, be.Name, err, rule)

@@ -17,9 +17,10 @@ import (
 // any backend fails to verify. `make test/performance/N` sets RANKE_PERF_SIZE.
 func TestPerformanceMatrix(t *testing.T) {
 	cfg := Config{
-		Size:   envInt(t, "RANKE_PERF_SIZE", 100),
-		Seed:   1,
-		Access: envInt(t, "RANKE_PERF_ACCESS", 50),
+		Size:        envInt(t, "RANKE_PERF_SIZE", 100),
+		Seed:        1,
+		Access:      envInt(t, "RANKE_PERF_ACCESS", 50),
+		Correctness: true, // the test's whole point: every backend matches the mem reference
 	}
 	if err := RunMatrix(cfg, &testWriter{t: t}, nil); err != nil {
 		t.Fatal(err)

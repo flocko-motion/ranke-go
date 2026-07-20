@@ -20,13 +20,32 @@ import (
 // printQueryList prints the fixed query set once, before the matrix — name, RQL,
 // and reference result count — since it is identical for every backend. Each
 // backend's report then shows the query timings as "4.N" rows in its table.
-func printQueryList(w io.Writer, stats []queryStat) {
+func printQueryList(w io.Writer, stats []queryStat, withResults bool) {
 	rule := strings.Repeat("═", 88)
 	fmt.Fprintf(w, "\n%s\n  chapter 4 — queries (same for every backend; timings appear as 4.N table rows)\n%s\n", rule, rule)
 	for _, s := range stats {
-		fmt.Fprintf(w, "  %-4s %-24s %-46s %d results\n", s.id, s.name, s.rql, s.results)
+		if withResults {
+			fmt.Fprintf(w, "  %-4s %-24s %-46s %d results\n", s.id, s.name, s.rql, s.results)
+		} else {
+			fmt.Fprintf(w, "  %-4s %-24s %s\n", s.id, s.name, s.rql)
+		}
 	}
 	fmt.Fprintf(w, "%s\n", rule)
+}
+
+// queryList returns the query set's id/name/rql without running anything — for
+// the list when --correctness is off (no result counts). Filtered by step like
+// runQuerySet. Root is irrelevant to the RQL rendering, so it is left nil.
+func queryList(m *generator.Manifest, step string) []queryStat {
+	var out []queryStat
+	for i, nq := range perfQueries(m, nil) {
+		id := fmt.Sprintf("4.%d", i+1)
+		if step != "" && step != "4" && step != id {
+			continue
+		}
+		out = append(out, queryStat{id: id, name: nq.name, rql: describeQuery(nq.q)})
+	}
+	return out
 }
 
 // namedQuery pairs a stable name with an RQL query. The name keys both the

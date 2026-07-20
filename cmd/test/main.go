@@ -32,9 +32,10 @@ func performanceCmd() *cobra.Command {
 		seed     int64
 		access   int
 		backends []string
-		native   bool
-		step     string
-		report   bool
+		native      bool
+		step        string
+		report      bool
+		correctness bool
 	)
 	cmd := &cobra.Command{
 		Use:   "performance",
@@ -55,8 +56,9 @@ func performanceCmd() *cobra.Command {
 				Backends: backends,
 				Progress: true, // interactive CLI: show the in-place progress line
 				Native:   native,
-				Step:     step,
-				Report:   report,
+				Step:        step,
+				Report:      report,
+				Correctness: correctness,
 			}
 			return performance.RunMatrix(cfg, cmd.OutOrStdout(), nil)
 		},
@@ -69,5 +71,6 @@ func performanceCmd() *cobra.Command {
 	f.BoolVar(&native, "native", false, "use the host-native neo4j/redis on localhost (flushed at start, left in place after) instead of spawning podman pods")
 	f.StringVar(&step, "step", "", "run only this step (e.g. 2-verify, 3.1, 4.5; 4 = all queries); setup and tag always run")
 	f.BoolVar(&report, "report", false, "print each query's full execution report in the queries section")
+	f.BoolVar(&correctness, "correctness", false, "run queries on the mem reference and check every backend's result sets against it (slower)")
 	return cmd
 }
