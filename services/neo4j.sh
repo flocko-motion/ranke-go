@@ -163,23 +163,59 @@ nat_status() { nat_is_running && echo "running — bolt://127.0.0.1:${BOLT_PORT}
 nat_env()    { nat_is_running && nat_print_env || { echo "not running" >&2; exit 1; }; }
 nat_purge()  { nat_down || true; rm -rf "$NAT_DIR"; echo "purged ${NAT_DIR}"; }
 
+# ── query ──────────────────────────────────────────────────────────────
+# Run any Cypher against the running instance and print one JSON object per
+# row, keyed by return column. Mode-independent: both pod and native publish
+# HTTP on 127.0.0.1:${HTTP_PORT}. Cypher comes from the argument, or from stdin
+# when the argument is "-", so a heredoc can carry a multi-line statement.
+query() {
+  local cypher="${1:-}"
+  [ "$cypher" = "-" ] && cypher="$(cat)"
+  if [ -z "$cypher" ]; then
+    echo "error: no cypher given (pass a statement, or '-' to read stdin)" >&2
+    return 2
+  fi
+  local body out
+  body="$(jq -nc --arg s "$cypher" '{statements:[{statement:$s}]}')"
+  out="$(curl -fsS -u "neo4j:${PASS}" -H 'Content-Type: application/json' \
+    -X POST "http://127.0.0.1:${HTTP_PORT}/db/${RANKE_NEO4J_DB:-neo4j}/tx/commit" \
+    -d "$body")" || { echo "error: could not reach Neo4j on 127.0.0.1:${HTTP_PORT} (is it up?)" >&2; return 1; }
+
+  # Neo4j reports Cypher errors in-band with HTTP 200, so check them explicitly.
+  if [ "$(jq -r '.errors | length' <<<"$out")" != "0" ]; then
+    jq -r '.errors[] | "error: \(.code): \(.message)"' <<<"$out" >&2
+    return 1
+  fi
+  # Zip each row against the column names, so output is self-describing rather
+  # than positional.
+  jq -c '.results[]? | .columns as $c | .data[]?
+         | [$c, .row] | transpose | map({(.[0]): .[1]}) | add' <<<"$out"
+}
+
 # ── dispatch ───────────────────────────────────────────────────────────
 usage() {
   cat <<EOF
 usage: $0 <pod|native> <command> [opts]
+       $0 query <cypher>
 
   pod     run Neo4j in a podman pod on a shared network (needs podman)
             up [agent-pod] | down | status | env
   native  install + run Neo4j in this container (no podman/root)
             up | down | status | env | purge
+  query   run any Cypher against the running instance (either mode) and
+          print one JSON object per row, keyed by return column. Pass '-'
+          to read the statement from stdin.
+            $0 query 'MATCH (n) RETURN labels(n)[0] AS label, n.content_size AS size'
 
-  Call with either 'pod' or 'native'.
+  Overrides: RANKE_NEO4J_DB selects the database (default neo4j).
 EOF
 }
 
 mode="${1:-}"
 cmd="${2:-up}"
 case "$mode" in
+  query)
+    query "${2:-}" ;;
   pod)
     case "$cmd" in
       up) pod_up "${3:-}" ;;
