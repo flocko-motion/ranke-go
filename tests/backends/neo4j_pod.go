@@ -1,8 +1,8 @@
-// package: tests/performance / integration
+// package: tests/backends / integration
 // type:    tool
 // job:     spawn a real Neo4j instance in a podman pod for the (forthcoming) neo4j matrix row, tear it down after — ready to wire the moment the neo4j adapter lands
 // limits:  requires podman on PATH and network to pull the image; returns ErrUnavailable when podman is absent. Neo4j boots slowly, so the timeouts are generous (and cover a first-run image pull).
-package performance
+package backends
 
 import (
 	"context"

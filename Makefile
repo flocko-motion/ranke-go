@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -93,6 +93,17 @@ test/integration:
 	echo "fs archive directory (preserved for inspection):" && \
 	echo "  $(RANKE_FS_DIR)"
 
+# test/matrix — the cross-backend conformance matrix: build the same
+# deterministic archive into every backend that can run here and assert each
+# one answers the whole RQL corpus exactly as the mem reference does. Rows
+# needing a service that is not up skip themselves, so this is green on a bare
+# checkout and grows teeth as services come up:
+#   services/neo4j.sh native up    # adds the neo4j/mem row
+#   services/redis.sh native up    # adds the redis row
+# Verbose so the per-row, per-query sub-tests are visible.
+test/matrix:
+	go test ./tests/matrix/ -v -count=1
+
 # test/performance/N — the backend matrix: generate the same deterministic
 # size-N archive into each storage backend and time build + verify, one row
 # per backend. N is the generator size knob (SpecForSize); ~5*N claims. E.g.
@@ -101,9 +112,10 @@ test/integration:
 test/performance/%:
 	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
 
-# test — both layers, core first so a broken foundation fails before the
-# feature suite spins up.
-test: test/core test/integration
+# test — the layers in order of foundation: the datatype, then the feature
+# suite, then cross-backend agreement (which skips the rows whose services
+# aren't up).
+test: test/core test/integration test/matrix
 
 test-verbose:
 	go test -v ./tests/...

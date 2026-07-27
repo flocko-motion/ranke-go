@@ -1,8 +1,8 @@
-// package: tests/performance / integration
+// package: tests/backends / integration
 // type:    tool
 // job:     obtain a Redis for the matrix — a host/local instance via RANKE_REDIS_ADDR (services/redis.sh), else an ephemeral podman pod — with connection details for the redis adapter
 // limits:  requires RANKE_REDIS_ADDR or podman; returns ErrUnavailable otherwise. Never tears down an instance it did not start.
-package performance
+package backends
 
 import (
 	"context"
