@@ -123,30 +123,33 @@ func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollec
 // same total order as the default sort — so a path shape is deterministic and a
 // Cypher lowering can reproduce it byte-for-byte with a matching ORDER BY.
 func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
-	seen := map[string]bool{}
-	var level []Claim // the current BFS level; the frontier is hop 0
-	for _, f := range frontier {
-		if k := f.ID().String(); !seen[k] {
-			seen[k] = true
-			level = append(level, f)
-		}
-	}
+	// Two sets, one meaning each. routed holds the nodes whose canonical route is
+	// fixed, so neither expansion nor routing revisits them. collected holds what
+	// the result already carries.
+	routed := map[string]bool{}
+	collected := map[string]bool{}
+	minHops := step.MinHops()
 
 	var out []Claim
-	outSeen := map[string]bool{}
-	minHops := step.MinHops()
-	collect := func(c Claim, hop int) {
-		if hop < minHops {
+	// reach records that a path of hop edges arrives at c. Arriving is independent
+	// of routing: a node the frontier started from is still a result when a path
+	// comes back to it, as in Cypher.
+	reach := func(c Claim, hop int) {
+		k := c.ID().String()
+		if hop < minHops || collected[k] || !matchTypeList(step.Nodes, c.Node().Type()) {
 			return
 		}
-		k := c.ID().String()
-		if !outSeen[k] && matchTypeList(step.Nodes, c.Node().Type()) {
-			outSeen[k] = true
-			out = append(out, c)
-		}
+		collected[k] = true
+		out = append(out, c)
 	}
-	for _, c := range level {
-		collect(c, 0)
+
+	var level []Claim // the current BFS level; the frontier is hop 0
+	for _, f := range frontier {
+		if k := f.ID().String(); !routed[k] {
+			routed[k] = true
+			level = append(level, f)
+			reach(f, 0)
+		}
 	}
 
 	forward := step.Dir == "" || step.Dir == DirProvenance || step.Dir == DirConnections
@@ -169,10 +172,13 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		}
 		best := map[string]cand{} // child id → best candidate so far
 		var order []string        // children first seen this level, for stable finalisation
+		// consider offers child as a route candidate for this level. Arrival is
+		// recorded first, since it holds whether or not the route is a candidate.
 		consider := func(cur, child Claim) {
 			k := child.ID().String()
-			if seen[k] {
-				return // finalised at a shorter level — that shorter route wins
+			reach(child, hop+1)
+			if routed[k] {
+				return // a shorter route already won
 			}
 			var route []Claim
 			if needPaths {
@@ -196,9 +202,6 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 						continue
 					}
 					ref := e.Reference()
-					if seen[ref.String()] {
-						continue
-					}
 					child, err := GetClaim(ctx, u, ref)
 					if err != nil {
 						return nil, WrapDetail(errQuery, "traverse "+ref.String(), err)
@@ -221,13 +224,12 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		}
 		var next []Claim
 		for _, k := range order {
-			seen[k] = true
+			routed[k] = true
 			c := best[k]
 			if needPaths {
 				routes[k] = c.route
 			}
 			next = append(next, c.claim)
-			collect(c.claim, hop+1)
 		}
 		level = next
 	}
