@@ -6,14 +6,12 @@ package stack
 
 import (
 	"context"
-	"errors"
 
 	"github.com/flocko-motion/ranke-go"
 )
 
-// Joined so errors.Is still matches ranke.ErrUnsupported across the port.
-var errNoOriginals = errors.Join(ranke.ErrUnsupported,
-	errors.New("adapter/stack: original form — no layer keeps canonical claims"))
+var errNoOriginals = ranke.WithDetail(ranke.ErrUnsupported,
+	"adapter/stack: original form — no layer keeps canonical claims")
 
 // Query runs the read on the top layer — which layer answers is a routing
 // decision, and the selection is the expensive part. The form asked for is a
