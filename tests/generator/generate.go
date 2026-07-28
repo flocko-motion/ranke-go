@@ -35,6 +35,7 @@ type Manifest struct {
 
 	DiffChainHead ranke.Id   // head of the longest contribution/diff chain
 	ExternalBlobs []ranke.Id // source claims whose content is external (hash-addressed)
+	TinyBlob      ranke.Id   // the source whose content is TinyBlobBytes long
 	HighDegree    ranke.Id   // the derivation citing the most sources
 	Expiries      []ranke.Id // contribution/expiry claims (key expiry)
 	Deletes       []ranke.Id // contribution/delete tombstones
@@ -157,6 +158,7 @@ type builder struct {
 	batch         []ranke.Claim
 	manifest      Manifest
 	oversizedDone bool // the oversized-field corner is applied once
+	tinyDone      bool // likewise the tiny-content corner
 	err           error
 }
 
@@ -205,8 +207,8 @@ func (b *builder) contributors(op ranke.Contributor) {
 }
 
 // sources builds spec.Sources source/* claims: the first ExternalBlobs carry
-// external (hash-addressed) content, then tiny and large inline blobs
-// alternate. One source carries an oversized field value.
+// external (hash-addressed) content, then inline notes and further external
+// blobs alternate. One source carries an oversized field value.
 func (b *builder) sources() {
 	for i := 0; i < b.spec.Sources && b.err == nil; i++ {
 		who := b.who(i)
@@ -234,8 +236,14 @@ func (b *builder) sources() {
 // inline source also carries the oversized field value (that corner, applied
 // once) — a large-but-valid field, kept under the ADT's field cap.
 func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
+	text := textFor(b.spec.Seed, "src", i)
+	tiny := !b.tinyDone && b.spec.TinyBlobBytes > 0
+	if tiny {
+		text = tinyFor(b.spec.Seed, "src", i, b.spec.TinyBlobBytes)
+		b.tinyDone = true
+	}
 	cb := ranke.NewClaim(ranke.TypeSource("note"), who).
-		WithInlineContent([]byte(textFor(b.spec.Seed, "src", i))).
+		WithInlineContent([]byte(text)).
 		WithEncoding(ranke.EncodingPlain). // a note is legible text
 		WithCreatedAt(b.clock.Tick())
 	if !b.oversizedDone && b.spec.OversizedFieldBytes > 0 {
@@ -246,7 +254,11 @@ func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
 		cb = cb.WithField("note", big)
 		b.oversizedDone = true
 	}
-	return b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
+	c := b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
+	if tiny && c != nil {
+		b.manifest.TinyBlob = c.ID()
+	}
+	return c
 }
 
 // externalSource builds a source/* claim whose content lives in the Universe

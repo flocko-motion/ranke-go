@@ -149,6 +149,12 @@ func textFor(master int64, tag string, index int) string {
 	return gofakeit.New(contentSeed(master, tag, index)).Sentence(12)
 }
 
+// tinyFor returns exactly n bytes of deterministic legible text — the
+// small-content corner, where content_size is a handful of bytes.
+func tinyFor(master int64, tag string, index, n int) string {
+	return gofakeit.New(contentSeed(master, tag, index)).LetterN(uint(n))
+}
+
 // nameFor returns a deterministic person name for an entity/person's content.
 func nameFor(master int64, index int) string {
 	return gofakeit.New(contentSeed(master, "person", index)).Name()
