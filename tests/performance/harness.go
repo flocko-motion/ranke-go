@@ -170,20 +170,10 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	runBranch := taggable && cfg.stepSelected("3.1-branch")
 	runUniverse := cfg.stepSelected("3.2-universe")
 	runQueries := cfg.Step == "" || strings.HasPrefix(cfg.Step, "4")
-	needTag := taggable && (cfg.Step == "" || cfg.stepSelected("1-tag") || runBranch || runQueries)
 
-	// tag: stamp each claim's branch membership (_b_<branch>) and each branch
-	// table's revision (_br) — what the branch-scoped reads rely on.
-	var tagDur time.Duration
-	if needTag {
-		progress("tag")
-		u.setPhase("1-tag")
-		ctag := time.Now()
-		if _, err := ranke.TagArchive(ctx, arc); err != nil {
-			return 0, fmt.Errorf("%s: tag: %w", name, err)
-		}
-		tagDur = time.Since(ctag)
-	}
+	// No tag chapter: the Sequencer signals the storage as the head advances, so
+	// branch membership is already in place and its cost is inside setup. A pass
+	// here would find nothing to do and time it as if it were work.
 
 	// verify: walk the provenance DAG and check every claim.
 	var run ranke.VerificationRun
@@ -271,12 +261,6 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, verified, len(ids))
 	sr, sw := u.phaseIO("setup")
 	fmt.Fprintf(w, "  setup            %-9s (%dw %dr)\n", ms(writeDur), sw, sr)
-	if needTag {
-		r, wr := u.phaseIO("1-tag")
-		fmt.Fprintf(w, "  tag              %-9s (%dw %dr)\n", ms(tagDur), wr, r)
-	} else if full && !taggable {
-		fmt.Fprintf(w, "  tag              n/a\n")
-	}
 	if runVerify {
 		r, _ := u.phaseIO("2-verify")
 		fmt.Fprintf(w, "  verify           %-9s (%dr)\n", ms(verifyDur), r)

@@ -21,7 +21,32 @@ func (u *neo4jUniverse) materializeForWrite(ctx context.Context, cs []ranke.Clai
 			batch[c.ID().String()] = c
 		}
 	}
-	_, err := ranke.DefaultMaterialize(ctx, batchFirst{Universe: u, batch: batch}, cs)
+	src := batchFirst{Universe: u, batch: batch}
+	done := make(map[string]bool, len(cs))
+	for _, c := range cs {
+		if err := link(ctx, src, batch, done, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// link resolves c's predecessor chain depth-first, then c — so no claim is ever
+// linked twice, and no link walks a chain that is already resolved. Only the batch
+// is descended: a predecessor already in the graph is materialised there.
+func link(ctx context.Context, src batchFirst, batch map[string]ranke.Claim, done map[string]bool, c ranke.Claim) error {
+	if c == nil || c.ID() == nil || done[c.ID().String()] {
+		return nil
+	}
+	done[c.ID().String()] = true
+	for _, e := range c.Edges(ranke.EdgeFilterType{Type: ranke.EdgeTypeDiff}) {
+		if pred, ok := batch[e.Reference().String()]; ok {
+			if err := link(ctx, src, batch, done, pred); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := ranke.DefaultMaterialize(ctx, src, []ranke.Claim{c})
 	return err
 }
 
@@ -51,14 +76,15 @@ func (b batchFirst) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke
 		missIDs = append(missIDs, id)
 		missAt = append(missAt, i)
 	}
-	if len(missIDs) > 0 {
-		got, err := b.Universe.GetClaims(ctx, missIDs, opts...)
-		if err != nil {
-			return nil, err
-		}
-		for j, c := range got {
-			out[missAt[j]] = c
-		}
+	if len(missIDs) == 0 {
+		return out, nil
 	}
-	return ranke.DefaultMaterialize(ctx, b, out, opts...)
+	got, err := b.Universe.GetClaims(ctx, missIDs, opts...)
+	if err != nil {
+		return nil, err
+	}
+	for j, c := range got {
+		out[missAt[j]] = c
+	}
+	return out, nil
 }
