@@ -69,3 +69,17 @@ func TestHopsMinAboveMax(t *testing.T) {
 func unwired(m *generator.Manifest) ranke.Id {
 	return m.Entities[len(m.Entities)-1]
 }
+
+// TestConnectionsTwoHops: DirConnections walks both ways, so from an entity it
+// reaches the relation that wires it at one hop and the entity on the far side at
+// two. Single-branch, so the scope is not part of the question.
+func TestConnectionsTwoHops(t *testing.T) {
+	eachToyBackend(t, generator.ToyRelation(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		got := reached(t, u, m.Head, ranke.Query{
+			Select: ranke.Select{Branch: rql.Branch, Claim: m.Entities[0],
+				Path: []ranke.PathStep{{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Max: 2}}},
+		})
+		require.Contains(t, got, m.Relations[0].String(), "the relation is one hop away")
+		require.Contains(t, got, m.Entities[1].String(), "the far entity is two hops away")
+	})
+}
