@@ -361,44 +361,64 @@ func segmentPattern(prev, rv, nv string, step ranke.PathStep) string {
 // under per-step keys in params.
 func segmentFilters(step ranke.PathStep, rv, nv string, i int, params map[string]any) []string {
 	var conds []string
-	if pos, neg := splitPatterns(step.Edges); len(pos) > 0 || len(neg) > 0 {
-		if len(pos) > 0 {
+	if pos, neg := splitPatterns(step.Edges); pos != "" || neg != "" {
+		if pos != "" {
 			k := "ep" + strconv.Itoa(i)
 			params[k] = pos
-			conds = append(conds, "all(x IN "+rv+" WHERE any(re IN $"+k+" WHERE type(x) =~ re))")
+			conds = append(conds, "all(x IN "+rv+" WHERE type(x) =~ $"+k+")")
 		}
-		if len(neg) > 0 {
+		if neg != "" {
 			k := "en" + strconv.Itoa(i)
 			params[k] = neg
-			conds = append(conds, "all(x IN "+rv+" WHERE none(re IN $"+k+" WHERE type(x) =~ re))")
+			conds = append(conds, "all(x IN "+rv+" WHERE NOT type(x) =~ $"+k+")")
 		}
 	}
-	if pos, neg := splitPatterns(step.Nodes); len(pos) > 0 || len(neg) > 0 {
-		if len(pos) > 0 {
+	if pos, neg := splitPatterns(step.Nodes); pos != "" || neg != "" {
+		if pos != "" {
 			k := "np" + strconv.Itoa(i)
 			params[k] = pos
-			conds = append(conds, "any(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+			conds = append(conds, "any(l IN labels("+nv+") WHERE l =~ $"+k+")")
 		}
-		if len(neg) > 0 {
+		if neg != "" {
 			k := "nn" + strconv.Itoa(i)
 			params[k] = neg
-			conds = append(conds, "none(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+			conds = append(conds, "none(l IN labels("+nv+") WHERE l =~ $"+k+")")
 		}
 	}
 	return conds
 }
 
-// splitPatterns turns a type-pattern list into positive and negative regex
-// lists (a leading "-" excludes); globs become regex for Cypher's =~ full match.
-func splitPatterns(patterns []string) (pos, neg []string) {
-	for _, p := range patterns {
-		if strings.HasPrefix(p, "-") {
-			neg = append(neg, globToRegex(strings.TrimPrefix(p, "-")))
+// splitPatterns turns a type-pattern list into one positive and one negative
+// regex (a leading "-" excludes), "" where that polarity has no pattern; globs
+// become regex for Cypher's =~ full match.
+//
+// The alternatives are joined into a SINGLE regex rather than left as a list the
+// Cypher iterates. A nested list predicate — all(x IN r WHERE any(re IN $p ...))
+// — is mis-rewritten when neo4j inlines it into a shortest-path expansion: the
+// inner iteration variable is bound where the relationship belongs, and type()
+// is handed the regex instead. One flat regex has nothing to nest.
+func splitPatterns(patterns []string) (pos, neg string) {
+	var p, n []string
+	for _, pat := range patterns {
+		if after, found := strings.CutPrefix(pat, "-"); found {
+			n = append(n, globToRegex(after))
 		} else {
-			pos = append(pos, globToRegex(p))
+			p = append(p, globToRegex(pat))
 		}
 	}
-	return pos, neg
+	return alternation(p), alternation(n)
+}
+
+// alternation joins regexes into one, each branch grouped so its alternatives
+// cannot reach across the join. Empty for none.
+func alternation(res []string) string {
+	if len(res) == 0 {
+		return ""
+	}
+	if len(res) == 1 {
+		return res[0]
+	}
+	return "(?:" + strings.Join(res, ")|(?:") + ")"
 }
 
 func globToRegex(glob string) string {
