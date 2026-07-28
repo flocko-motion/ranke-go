@@ -161,8 +161,8 @@ func Describe(q ranke.Query) string {
 			if len(s.Nodes) > 0 {
 				seg += "nodes=" + strings.Join(s.Nodes, ",") + " "
 			}
-			if s.Depth > 0 {
-				seg += fmt.Sprintf("depth=%d", s.Depth)
+			if s.Max > 0 {
+				seg += fmt.Sprintf("depth=%d", s.Max)
 			}
 			parts = append(parts, strings.TrimSpace(seg)+")")
 		}

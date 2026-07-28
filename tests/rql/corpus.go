@@ -94,7 +94,7 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"select/root-mid-branch", ranke.Query{Select: scanFrom(m.DiffChainHead)}},
 		{"select/root-mid-branch-path", ranke.Query{
 			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead,
-				Path: []ranke.PathStep{{Edges: []string{"contribution/*"}, Depth: 2}}},
+				Path: []ranke.PathStep{{Edges: []string{"contribution/*"}, Max: 2}}},
 		}},
 		{"select/root-mid-archive", ranke.Query{
 			Select: ranke.Select{Branch: ranke.BranchArchive, Head: m.DiffChainHead},
@@ -102,15 +102,15 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 
 		// ── traversal: typed edges to a bounded depth ───────────────────────
 		{"path/derivation-d1", ranke.Query{Select: path(
-			ranke.PathStep{Edges: []string{"derivation/*"}, Depth: 1})}},
+			ranke.PathStep{Edges: []string{"derivation/*"}, Max: 1})}},
 		{"path/derivation-d3", ranke.Query{Select: path(
-			ranke.PathStep{Edges: []string{"derivation/*"}, Depth: 3})}},
+			ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3})}},
 		{"path/derivation-unbounded", ranke.Query{Select: path(
 			ranke.PathStep{Edges: []string{"derivation/*"}})}},
 		{"path/contribution-d2", ranke.Query{Select: path(
-			ranke.PathStep{Edges: []string{"contribution/*"}, Depth: 2})}},
+			ranke.PathStep{Edges: []string{"contribution/*"}, Max: 2})}},
 		{"path/edges-exclude-contribution", ranke.Query{Select: path(
-			ranke.PathStep{Edges: []string{"-contribution/*"}, Depth: 3})}},
+			ranke.PathStep{Edges: []string{"-contribution/*"}, Max: 3})}},
 
 		// ── traversal: endpoint node constraints ────────────────────────────
 		// Two steps: a derivation-only step cannot leave the root (a
@@ -133,7 +133,7 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}})}},
 		{"path/connections-relation", ranke.Query{Select: path(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
-			ranke.PathStep{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Depth: 2})}},
+			ranke.PathStep{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Max: 2})}},
 		{"path/uses-of-entities", ranke.Query{Select: path(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"relation/*"}})}},
@@ -188,10 +188,10 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"output/detail-claims", ranke.Query{Select: sel(),
 			Output: ranke.Output{Detail: ranke.DetailClaims}}},
 		{"output/shape-path", ranke.Query{
-			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Depth: 3}),
+			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
 			Output: ranke.Output{Shape: ranke.ShapePath}}},
 		{"output/shape-path-detail-id", ranke.Query{
-			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Depth: 3}),
+			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
 			Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailID}}},
 
 		// ── shape: diff-chain resolution (the generator builds a long chain) ─
