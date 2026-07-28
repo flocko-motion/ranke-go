@@ -1,5 +1,5 @@
 // package: neo4j / persistence-cache
-// job:     resolve a write batch's diff overlays before it is projected, so the cache stores materialised claims only
+// job:     link each write batch's diff overlays before it is projected, so the cache stores materialised claims only
 // type:    logic
 // limits:  write-path only; reads need no overlay pass because what is stored is already materialised (-> neo4j.go)
 package neo4j
@@ -10,10 +10,10 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// materializeForWrite resolves the contribution/diff overlay of every claim in cs.
-// A delta's predecessor is usually in the same batch (references precede
-// referrers) and not yet stored, so resolution looks in the batch first and only
-// then in the graph.
+// materializeForWrite links the contribution/diff overlay of every claim in cs.
+// Predecessors first, so each claim's own link is a single read of an
+// already-linked predecessor: within the batch because this pass got there first,
+// from the graph because what is stored is already materialised.
 func (u *neo4jUniverse) materializeForWrite(ctx context.Context, cs []ranke.Claim) error {
 	batch := make(map[string]ranke.Claim, len(cs))
 	for _, c := range cs {
@@ -25,16 +25,17 @@ func (u *neo4jUniverse) materializeForWrite(ctx context.Context, cs []ranke.Clai
 	return err
 }
 
-// batchFirst resolves claims from a pending write batch before falling back to the
-// graph — the predecessor of a delta being written is typically in the same batch,
-// so it cannot be read back yet.
+// batchFirst resolves a predecessor from the pending write batch before the graph —
+// the predecessor of a delta being written is typically in the same batch, so it
+// cannot be read back yet.
 type batchFirst struct {
-	ranke.Universe // the cache, for predecessors already stored
+	ranke.Universe // the cache, for predecessors already stored (already materialised)
 	batch          map[string]ranke.Claim
 }
 
-// GetClaims answers from the batch where it can, the graph otherwise, and
-// materialises what it returns so a chain deeper than one link resolves.
+// GetClaims answers from the batch where it can, the graph otherwise. It adds no
+// overlay pass of its own: callers reach a claim only after its predecessors are
+// linked, and the graph stores materialised claims.
 func (b batchFirst) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	var missIDs []ranke.Id

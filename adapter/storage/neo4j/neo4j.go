@@ -75,13 +75,12 @@ type neo4jUniverse struct {
 var _ ranke.Universe = (*neo4jUniverse)(nil)
 
 var (
-	errNilClaim = errors.New("adapter/neo4j: nil claim or id")
-	errNilID    = errors.New("adapter/neo4j: nil id")
-	errNilHash  = errors.New("adapter/neo4j: nil content hash")
-	errQuery    = errors.New("adapter/neo4j: query")
-	// Joined so errors.Is still matches ranke.ErrUnsupported across the port.
-	errDeltaForm = errors.Join(ranke.ErrUnsupported,
-		errors.New("adapter/neo4j: delta form — this cache stores materialised claims only"))
+	errNilClaim  = errors.New("adapter/neo4j: nil claim or id")
+	errNilID     = errors.New("adapter/neo4j: nil id")
+	errNilHash   = errors.New("adapter/neo4j: nil content hash")
+	errQuery     = errors.New("adapter/neo4j: query")
+	errDeltaForm = ranke.WithDetail(ranke.ErrUnsupported,
+		"adapter/neo4j: delta form — this cache stores materialised claims only")
 )
 
 // query runs a Cypher statement in an auto-commit transaction, scoped to the

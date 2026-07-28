@@ -9,7 +9,7 @@ import (
 
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
-	"github.com/flocko-motion/ranke-go/generator"
+	"github.com/flocko-motion/ranke-go/tests/generator"
 )
 
 // cypherToyDelta reads the content overlay straight out of the projection, as this

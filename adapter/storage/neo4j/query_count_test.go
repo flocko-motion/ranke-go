@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/generator"
+	"github.com/flocko-motion/ranke-go/tests/generator"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 )

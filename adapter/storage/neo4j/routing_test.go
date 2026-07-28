@@ -9,7 +9,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
-	"github.com/flocko-motion/ranke-go/generator"
+	"github.com/flocko-motion/ranke-go/tests/generator"
 )
 
 // TestStackRoutesByForm asserts a stack routes a claim read by the FORM asked for.

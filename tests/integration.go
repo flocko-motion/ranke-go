@@ -33,7 +33,7 @@ import (
 	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	"github.com/flocko-motion/ranke-go/generator"
+	"github.com/flocko-motion/ranke-go/tests/generator"
 	"github.com/stretchr/testify/require"
 )
 

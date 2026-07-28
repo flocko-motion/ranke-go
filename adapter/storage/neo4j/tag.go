@@ -6,15 +6,9 @@ package neo4j
 
 import (
 	"context"
-	"errors"
 	"strconv"
 
 	"github.com/flocko-motion/ranke-go"
-)
-
-var (
-	errTagBranch = errors.New("adapter/neo4j: tag branch closure")
-	errTagSpine  = errors.New("adapter/neo4j: tag spine revision")
 )
 
 // cypherTagClosure stamps every claim reachable from a branch head that does not
@@ -60,14 +54,14 @@ func (u *neo4jUniverse) Tag(ctx context.Context, head ranke.Id) error {
 				"bkey":  bkey,
 				"props": map[string]any{bkey: height},
 			}); err != nil {
-				return errors.Join(errQuery, errTagBranch, err)
+				return ranke.WrapDetail(errQuery, "tag branch closure "+name, err)
 			}
 		}
 		if _, err := u.query(ctx, cypherTagSpine, map[string]any{
 			"id":    bt.ID().String(),
 			"props": map[string]any{ranke.SpineRevKey: int64(revision)},
 		}); err != nil {
-			return errors.Join(errQuery, errTagSpine, err)
+			return ranke.WrapDetail(errQuery, "tag spine revision "+strconv.FormatUint(revision, 10), err)
 		}
 	}
 	return nil

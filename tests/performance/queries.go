@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/generator"
+	"github.com/flocko-motion/ranke-go/tests/generator"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
