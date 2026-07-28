@@ -44,14 +44,31 @@ type Select struct {
 	Path   []PathStep
 }
 
-// PathStep follows typed edges to a bounded depth, optionally constraining the
+// PathStep follows typed edges over a hop range, optionally constraining the
 // endpoint node types. A leading "-" on an Edges or Nodes entry excludes that
 // type; entries are glob patterns over "class/sub".
 type PathStep struct {
 	Edges []string
 	Dir   Direction // default DirProvenance
-	Depth int       // max hops; 0 = unbounded for this step
+	Min   *int      // min hops; nil means 1. Hops(0) includes the step's start.
+	Max   int       // max hops; 0 = unbounded for this step
 	Nodes []string
+}
+
+// Hops is a PathStep.Min value, so a step can ask for a minimum a plain int could
+// not express: Hops(0) admits the start itself.
+func Hops(n int) *int { return &n }
+
+// MinHops is Min with its default applied — one hop, so a step's start is not a
+// result of itself.
+func (s PathStep) MinHops() int {
+	if s.Min == nil {
+		return 1
+	}
+	if *s.Min < 0 {
+		return 0
+	}
+	return *s.Min
 }
 
 // Direction is which way a step follows an edge. Provenance (outgoing, toward

@@ -110,7 +110,7 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 // Query resolves the branch scope and delegates to 𝒰.
 // Select.Claim is the caller's traversal anchor, nil means unanchored
 func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
-	if err := ValidateSelect(q); err != nil {
+	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
 	scope, err := a.resolveScope(ctx, q)
@@ -126,20 +126,51 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 // _b_<branch> is the table height it joined at, so tag <= Height filters both
 // membership and point-in-time in one comparison.
 func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
-	switch q.Select.Branch {
-	case "":
+	if q.Select.Branch == "" {
 		return Scope{}, ErrQueryNoScope
-	case BranchUniverse:
-		return Scope{Branch: BranchUniverse}, nil
-	case BranchArchive:
-		return Scope{Head: a.bth.ID(), Branch: BranchArchive, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}, nil
-	default:
-		br, err := a.GetBranch(ctx, q.Select.Branch)
-		if err != nil {
-			return Scope{}, err
-		}
-		return Scope{Head: br.Head(), Branch: q.Select.Branch, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}, nil
 	}
+	if q.Select.Branch == BranchUniverse {
+		return Scope{Branch: BranchUniverse}, nil
+	}
+	scope := Scope{Branch: q.Select.Branch, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}
+	if q.Select.Branch == BranchArchive {
+		scope.Head = a.bth.ID()
+		return scope, nil
+	}
+	br, err := a.GetBranch(ctx, q.Select.Branch)
+	if err != nil {
+		return Scope{}, err
+	}
+	scope.Head = br.Head()
+	return scope, nil
+}
+
+// validateSelect checks a read's shape on the way in, so the engines below trust
+// the query they are handed.
+func validateSelect(q Query) error {
+	sel := q.Select
+	if sel.Branch == "" {
+		return ErrQueryNoScope
+	}
+	if len(sel.Path) > 0 {
+		// Under $universe the scope bounds nothing, so the traversal's own anchor
+		// or a Head has to.
+		if sel.Branch == BranchUniverse && sel.Claim == nil && sel.Head == nil {
+			return ErrQueryNoHead
+		}
+		return nil
+	}
+	// A scan. Head bounds it; under $universe that is the only bound.
+	if sel.Branch == BranchUniverse && sel.Head == nil {
+		return ErrQueryNoHead
+	}
+	if q.Output.Shape == ShapePath {
+		return ErrQueryScanShape
+	}
+	if sel.Claim != nil {
+		return ErrQueryScanClaim
+	}
+	return nil
 }
 
 // revisionOf reads the spine revision

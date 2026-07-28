@@ -36,9 +36,6 @@ func scopeOrigin(sel Select, scope Scope) (Id, error) {
 // graph-native backend (neo4j) overrides Universe.Query.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
-	if err := ValidateSelect(q); err != nil {
-		return nil, err
-	}
 	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
 	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch})
 	if q.Limit.Time > 0 {
