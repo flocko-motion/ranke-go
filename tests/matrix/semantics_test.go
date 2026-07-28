@@ -13,38 +13,33 @@ import (
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
-// The matrix proves backends AGREE; these prove they are RIGHT. On a toy graph the
-// expected answer is small enough to state, so a gap every backend shares — and
-// therefore agrees on — still fails here.
+// Exact answers on a toy graph, so a gap every backend shares still fails here.
+// The matrix next door compares backends against each other.
 
-// TestToyWalkStart pins what Select.Claim means: the walk's starting point. Rooted
-// at the diff chain's base, the walk reaches what the base cites and NOT the delta
-// that overlays it — edges run delta→base, so a delta is never in its base's
-// closure. A lowering that scans branch membership and ignores the root returns the
-// delta too, and is wrong however much it agrees with another such lowering.
-func TestToyWalkStart(t *testing.T) {
+// TestToyHeadClosure: Select.Head narrows the scope to that claim's closure. Edges
+// run delta→base, so the base's closure holds the base alone and the delta's holds
+// both.
+func TestToyHeadClosure(t *testing.T) {
 	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 
 		fromBase := reached(t, u, m.Head, ranke.Query{
-			Select: ranke.Select{Branch: rql.Branch, Claim: base},
+			Select: ranke.Select{Branch: rql.Branch, Head: base},
 		})
-		require.Contains(t, fromBase, base.String(), "the root itself is reached")
-		require.NotContains(t, fromBase, delta.String(),
-			"the delta overlays the base, so it is NOT in the base's closure — a walk from the base must not reach it")
+		require.Contains(t, fromBase, base.String(), "the base is in its own closure")
+		require.NotContains(t, fromBase, delta.String(), "the delta is outside the base's closure")
 
 		fromDelta := reached(t, u, m.Head, ranke.Query{
-			Select: ranke.Select{Branch: rql.Branch, Claim: delta},
+			Select: ranke.Select{Branch: rql.Branch, Head: delta},
 		})
-		require.Contains(t, fromDelta, delta.String(), "the root itself is reached")
-		require.Contains(t, fromDelta, base.String(),
-			"the delta cites its base via contribution/diff, so a walk from the delta reaches it")
+		require.Contains(t, fromDelta, delta.String(), "the delta is in its own closure")
+		require.Contains(t, fromDelta, base.String(), "and cites the base via contribution/diff")
 	})
 }
 
-// TestToyScopeArchive pins $archive: the branch-table header's closure, so it
-// reaches the spine itself — claims no branch-confined read returns.
+// TestToyScopeArchive: $archive scopes to the branch-table header's closure, which
+// covers the spine as well as the branches' content.
 func TestToyScopeArchive(t *testing.T) {
 	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		archive := reached(t, u, m.Head, ranke.Query{Select: ranke.Select{Branch: ranke.BranchArchive}})
@@ -53,8 +48,8 @@ func TestToyScopeArchive(t *testing.T) {
 	})
 }
 
-// TestToyUniverseNeedsRoot pins that $universe has no natural head, so a read must
-// pin one — an unrooted universe read is an error, not the whole store.
+// TestToyUniverseNeedsRoot: $universe scopes to a closure, so a read there must pin
+// Select.Head.
 func TestToyUniverseNeedsRoot(t *testing.T) {
 	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		arc, err := ranke.NewArchive(context.Background(), u, m.Head)

@@ -30,7 +30,7 @@ func TestToyDiffByID(t *testing.T) {
 // unchanged by which layer answers it, so it must agree with TestToyDiffByID.
 func TestToyDiffByQuery(t *testing.T) {
 	eachBackend(t, func(t *testing.T, u ranke.Universe, want uint64, wantEnc string, delta ranke.Id) {
-		q := ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: delta}}
+		q := ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Head: delta}}
 		rs, err := u.Query(context.Background(), q, ranke.Scope{Branch: ranke.BranchUniverse})
 		require.NoError(t, err)
 		var got ranke.Claim

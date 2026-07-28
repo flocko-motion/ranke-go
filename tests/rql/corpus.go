@@ -66,6 +66,16 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 	scanFrom := func(head ranke.Id) ranke.Select {
 		return ranke.Select{Branch: Branch, Head: head}
 	}
+	// pathFrom anchors a traversal at a claim that carries the edges the steps
+	// follow — the branch head carries only contribution/* ones.
+	pathFrom := func(claim ranke.Id, steps ...ranke.PathStep) ranke.Select {
+		return ranke.Select{Branch: Branch, Claim: claim, Path: steps}
+	}
+	// archivePath spans every branch, for steps whose endpoints the generator may
+	// have committed to any of them.
+	archivePath := func(steps ...ranke.PathStep) ranke.Select {
+		return ranke.Select{Branch: ranke.BranchArchive, Claim: m.Head, Path: steps}
+	}
 	// A mid-graph instant: the clock starts at Base and advances Step per claim,
 	// so this splits the archive into a before and an after deterministically.
 	midpoint := m.Spec.Base.Add(time.Duration(m.Spec.Size/2) * m.Spec.Step).Format(time.RFC3339Nano)
@@ -101,15 +111,17 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		}},
 
 		// ── traversal: typed edges to a bounded depth ───────────────────────
-		{"path/derivation-d1", ranke.Query{Select: path(
+		// Anchored at the diff chain's head: a derivation, so it has the
+		// derivation/* edges these steps follow.
+		{"path/derivation-d1", ranke.Query{Select: pathFrom(m.DiffChainHead,
 			ranke.PathStep{Edges: []string{"derivation/*"}, Max: 1})}},
-		{"path/derivation-d3", ranke.Query{Select: path(
+		{"path/derivation-d3", ranke.Query{Select: pathFrom(m.DiffChainHead,
 			ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3})}},
-		{"path/derivation-unbounded", ranke.Query{Select: path(
+		{"path/derivation-unbounded", ranke.Query{Select: pathFrom(m.DiffChainHead,
 			ranke.PathStep{Edges: []string{"derivation/*"}})}},
 		{"path/contribution-d2", ranke.Query{Select: path(
 			ranke.PathStep{Edges: []string{"contribution/*"}, Max: 2})}},
-		{"path/edges-exclude-contribution", ranke.Query{Select: path(
+		{"path/edges-exclude-contribution", ranke.Query{Select: pathFrom(m.DiffChainHead,
 			ranke.PathStep{Edges: []string{"-contribution/*"}, Max: 3})}},
 
 		// ── traversal: endpoint node constraints ────────────────────────────
@@ -118,9 +130,11 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"path/nodes-source", ranke.Query{Select: path(
 			ranke.PathStep{Nodes: []string{"derivation/*"}},
 			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}})}},
-		{"path/nodes-exclude-source", ranke.Query{Select: path(
-			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"-source/*"}})}},
-		{"path/chain-entity-then-source", ranke.Query{Select: path(
+		// The sources a derivation cites are not entities, so the exclusion keeps
+		// them; excluding source/* here would leave nothing, which proves nothing.
+		{"path/nodes-exclude-entity", ranke.Query{Select: pathFrom(m.DiffChainHead,
+			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"-entity/*"}})}},
+		{"path/chain-entity-then-source", ranke.Query{Select: archivePath(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
 			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}})}},
 
@@ -129,20 +143,22 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// them — unreachable going forward, so it exercises the reverse path
 		// (native on neo4j; closure-inversion in the reference executor).
 		{"path/uses-of-sources", ranke.Query{Select: path(
-			ranke.PathStep{Nodes: []string{"source/*"}},
+			ranke.PathStep{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}})}},
-		{"path/connections-relation", ranke.Query{Select: path(
+		{"path/connections-relation", ranke.Query{Select: archivePath(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
 			ranke.PathStep{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Max: 2})}},
-		{"path/uses-of-entities", ranke.Query{Select: path(
+		{"path/uses-of-entities", ranke.Query{Select: archivePath(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"relation/*"}})}},
 
 		// ── filter: one operator at a time ──────────────────────────────────
 		{"where/type-glob-source", ranke.Query{Select: sel(),
 			Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}}}},
-		{"where/type-eq-entity-person", ranke.Query{Select: sel(),
-			Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Eq: "entity/person"}}}},
+		// Scoped to the archive: the generator may commit entities to any branch.
+		{"where/type-eq-entity-person", ranke.Query{
+			Select: ranke.Select{Branch: ranke.BranchArchive},
+			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Eq: "entity/person"}}}},
 		{"where/type-ne-source-note", ranke.Query{Select: sel(),
 			Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Ne: "source/note"}}}},
 		{"where/type-in-set", ranke.Query{Select: sel(),
@@ -166,10 +182,12 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 			{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
 			{Field: "height", Test: &ranke.Comparison{Ge: 1}},
 		}}}},
-		{"where/or", ranke.Query{Select: sel(), Where: &ranke.Where{Or: []ranke.Where{
-			{Field: "type", Test: &ranke.Comparison{Eq: "entity/person"}},
-			{Field: "type", Test: &ranke.Comparison{Eq: "relation/knows"}},
-		}}}},
+		{"where/or", ranke.Query{
+			Select: ranke.Select{Branch: ranke.BranchArchive},
+			Where: &ranke.Where{Or: []ranke.Where{
+				{Field: "type", Test: &ranke.Comparison{Eq: "entity/person"}},
+				{Field: "type", Test: &ranke.Comparison{Eq: "relation/knows"}},
+			}}}},
 		{"where/not", ranke.Query{Select: sel(), Where: &ranke.Where{
 			Not: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "contribution/*"}}}}},
 		{"where/nested", ranke.Query{Select: sel(), Where: &ranke.Where{And: []ranke.Where{
@@ -188,10 +206,10 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"output/detail-claims", ranke.Query{Select: sel(),
 			Output: ranke.Output{Detail: ranke.DetailClaims}}},
 		{"output/shape-path", ranke.Query{
-			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
+			Select: pathFrom(m.DiffChainHead, ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
 			Output: ranke.Output{Shape: ranke.ShapePath}}},
 		{"output/shape-path-detail-id", ranke.Query{
-			Select: path(ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
+			Select: pathFrom(m.DiffChainHead, ranke.PathStep{Edges: []string{"derivation/*"}, Max: 3}),
 			Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailID}}},
 
 		// ── shape: diff-chain resolution (the generator builds a long chain) ─
