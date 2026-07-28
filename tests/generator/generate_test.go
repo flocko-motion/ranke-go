@@ -101,9 +101,8 @@ func TestGenerateExpiryShape(t *testing.T) {
 	require.True(t, hasExpiryEdge, "expiry edge points at the contributor")
 }
 
-// TestGenerateTinyBlobSize: the tiny-content corner is a size, so the claim's
-// content_size must be exactly TinyBlobBytes — otherwise a query filtering on
-// the small-content boundary has nothing to find.
+// TestGenerateTinyBlobSize: the tiny blob's content_size is exactly
+// TinyBlobBytes, the boundary a small-content filter tests against.
 func TestGenerateTinyBlobSize(t *testing.T) {
 	ctx := context.Background()
 	spec := SpecForSize(1, 30)
