@@ -1,7 +1,7 @@
 // package: adapter/sequencer/dev / testkit
 // type:    adapter
 // job:     a blocking, single-threaded reference Sequencer for tests and development — the sole writer that advances a Ranke-Archive by driving the paper's six steps one contribution at a time
-// limits:  not concurrent (steps run serially per AddClaims); manages named branches but does NOT propagate changes between them (paper 2's cross-branch merge); stamps minted claims from the injected Clock so heads are deterministic. NOT for production (-> a concurrent Sequencer adapter).
+// limits:  not concurrent (steps run serially per AddClaims); manages named branches but does NOT propagate changes between them (paper 2's cross-branch merge); stamps minted claims from the injected Clock so heads are deterministic. NOT for production (-> adapter/sequencer/concurrent).
 package dev
 
 import (
