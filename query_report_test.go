@@ -26,7 +26,7 @@ func TestReportRecordsExecutionLog(t *testing.T) {
 	u, _, a, b := queryFixture(t) // root(0) ← a:source(1) ← b:entity(2)
 	rs, err := u.Query(context.Background(), Query{
 		Select: Select{Branch: BranchUniverse, Claim: b.ID(),
-			Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
+			Path: []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}}},
 		Execution: Execution{Report: ReportTrace},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestReportLevelThreshold(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	fetchEvents := func(level ReportLevel) int {
 		rs, err := u.Query(context.Background(), Query{
-			Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
+			Select:    Select{Branch: BranchUniverse, Head: b.ID()},
 			Execution: Execution{Report: level},
 		}, Scope{Branch: BranchUniverse})
 		require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestReportLevelThreshold(t *testing.T) {
 func TestReportOffIsNil(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Head: b.ID()},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	_ = drain(t, rs)
@@ -97,7 +97,7 @@ func TestReportOffIsNil(t *testing.T) {
 func TestReportFilterCounts(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
-		Select:    Select{Branch: BranchUniverse, Claim: b.ID()}, // full closure: root, a, b
+		Select:    Select{Branch: BranchUniverse, Head: b.ID()}, // full closure: root, a, b
 		Where:     &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 		Execution: Execution{Report: ReportTrace},
 	}, Scope{Branch: BranchUniverse})

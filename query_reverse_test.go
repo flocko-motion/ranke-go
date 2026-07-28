@@ -56,7 +56,7 @@ func TestQueryReverseConnectionsConfined(t *testing.T) {
 	u, a := reverseFixture(t)
 	q := Query{Select: Select{
 		Branch: BranchUniverse, Claim: a["head"].ID(),
-		Path: []PathStep{{Dir: DirConnections}},
+		Path: []PathStep{{Min: Hops(0), Dir: DirConnections}},
 	}}
 	got := queryIDs(t, u, q)
 	require.Equal(t, idsOf(a["head"], a["x"], a["y"], a["a"], a["b"], a["root"]), got)

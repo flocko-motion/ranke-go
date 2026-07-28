@@ -157,7 +157,7 @@ func TestQueryPathEdgeExclude(t *testing.T) {
 	q := Query{Select: Select{
 		Branch: BranchUniverse,
 		Claim:  a["hub"].ID(),
-		Path:   []PathStep{{Edges: []string{"-contribution/*"}}},
+		Path:   []PathStep{{Min: Hops(0), Edges: []string{"-contribution/*"}}},
 	}}
 	got := queryIDs(t, u, q)
 	require.False(t, got[a["root"].ID().String()], "root is off-limits without contributor edges")

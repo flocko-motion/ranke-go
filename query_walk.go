@@ -55,7 +55,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPat
 		if err != nil {
 			return nil, nil, err
 		}
-		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Depth, "reached": len(reached)})
+		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Max, "reached": len(reached)})
 		frontier = reached
 	}
 	return reached, routes, nil
@@ -134,7 +134,11 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 
 	var out []Claim
 	outSeen := map[string]bool{}
-	collect := func(c Claim) {
+	minHops := step.MinHops()
+	collect := func(c Claim, hop int) {
+		if hop < minHops {
+			return
+		}
 		k := c.ID().String()
 		if !outSeen[k] && matchTypeList(step.Nodes, c.Node().Type()) {
 			outSeen[k] = true
@@ -142,7 +146,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		}
 	}
 	for _, c := range level {
-		collect(c)
+		collect(c, 0)
 	}
 
 	forward := step.Dir == "" || step.Dir == DirProvenance || step.Dir == DirConnections
@@ -152,7 +156,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if step.Depth > 0 && hop >= step.Depth {
+		if step.Max > 0 && hop >= step.Max {
 			break
 		}
 		// Discover the next level from every node in this one, keeping the
@@ -223,7 +227,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 				routes[k] = c.route
 			}
 			next = append(next, c.claim)
-			collect(c.claim)
+			collect(c.claim, hop+1)
 		}
 		level = next
 	}

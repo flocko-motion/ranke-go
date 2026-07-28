@@ -48,7 +48,7 @@ func idSet(rs []QueryResult) map[string]bool {
 // root — here b reaches a (derivation) and root (contributor), and a reaches root.
 func TestQueryFullClosure(t *testing.T) {
 	u, root, a, b := queryFixture(t)
-	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Claim: b.ID()}}, Scope{Branch: BranchUniverse})
+	rs, err := u.Query(context.Background(), Query{Select: Select{Branch: BranchUniverse, Head: b.ID()}}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := idSet(drain(t, rs))
 	require.Equal(t, map[string]bool{
@@ -63,7 +63,7 @@ func TestQueryPathTypedDepth(t *testing.T) {
 	q := Query{Select: Select{
 		Branch: BranchUniverse,
 		Claim:  b.ID(),
-		Path:   []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}},
+		Path:   []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}},
 	}}
 	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestQueryPathTypedDepth(t *testing.T) {
 func TestQueryWhereType(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Head: b.ID()},
 		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
@@ -89,7 +89,7 @@ func TestQueryWhereType(t *testing.T) {
 func TestQueryWhereHeight(t *testing.T) {
 	u, root, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Head: b.ID()},
 		Where:  &Where{Field: "height", Test: &Comparison{Ge: 1}},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
@@ -103,7 +103,7 @@ func TestQueryWhereHeight(t *testing.T) {
 func TestQueryOrderLimit(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID()},
+		Select: Select{Branch: BranchUniverse, Head: b.ID()},
 		Order:  []OrderKey{{Field: "height", Compare: CompareNumeric, Dir: SortDesc}},
 		Limit:  Limit{Results: 1},
 	}
@@ -119,7 +119,7 @@ func TestQueryOrderLimit(t *testing.T) {
 func TestQueryOutputContent(t *testing.T) {
 	u, _, a, _ := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: a.ID()},
+		Select: Select{Branch: BranchUniverse, Head: a.ID()},
 		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
 		Output: Output{Content: &Content{Max: 4, Overflow: OverflowCutoff}},
 	}
@@ -134,7 +134,7 @@ func TestQueryOutputContent(t *testing.T) {
 func TestQueryOutputPath(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Depth: 1, Nodes: []string{"source/*"}}}},
+		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}}},
 		Output: Output{Shape: ShapePath},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
@@ -151,25 +151,27 @@ func TestQueryOutputPath(t *testing.T) {
 // closure, both directions, confined to it.
 func TestQueryReverseSupported(t *testing.T) {
 	u, root, a, b := queryFixture(t)
-	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Dir: DirConnections}}}}
+	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(),
+		Path: []PathStep{{Min: Hops(0), Dir: DirConnections}}}}
 	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err, "reverse walk is served via closure inversion, not refused")
 	require.Equal(t, idsOf(a, b, root), idSet(drain(t, rs)))
 }
 
-// TestQueryNoRoot: a Universe query needs a claim root (branch resolution is
-// upstream).
-func TestQueryNoRoot(t *testing.T) {
+// TestQueryNoScopeAnchor: this walker enumerates a scope by closing over an
+// anchor, so a branch read reaching it without one — Select.Head unset and the
+// Scope unresolved — cannot be served. Branch resolution is upstream.
+func TestQueryNoScopeAnchor(t *testing.T) {
 	u := NewMemoryUniverse()
 	_, err := u.Query(context.Background(), Query{Select: Select{Branch: "main"}}, Scope{})
-	require.ErrorIs(t, err, errQueryNoRoot)
+	require.ErrorIs(t, err, ErrQueryNoHead)
 }
 
 // TestQueryReport: Execution.Report appends a report after the stream drains.
 func TestQueryReport(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
-		Select:    Select{Branch: BranchUniverse, Claim: b.ID()},
+		Select:    Select{Branch: BranchUniverse, Head: b.ID()},
 		Execution: Execution{Report: ReportInfo},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)

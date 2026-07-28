@@ -51,12 +51,14 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	sel := q.Select
 	switch {
 	case len(sel.Path) == 0:
-		// A scan: the scope's claim set, reached by closing over an anchor.
+		// A scan: the scope's claim set, reached by closing over an anchor. The
+		// anchor belongs to that set, so the sweep starts at zero hops.
 		origin, err := scopeOrigin(sel, scope)
 		if err != nil {
 			return nil, err
 		}
 		sel.Claim = origin
+		sel.Path = []PathStep{{Min: Hops(0)}}
 		needPaths = false
 	case sel.Claim == nil:
 		return nil, ErrQueryUnanchored
