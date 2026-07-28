@@ -44,13 +44,13 @@ func runReported(t *testing.T, u ranke.Universe, name string, q ranke.Query) {
 
 func TestNeo4jQueryClosure(t *testing.T) {
 	u, head := openTestNeo4j(t)
-	runReported(t, u, "closure", ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head}})
+	runReported(t, u, "closure", ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Head: head}})
 }
 
 func TestNeo4jQueryWhereType(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	runReported(t, u, "where type glob source/*", ranke.Query{
-		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Head: head},
 		Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
 	})
 }
@@ -58,7 +58,7 @@ func TestNeo4jQueryWhereType(t *testing.T) {
 func TestNeo4jQueryWhereHeight(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	runReported(t, u, "where height ge 2", ranke.Query{
-		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Head: head},
 		Where:  &ranke.Where{Field: "height", Test: &ranke.Comparison{Ge: 2}},
 	})
 }
@@ -66,7 +66,7 @@ func TestNeo4jQueryWhereHeight(t *testing.T) {
 func TestNeo4jQueryOrderLimit(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	runReported(t, u, "order height desc limit 10", ranke.Query{
-		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head},
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Head: head},
 		Order:  []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}},
 		Limit:  ranke.Limit{Results: 10},
 	})
@@ -75,14 +75,14 @@ func TestNeo4jQueryOrderLimit(t *testing.T) {
 func TestNeo4jQueryPathDepth(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	runReported(t, u, "derivation path depth 3", ranke.Query{
-		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}},
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Max: 3}}},
 	})
 }
 
 func TestNeo4jQueryDetailPath(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	runReported(t, u, "derivation path depth 3, shape=path", ranke.Query{
-		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}},
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Max: 3}}},
 		Output: ranke.Output{Shape: ranke.ShapePath},
 	})
 }

@@ -76,8 +76,8 @@ func TestOneQueryPerRQL(t *testing.T) {
 	u, head := openTestNeo4j(t)
 	ctx := context.Background()
 	scope := ranke.Scope{Branch: ranke.BranchUniverse}
-	sel := ranke.Select{Branch: ranke.BranchUniverse, Claim: head}
-	selPath := ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Depth: 3}}}
+	sel := ranke.Select{Branch: ranke.BranchUniverse, Head: head}
+	selPath := ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{Edges: []string{"derivation/*"}, Max: 3}}}
 
 	cases := map[string]ranke.Query{
 		"single/id":     {Select: sel, Output: ranke.Output{Detail: ranke.DetailID}},
@@ -86,7 +86,9 @@ func TestOneQueryPerRQL(t *testing.T) {
 		"single/where":  {Select: sel, Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}}},
 		"single/order":  {Select: sel, Order: []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}}, Limit: ranke.Limit{Results: 10}},
 		"path/claims":   {Select: selPath, Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailClaims}},
-		"path/closure":  {Select: sel, Output: ranke.Output{Shape: ranke.ShapePath}}, // unbounded → allShortestPaths
+		// An unbounded traversal (one step, no depth) still reports routes.
+		"path/unbounded": {Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: head, Path: []ranke.PathStep{{}}},
+			Output: ranke.Output{Shape: ranke.ShapePath}},
 	}
 	for name, q := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -20,12 +20,9 @@ import (
 // reconstructs and streams the matched claims (routes too, for the path shape).
 func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	start := time.Now()
-	if q.Select.Branch == "" {
-		return nil, fmt.Errorf("%w: query has no scope", errQuery)
-	}
 	needPaths := q.Output.Shape == ranke.ShapePath
-	if (needPaths || len(q.Select.Path) > 0) && q.Select.Claim == nil {
-		return nil, fmt.Errorf("%w: a path query needs a root claim", errQuery)
+	if len(q.Select.Path) > 0 && q.Select.Claim == nil {
+		return nil, ranke.ErrQueryUnanchored
 	}
 	rep := newReport(q.Execution.Report, start)
 
@@ -137,24 +134,38 @@ func confined(scope ranke.Scope) bool {
 // no-path read is the root's reachable closure (not the whole cache), and a path
 // read follows its steps.
 func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
-	if !needPaths && len(q.Select.Path) == 0 && confined(scope) {
-		return scanCypher(q, scope)
+	if len(q.Select.Path) == 0 {
+		return scanCypher(q, scope) // no traversal: the scope's claim set
 	}
 	return traversalCypher(q, scope, needPaths)
 }
 
-// scanCypher answers a no-path read confined to a branch: the branch's members
-// are exactly the _b_<branch> tag (<= Height, point-in-time), so it is a node
-// scan on that tag — no traversal — plus Where/Order/Limit. Callers only reach
-// it for a real branch (lowerCypher); unconfined reads walk from the root claim.
+// scanCypher lowers a Path-less read: the scope's claim set. Branch membership is
+// the _b_<branch> tag (<= Height gives point-in-time); Head narrows to its reach.
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
-	params := map[string]any{"bkey": ranke.BranchTagKey(scope.Branch), "height": scope.Height}
-	where := "n[$bkey] <= $height AND size(labels(n)) > 0"
+	anchor := q.Select.Head
+	if anchor == nil && !confined(scope) {
+		anchor = scope.Head // $archive: the branch-table header's closure
+	}
+	params := map[string]any{}
+	match := "MATCH (n)"
+	if anchor != nil {
+		params["head"] = anchor.String()
+		match = "MATCH (h {id: $head})-[*0..]->(n)\nWITH DISTINCT n"
+	}
+	var conds []string
+	if confined(scope) {
+		params["bkey"] = ranke.BranchTagKey(scope.Branch)
+		params["height"] = scope.Height
+		conds = append(conds, "n[$bkey] <= $height")
+	}
+	conds = append(conds, "size(labels(n)) > 0")
 	ctr := 0
 	if wc := whereClause(q.Where, "n", params, &ctr); wc != "true" {
-		where += "\n  AND " + wc
+		conds = append(conds, wc)
 	}
-	return "MATCH (n)\nWHERE " + where + "\nRETURN " + returnCols(q.Output.Detail, "n") +
+	return match + "\nWHERE " + strings.Join(conds, "\n  AND ") +
+		"\nRETURN " + returnCols(q.Output.Detail, "n") +
 		orderLimitClause(q.Order, q.Limit.Results, "n"), params
 }
 
@@ -284,10 +295,16 @@ func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params
 		params["height"] = scope.Height
 		addWhere("all(x IN nodes(path) WHERE x[$bkey] <= $height)")
 	}
-	// A single-segment path uses allShortestPaths (O(nodes), not per-route).
+	// A single-segment path uses allShortestPaths (O(nodes), not per-route). It
+	// refuses a pattern whose ends it cannot prove distinct, so a step that walks
+	// at least one edge says so: the structural graph is acyclic, making the
+	// inequality free.
 	match := "MATCH path=" + pat.String()
 	if len(steps) == 1 {
 		match = "MATCH path = allShortestPaths(" + pat.String() + ")"
+		if steps[0].MinHops() > 0 {
+			addWhere("n0 <> " + final)
+		}
 	}
 	return match + "\nWHERE " + where.String() +
 		"\nWITH " + final + ", path ORDER BY length(path), [x IN nodes(path) | x.created_at + x.id]" +
@@ -301,20 +318,21 @@ func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params
 // single continuous pattern, where the previous segment already wrote the node).
 func segmentPattern(prev, rv, nv string, step ranke.PathStep) string {
 	bound := ""
-	if step.Depth > 0 {
-		bound = strconv.Itoa(step.Depth)
+	if step.Max > 0 {
+		bound = strconv.Itoa(step.Max)
 	}
+	hops := "*" + strconv.Itoa(step.MinHops()) + ".." + bound
 	head := "(" + prev + ")"
 	if prev == "" {
 		head = ""
 	}
 	switch step.Dir {
 	case ranke.DirUses:
-		return head + "<-[" + rv + "*0.." + bound + "]-(" + nv + ")"
+		return head + "<-[" + rv + hops + "]-(" + nv + ")"
 	case ranke.DirConnections:
-		return head + "-[" + rv + "*0.." + bound + "]-(" + nv + ")"
+		return head + "-[" + rv + hops + "]-(" + nv + ")"
 	default: // provenance (outgoing)
-		return head + "-[" + rv + "*0.." + bound + "]->(" + nv + ")"
+		return head + "-[" + rv + hops + "]->(" + nv + ")"
 	}
 }
 
