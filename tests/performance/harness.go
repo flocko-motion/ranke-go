@@ -219,7 +219,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 			c3a := time.Now()
 			for _, id := range ids {
 				if _, err := branch.GetClaim(ctx, id); err != nil {
-					return 0, fmt.Errorf("%s: branch access: %w", name, err)
+					return 0, fmt.Errorf("%s: branch access %s: %w", name, id, err)
 				}
 			}
 			branchDur = time.Since(c3a)
@@ -288,7 +288,7 @@ func accessIDs(ctx context.Context, u ranke.Universe, root ranke.Id, n int) ([]r
 	if n <= 0 || root == nil {
 		return nil, nil
 	}
-	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: root}}, ranke.Scope{Branch: ranke.BranchUniverse})
+	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Head: root}}, ranke.Scope{Branch: ranke.BranchUniverse})
 	if err != nil {
 		return nil, err
 	}

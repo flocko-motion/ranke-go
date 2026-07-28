@@ -14,24 +14,6 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// Scope resolves the branch context an Archive would apply to q: a branch query
-// is confined to its root's closure, $universe is unconfined. Height is the
-// archive's branch-table height — the scale the _b_<branch> tags use, so a
-// native backend can prune by tag while a byte store confines by Head alone.
-func Scope(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (ranke.Scope, error) {
-	scope := ranke.Scope{Branch: q.Select.Branch}
-	if q.Select.Branch == ranke.BranchUniverse {
-		return scope, nil
-	}
-	scope.Head = q.Select.Claim
-	hc, err := u.GetClaims(ctx, []ranke.Id{archiveHead})
-	if err != nil {
-		return ranke.Scope{}, err
-	}
-	scope.Height = hc[0].Node().Height()
-	return scope, nil
-}
-
 // Answer is one backend's response to one query: a fingerprint per result, in
 // the order the stream emitted them. Order is part of the contract, so the slice
 // is compared as a sequence, never as a set.

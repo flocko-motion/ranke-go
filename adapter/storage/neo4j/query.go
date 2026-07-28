@@ -1,13 +1,12 @@
 // package: neo4j / query
 // type:    adapter
 // job:     native RQL execution — lower the whole query to one Cypher statement, run it, reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk anchored at the root claim; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk
+// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure when it names none; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk
 package neo4j
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +20,6 @@ import (
 func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	start := time.Now()
 	needPaths := q.Output.Shape == ranke.ShapePath
-	if len(q.Select.Path) > 0 && q.Select.Claim == nil {
-		return nil, ranke.ErrQueryUnanchored
-	}
 	rep := newReport(q.Execution.Report, start)
 
 	cypher, params := lowerCypher(q, scope, needPaths)
