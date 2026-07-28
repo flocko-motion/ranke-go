@@ -64,6 +64,21 @@ func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, h
 	return nil
 }
 
+// DefaultTag is the reference implementation of Tag: walk the branch-table spine
+// and stamp membership claim by claim. Simple and slow, like every Default* — it
+// needs a layer that can store tags, and a layer with a native path overrides.
+func DefaultTag(ctx context.Context, u Universe, head Id) error {
+	if head == nil {
+		return nil
+	}
+	a, err := NewArchive(ctx, u, head)
+	if err != nil {
+		return err
+	}
+	_, err = TagArchive(ctx, a)
+	return err
+}
+
 // TagArchive descends a's branch-table spine and tags each revision's branch
 // closures oldest→newest
 func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]HistoryItem, error) {

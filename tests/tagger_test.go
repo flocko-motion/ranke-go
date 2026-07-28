@@ -42,8 +42,11 @@ func TestTagArchive(t *testing.T) {
 	arc, err := seq.GetArchive(ctx)
 	require.NoError(t, err, "GetArchive")
 
-	// History is the output of the walk, not an input.
-	history, err := ranke.TagArchive(ctx, arc)
+	// The commit already tagged (the Sequencer signals the storage), so an
+	// incremental pass would find nothing to do. RetagAll walks it regardless —
+	// this is a unit test of the walk, not of who triggers it. History is the
+	// output of that walk, not an input.
+	history, err := ranke.TagArchive(ctx, arc, ranke.TagArchiveOptions{RetagAll: true})
 	require.NoError(t, err, "TagArchive")
 	require.NotEmpty(t, history, "TagArchive produces the walked head-id history")
 

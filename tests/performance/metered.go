@@ -199,6 +199,13 @@ func (m *metered) SetClaimsTags(ctx context.Context, clearTags []string, tags ma
 	return err
 }
 
+func (m *metered) Tag(ctx context.Context, head ranke.Id) error {
+	t := time.Now()
+	err := m.inner.Tag(ctx, head)
+	m.rec("Tag", kindWrite, 1, time.Since(t))
+	return err
+}
+
 func (m *metered) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	t := time.Now()
 	rs, err := m.inner.Query(ctx, q, scope)

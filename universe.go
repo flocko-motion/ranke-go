@@ -229,6 +229,11 @@ type Universe interface {
 	// none), like GetClaims/GetClaimHeights.
 	GetClaimTags(ctx context.Context, claims []Id) ([]map[string]string, error)
 
+	// Tag signals that the archive at head has advanced. The signal is global;
+	// what a layer indexes and how is its own business. Purely an accelerator —
+	// it must never change what a read answers, only how fast.
+	Tag(ctx context.Context, head Id) error
+
 	// Sync fills the receiver for id's closure by copying whatever it is missing
 	// from src (claims + content). A stack calls it on its eager layer, passing
 	// the layers below as src — the stack only routes; the layer does the copy.

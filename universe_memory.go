@@ -137,6 +137,12 @@ func (u *memoryUniverse) GetClaimTags(_ context.Context, claims []Id) ([]map[str
 	return out, nil
 }
 
+// Tag walks the spine generically — an in-memory map has no native index to
+// lower it to.
+func (u *memoryUniverse) Tag(ctx context.Context, head Id) error {
+	return DefaultTag(ctx, u, head)
+}
+
 // SetClaimsTags applies tags per claim (keyed by id string): for each claim it
 // first clears every existing tag whose key matches a clearTags glob, then
 // applies the new key→value pairs.

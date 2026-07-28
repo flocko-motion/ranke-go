@@ -382,6 +382,10 @@ func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ map[string
 	return ranke.ErrUnsupported
 }
 
+// Tag is a no-op: an opaque byte store holds no tags to bring up to date, and a
+// read against it never consults them.
+func (u *blobUniverse) Tag(_ context.Context, _ ranke.Id) error { return nil }
+
 //deadcode:keep
 func (u *blobUniverse) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
 	out := make([][]byte, len(ids))

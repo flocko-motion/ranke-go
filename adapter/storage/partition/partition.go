@@ -263,6 +263,17 @@ func (p *partition) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[
 
 // SetClaimsTags routes each claim (by id) to its shard, grouping the per-claim
 // tag maps per shard; clearTags applies on every shard touched.
+// Tag broadcasts to every shard: a branch's closure is spread across all of them
+// (claims route by id), so each has its own share to index.
+func (p *partition) Tag(ctx context.Context, head ranke.Id) error {
+	for sh := range p.shards {
+		if err := p.shards[sh].Tag(ctx, head); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
 	groups := make([]map[string]map[string]string, len(p.shards))
 	for s, kv := range tags {

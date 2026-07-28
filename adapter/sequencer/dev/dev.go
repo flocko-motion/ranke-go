@@ -182,6 +182,12 @@ func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims
 		return nil, fmt.Errorf("%w: append history: %w", errSequencer, err)
 	}
 	s.head = bt.ID()
+	// The head advanced, so signal the storage to bring its query accelerators up
+	// to date. This is the only place that knows a branch just moved; what each
+	// layer indexes, and how, is the layer's own business.
+	if err := s.u.Tag(ctx, s.head); err != nil {
+		return nil, fmt.Errorf("%w: tag: %w", errSequencer, err)
+	}
 	return s.head, nil
 }
 
