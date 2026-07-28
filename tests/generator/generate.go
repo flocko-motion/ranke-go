@@ -78,17 +78,13 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	}
 
 	// A real archive grows over many contributions, not one: split the batch
-	// into contributions of varying size (small common, large rare) and merge
-	// each as its own branch-table revision. The batch is in dependency order
-	// (references precede referrers), so in-order chunks stay closed over the
-	// prior revisions already in 𝒰.
-	branches := branchNames(len(b.batch), spec.Seed)
+	// into contributions of varying size (small common, large rare)
+	branches := branchNames(len(b.batch), spec.Seed, spec.Branches)
 	var head ranke.Id
 	revisions := 0
-	for i, chunk := range contributionChunks(b.batch, spec.Seed) {
+	for i, chunk := range contributionChunks(b.batch, spec.Seed, len(branches)) {
 		// Round-robin contributions across the branches (main takes the first,
-		// so the shared base lands there); references resolve across branches via
-		// 𝒰, which every contribution writes to regardless of branch.
+		// so the shared base lands there);
 		head, err = seq.AddClaimsToBranch(ctx, branches[i%len(branches)], chunk)
 		if err != nil {
 			return nil, fmt.Errorf("%w: merge: %w", errGenerate, err)
@@ -113,10 +109,21 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 // contribution's closure, so an unbounded count would be quadratic. Deterministic
 // per seed (chunking only shapes the Sequencer-minted revision chain; contributed
 // claim ids do not depend on it).
-func contributionChunks(batch []ranke.Claim, seed int64) [][]ranke.Claim {
+func contributionChunks(batch []ranke.Claim, seed int64, minChunks int) [][]ranke.Claim {
 	n := len(batch)
 	if n == 0 {
 		return nil
+	}
+	// Each branch takes a contribution in turn, so reaching them all needs at
+	// least that many. A small batch splits evenly to get there.
+	if minChunks > 1 && n >= minChunks {
+		size := (n + minChunks - 1) / minChunks
+		var chunks [][]ranke.Claim
+		for i := 0; i < n; i += size {
+			end := min(i+size, n)
+			chunks = append(chunks, batch[i:end])
+		}
+		return chunks
 	}
 	rng := rand.New(rand.NewSource(seed))
 	mean := 4.0

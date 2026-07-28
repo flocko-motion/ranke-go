@@ -15,20 +15,16 @@ import (
 	"time"
 )
 
-// validateSelect enforces the byte-store reference contract: a scope is
-// mandatory (use BranchUniverse for unconfined reads), and Claim must be the
-// resolved root. The reference cannot enumerate a branch's members (no tag
-// index over an opaque byte store), so it needs a root to walk from — the
-// archive layer resolves a branch to its head upstream. A tag-capable backend
-// (neo4j) has no such need and serves a nil-Claim branch read from _b_<branch>.
-func validateSelect(sel Select) error {
-	if sel.Branch == "" {
-		return errQueryNoScope
+// scopeOrigin is where this walker enumerates a scope from: Select.Head, else the
+// scope's own anchor. An index-free walker's own business, not a Select default.
+func scopeOrigin(sel Select, scope Scope) (Id, error) {
+	if sel.Head != nil {
+		return sel.Head, nil
 	}
-	if sel.Claim == nil {
-		return errQueryNoRoot
+	if scope.Head != nil {
+		return scope.Head, nil
 	}
-	return nil
+	return nil, ErrQueryNoHead
 }
 
 // DefaultQuery is the reference implementation of Universe.Query for a backend
@@ -40,11 +36,11 @@ func validateSelect(sel Select) error {
 // graph-native backend (neo4j) overrides Universe.Query.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
-	if err := validateSelect(q.Select); err != nil {
+	if err := ValidateSelect(q); err != nil {
 		return nil, err
 	}
 	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
-	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch, "root": q.Select.Claim.String()})
+	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch})
 	if q.Limit.Time > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, q.Limit.Time)
@@ -52,7 +48,20 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	}
 
 	needPaths := q.Output.Shape == ShapePath
-	reached, routes, err := queryTraverse(ctx, u, q.Select, scope.Head, needPaths, rc)
+	sel := q.Select
+	switch {
+	case len(sel.Path) == 0:
+		// A scan: the scope's claim set, reached by closing over an anchor.
+		origin, err := scopeOrigin(sel, scope)
+		if err != nil {
+			return nil, err
+		}
+		sel.Claim = origin
+		needPaths = false
+	case sel.Claim == nil:
+		return nil, ErrQueryUnanchored
+	}
+	reached, routes, err := queryTraverse(ctx, u, sel, scope.Head, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}

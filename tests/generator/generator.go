@@ -174,11 +174,14 @@ func branchCount(claimCount int) int {
 
 // branchNames returns the branch names for a graph of claimCount claims: "main"
 // plus deterministic gofakeit words, seeded so they are stable run to run.
-func branchNames(claimCount int, seed int64) []string {
+func branchNames(claimCount int, seed int64, want int) []string {
+	if want < 1 {
+		want = branchCount(claimCount)
+	}
 	names := []string{"main"}
 	f := gofakeit.New(contentSeed(seed, "branch", 0))
 	seen := map[string]bool{"main": true}
-	for len(names) < branchCount(claimCount) {
+	for len(names) < want {
 		w := strings.ToLower(f.Word())
 		if w == "" || seen[w] {
 			continue

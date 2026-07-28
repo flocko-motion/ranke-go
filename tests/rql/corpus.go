@@ -56,9 +56,15 @@ func Timed(m *generator.Manifest, root ranke.Id) []NamedQuery {
 // least one claim (the matrix asserts it), else backends agree on nothing.
 // root is the "main" branch head; m.Head the archive head.
 func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
-	sel := func() ranke.Select { return ranke.Select{Branch: Branch, Claim: root} }
+	// A scan of the branch: the branch is the scope, so no sub-selection and no
+	// starting point. A traversal anchors at the branch head.
+	sel := func() ranke.Select { return ranke.Select{Branch: Branch} }
 	path := func(steps ...ranke.PathStep) ranke.Select {
 		return ranke.Select{Branch: Branch, Claim: root, Path: steps}
+	}
+	// scanFrom narrows a branch scan to one claim's closure.
+	scanFrom := func(head ranke.Id) ranke.Select {
+		return ranke.Select{Branch: Branch, Head: head}
 	}
 	// A mid-graph instant: the clock starts at Base and advances Step per claim,
 	// so this splits the archive into a before and an after deterministically.
@@ -68,7 +74,7 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// ── traversal: the whole closure, in each of the three scopes ────────
 		{"closure/branch", ranke.Query{Select: sel()}},
 		{"closure/universe", ranke.Query{
-			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.Head},
+			Select: ranke.Select{Branch: ranke.BranchUniverse, Head: m.Head},
 		}},
 		// $archive is the whole Ranke-Archive: the branch-table header's closure,
 		// so it reaches the spine and every branch. Its root defaults to the
@@ -85,15 +91,13 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// Rooted mid-branch, not at the branch head: the walk starts here and the
 		// branch confines it, so the answer is smaller than the branch. A lowering
 		// that scans branch membership and ignores the root over-returns.
-		{"select/root-mid-branch", ranke.Query{
-			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead},
-		}},
+		{"select/root-mid-branch", ranke.Query{Select: scanFrom(m.DiffChainHead)}},
 		{"select/root-mid-branch-path", ranke.Query{
 			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead,
 				Path: []ranke.PathStep{{Edges: []string{"contribution/*"}, Depth: 2}}},
 		}},
 		{"select/root-mid-archive", ranke.Query{
-			Select: ranke.Select{Branch: ranke.BranchArchive, Claim: m.DiffChainHead},
+			Select: ranke.Select{Branch: ranke.BranchArchive, Head: m.DiffChainHead},
 		}},
 
 		// ── traversal: typed edges to a bounded depth ───────────────────────
@@ -192,10 +196,10 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 
 		// ── shape: diff-chain resolution (the generator builds a long chain) ─
 		{"output/form-materialized", ranke.Query{
-			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead},
+			Select: scanFrom(m.DiffChainHead),
 			Output: ranke.Output{Form: ranke.FormMaterialized}}},
 		{"output/form-original", ranke.Query{
-			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead},
+			Select: scanFrom(m.DiffChainHead),
 			Output: ranke.Output{Form: ranke.FormOriginal}}},
 
 		// ── shape: inline content and its overflow handling ──────────────────

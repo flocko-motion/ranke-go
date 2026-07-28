@@ -80,10 +80,9 @@ type Spec struct {
 	// here; the tombstone claim is the structural corner.
 	Deletes int
 
-	// Not a knob yet: multiple named branches. The ADT expresses it fine (a
-	// branch table is a claim with several contribution/branch edges), but the
-	// dev Sequencer advances a single "main" — a tooling limit, not an ADT
-	// one. Add it here once the dev Sequencer takes a branch name.
+	// Branches is how many named branches the contributions spread across;
+	// 0 derives a count from the claim total. "main" is always the first.
+	Branches int
 }
 
 // SpecForSize derives a full Spec from one size knob. The scaling is linear

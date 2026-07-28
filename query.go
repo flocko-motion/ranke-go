@@ -34,16 +34,13 @@ const (
 	BranchArchive = "$archive"
 )
 
-// Select is a generator: a scope, a root, and a traversal. Branch is the
-// mandatory scope — a real branch name (confined to that branch), or the
-// reserved BranchUniverse / BranchArchive. Claim is the root within the scope:
-// required under BranchUniverse (there is no head to default to), optional
-// otherwise (the archive layer defaults it to the scope's current head — the
-// branch head, or the branch-table header for BranchArchive). An empty Path
-// follows every edge outward to the full closure (§Closures).
+// Select is a generator built from four orthogonal parts: Branch is the scope,
+// Head narrows it to one claim's closure, Path is the traversal, and Claim anchors
+// that traversal. A Select with no Path is a scan of the scope.
 type Select struct {
 	Branch string // scope: BranchUniverse, BranchArchive, or a branch name
-	Claim  Id     // root within the scope; required under BranchUniverse
+	Head   Id     // narrows the scope to this claim's closure
+	Claim  Id     // anchors a traversal; nil leaves the pattern unanchored
 	Path   []PathStep
 }
 

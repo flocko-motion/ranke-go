@@ -45,4 +45,13 @@ func TestToys(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, m.ExternalBlobs, 1, "must produce one external-content source")
 	})
+
+	t.Run("ToyBranches", func(t *testing.T) {
+		u := ranke.NewMemoryUniverse()
+		m, err := Generate(ctx, u, ToyBranches(1))
+		require.NoError(t, err)
+		require.Len(t, m.Branches, 2, "must spread over exactly two branches")
+		require.Equal(t, "main", m.Branches[0])
+		require.GreaterOrEqual(t, m.Revisions, 2, "each branch takes a contribution")
+	})
 }

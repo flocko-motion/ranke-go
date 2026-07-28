@@ -107,27 +107,28 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 	return c.GetContent(ctx, a.u)
 }
 
-// Query resolves the branch scope (its only job) and delegates to 𝒰.
+// Query resolves the branch scope and delegates to 𝒰.
+// Select.Claim is the caller's traversal anchor, nil means unanchored
 func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
+	if err := ValidateSelect(q); err != nil {
+		return nil, err
+	}
 	scope, err := a.resolveScope(ctx, q)
 	if err != nil {
 		return nil, err
-	}
-	if q.Select.Claim == nil {
-		q.Select.Claim = scope.Head // default to the scope head ($universe has none → errQueryNoRoot)
 	}
 	return a.u.Query(ctx, q, scope)
 }
 
 // resolveScope maps Branch to its Scope: a name via its head, $archive via the
-// table head, $universe unconfined (Head nil — caller must pin Select.Claim).
+// table head, $universe unconfined (Head nil — the caller pins Select.Head).
 // Height is always the branch-table height (the tag scale): a member's
 // _b_<branch> is the table height it joined at, so tag <= Height filters both
 // membership and point-in-time in one comparison.
 func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 	switch q.Select.Branch {
 	case "":
-		return Scope{}, errQueryNoScope
+		return Scope{}, ErrQueryNoScope
 	case BranchUniverse:
 		return Scope{Branch: BranchUniverse}, nil
 	case BranchArchive:

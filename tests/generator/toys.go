@@ -16,6 +16,7 @@ func toyBase(seed int64) Spec {
 		Step: time.Second,
 
 		Contributors:   1,
+		Branches:       1, // one corner per toy; ToyBranches opts into more
 		TinyBlobBytes:  16,
 		LargeBlobBytes: 16,
 		MaxEdgeDegree:  1,
@@ -42,6 +43,16 @@ func ToyRelation(seed int64) Spec {
 	return s
 }
 
+// ToyUnwiredEntity adds a third entity the single relation leaves alone, so a hop
+// range tells the wired pair from the whole entity set.
+func ToyUnwiredEntity(seed int64) Spec {
+	s := toyBase(seed)
+	s.Sources = 1
+	s.Entities = 3
+	s.Relations = 1
+	return s
+}
+
 // ToyExternalContent is the smallest archive whose source content lives in the
 // Universe by hash rather than inline — the content a projection layer must serve
 // from a durable tier.
@@ -49,5 +60,15 @@ func ToyExternalContent(seed int64) Spec {
 	s := toyBase(seed)
 	s.Sources = 1
 	s.ExternalBlobs = 1
+	return s
+}
+
+// ToyBranches is the smallest archive spread over two branches, so a branch-scoped
+// read has another branch's claims to leave out.
+func ToyBranches(seed int64) Spec {
+	s := toyBase(seed)
+	s.Sources = 2
+	s.Derivations = 2
+	s.Branches = 2
 	return s
 }
