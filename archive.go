@@ -108,7 +108,6 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 }
 
 // Query resolves the branch scope and delegates to 𝒰.
-// Select.Claim is the caller's traversal anchor, nil means unanchored
 func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	if err := validateSelect(q); err != nil {
 		return nil, err

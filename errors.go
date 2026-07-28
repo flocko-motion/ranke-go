@@ -104,7 +104,6 @@ var (
 	ErrQueryNoScope          = errors.New("ranke.Query: Select.Branch is required (scope is mandatory — use BranchUniverse for an unconfined read)")
 	ErrQueryScanShape        = errors.New("ranke.Query: a scan (no Select.Path) reaches claims by no stated route, so Output.Shape must be single")
 	ErrQueryScanClaim        = errors.New("ranke.Query: a scan (no Select.Path) has no traversal to start, so Select.Claim is meaningless")
-	ErrQueryUnanchored       = errors.New("ranke.Query: unanchored traversal — Select.Path with no Select.Claim")
 	errVerify                = errors.New("ranke.verify")
 	errContributorUnresolved = errors.New("ranke.verify: contributor claim unresolved")
 	errHeightResolve         = errors.New("ranke.NewClaim: resolve reference height for WithAutoHeight")

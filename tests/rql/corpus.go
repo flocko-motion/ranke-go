@@ -76,6 +76,10 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 	archivePath := func(steps ...ranke.PathStep) ranke.Select {
 		return ranke.Select{Branch: ranke.BranchArchive, Claim: m.Head, Path: steps}
 	}
+	// unanchored names no start, so the steps match anywhere in the closure.
+	unanchored := func(steps ...ranke.PathStep) ranke.Select {
+		return ranke.Select{Branch: ranke.BranchArchive, Path: steps}
+	}
 	// A mid-graph instant: the clock starts at Base and advances Step per claim,
 	// so this splits the archive into a before and an after deterministically.
 	midpoint := m.Spec.Base.Add(time.Duration(m.Spec.Size/2) * m.Spec.Step).Format(time.RFC3339Nano)
@@ -110,6 +114,19 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 			Select: ranke.Select{Branch: ranke.BranchArchive, Head: m.DiffChainHead},
 		}},
 
+		// ── traversal: unanchored, matched wherever it occurs in the closure ──
+		{"unanchored/relation-to-entity", ranke.Query{Select: unanchored(
+			ranke.PathStep{Dir: ranke.DirConnections, Edges: []string{"relation/*"},
+				Nodes: []string{"entity/person"}})}},
+		{"unanchored/derivation-to-source", ranke.Query{Select: unanchored(
+			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}})}},
+		{"unanchored/uses-of-sources", ranke.Query{Select: unanchored(
+			ranke.PathStep{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
+			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}})}},
+		{"unanchored/shape-path", ranke.Query{
+			Select: unanchored(ranke.PathStep{Edges: []string{"relation/*"}, Max: 1}),
+			Output: ranke.Output{Shape: ranke.ShapePath}}},
+
 		// ── traversal: typed edges to a bounded depth ───────────────────────
 		// Anchored at the diff chain's head: a derivation, so it has the
 		// derivation/* edges these steps follow.
@@ -142,8 +159,8 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// Forward to the sources, then backward to the derivations that cite
 		// them — unreachable going forward, so it exercises the reverse path
 		// (native on neo4j; closure-inversion in the reference executor).
-		// Scoped to the archive: "who uses this" reaches across branches, and the
-		// generator commits a source and its deriver to whichever it likes.
+		// Referrers sit above the claim they cite, so a scope holds them only when
+		// its head reaches them. $archive's head reaches every branch head.
 		{"path/uses-of-sources", ranke.Query{Select: archivePath(
 			ranke.PathStep{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}})}},
@@ -157,7 +174,7 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// ── filter: one operator at a time ──────────────────────────────────
 		{"where/type-glob-source", ranke.Query{Select: sel(),
 			Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}}}},
-		// Scoped to the archive: the generator may commit entities to any branch.
+		// Scoped to the archive, whose head reaches every branch's entities.
 		{"where/type-eq-entity-person", ranke.Query{
 			Select: ranke.Select{Branch: ranke.BranchArchive},
 			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Eq: "entity/person"}}}},
