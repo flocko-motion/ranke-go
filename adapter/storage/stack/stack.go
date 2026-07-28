@@ -153,12 +153,23 @@ func (s *stack) background(ctx context.Context, put func(context.Context, layer)
 	}
 }
 
+// GetClaims routes by the form asked for, using each layer's capabilities. A
+// RawClaims layer keeps deltas: it is asked for delta form, and (unless the caller
+// wanted that) the result is materialised at stack level so a predecessor resolves
+// across all layers. A layer without RawClaims keeps materialised claims only, so
+// it is asked plainly and skipped entirely for a delta read.
 func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
+	wantDelta := ranke.WantsDelta(opts...)
 	out := make([]ranke.Claim, len(ids))
 	pending := seq(len(ids))
+	var resolve []ranke.Claim // fetched as deltas, still to be materialised
 	for li := range s.layers {
 		if len(pending) == 0 {
 			break
+		}
+		keepsDeltas := s.layers[li].caps.RawClaims
+		if wantDelta && !keepsDeltas {
+			continue // it has no delta to give — do not spend a round trip
 		}
 		has, err := s.layers[li].u.HasClaims(ctx, pickIds(ids, pending))
 		if err != nil {
@@ -178,16 +189,21 @@ func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.Get
 		if len(hitIDs) > 0 {
 			if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
 				ranke.ReportEvent(ctx, "stack", "route", ranke.ReportDebug, "",
-					map[string]any{"layer": li, "hits": len(hitIDs)})
+					map[string]any{"layer": li, "hits": len(hitIDs), "delta": keepsDeltas})
 			}
-			// Fetch raw delta from the layer; materialise at the stack level
-			// (below) so a diff's predecessor resolves across all layers.
-			got, err := s.layers[li].u.GetClaims(ctx, hitIDs, ranke.WithNotDiffMaterialized())
+			var layerOpts []ranke.GetOption
+			if keepsDeltas {
+				layerOpts = append(layerOpts, ranke.WithNotDiffMaterialized())
+			}
+			got, err := s.layers[li].u.GetClaims(ctx, hitIDs, layerOpts...)
 			if err != nil {
 				return nil, err
 			}
 			for j, c := range got {
 				out[hitAt[j]] = c
+			}
+			if keepsDeltas && !wantDelta {
+				resolve = append(resolve, got...)
 			}
 			s.fillClaims(ctx, li, got)
 		}
@@ -196,8 +212,12 @@ func (s *stack) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.Get
 	if len(pending) > 0 {
 		return nil, ranke.ErrNotFound
 	}
-	// Materialise diff overlays at the stack level, honouring the read opts.
-	return ranke.DefaultMaterialize(ctx, s, out, opts...)
+	if len(resolve) > 0 {
+		if _, err := ranke.DefaultMaterialize(ctx, s, resolve); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *stack) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
@@ -347,11 +367,6 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 	return ranke.DefaultGetClaimHeights(ctx, s, ids)
 }
 
-// Query hands the read to the top layer
-func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	return s.layers[0].u.Query(ctx, q, scope)
-}
-
 // GetClaimsRaw returns the stored CBOR, tried layer by layer top-down: the
 // first layer holding the bytes wins; a layer that lacks them (a structure-only
 // cache like neo4j returns ErrNotFound) is skipped, so the request falls
@@ -406,6 +421,22 @@ func (s *stack) SetClaimsTags(ctx context.Context, clearTags []string, tags map[
 	}
 	if !found {
 		return ranke.ErrUnsupported
+	}
+	return nil
+}
+
+// Tag broadcasts the signal to every layer reporting Tags and skips the rest, so
+// each capable layer updates its accelerators its own way. One layer's failure
+// fails the call: a half-tagged stack would serve different speeds per read, and
+// silently.
+func (s *stack) Tag(ctx context.Context, head ranke.Id) error {
+	for li := range s.layers {
+		if !s.layers[li].caps.Tags {
+			continue
+		}
+		if err := s.layers[li].u.Tag(ctx, head); err != nil {
+			return err
+		}
 	}
 	return nil
 }

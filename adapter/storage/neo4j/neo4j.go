@@ -134,6 +134,12 @@ func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	if len(cs) == 0 {
 		return nil
 	}
+	// This cache stores materialised claims, so any diff overlay is resolved
+	// before projecting: a delta's effective content_size and encoding come from
+	// its base, and claimParam reads them off the materialised view.
+	if err := u.materializeForWrite(ctx, cs); err != nil {
+		return err
+	}
 	claims := make([]map[string]any, 0, len(cs))
 	byType := map[string][]map[string]any{} // edge type → its edge params (each with src)
 	for _, c := range cs {
@@ -180,6 +186,11 @@ RETURN properties(n) AS node, labels(n) AS labels,
 // cache is a miss (ranke.ErrNotFound) so the stack falls through to the durable
 // layer.
 func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
+	// This cache keeps materialised claims and no canonical CBOR, so it has no
+	// delta to serve. Miss, so a stack descends to a RawClaims layer.
+	if ranke.WantsDelta(opts...) {
+		return nil, fmt.Errorf("%w: delta form (this cache stores materialised claims only)", ranke.ErrNotFound)
+	}
 	out := make([]ranke.Claim, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -225,8 +236,9 @@ func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...r
 		}
 		out[i] = c
 	}
-	// Materialise diff overlays via the ADT default, honouring read opts.
-	return ranke.DefaultMaterialize(ctx, u, out, opts...)
+	// Stored claims are already materialised — no overlay pass. No delta form to
+	// serve either; a caller needing one reads a RawClaims layer.
+	return out, nil
 }
 
 const cypherHasClaims = `
