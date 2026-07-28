@@ -142,7 +142,9 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// Forward to the sources, then backward to the derivations that cite
 		// them — unreachable going forward, so it exercises the reverse path
 		// (native on neo4j; closure-inversion in the reference executor).
-		{"path/uses-of-sources", ranke.Query{Select: path(
+		// Scoped to the archive: "who uses this" reaches across branches, and the
+		// generator commits a source and its deriver to whichever it likes.
+		{"path/uses-of-sources", ranke.Query{Select: archivePath(
 			ranke.PathStep{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}})}},
 		{"path/connections-relation", ranke.Query{Select: archivePath(
