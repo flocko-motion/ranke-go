@@ -39,9 +39,9 @@ func neo4jReachable() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// openTestNeo4j connects to a live neo4j, flushes, seeds a small graph, and
-// returns the *neo4jUniverse (so tests can read its query counter) and head id.
-func openTestNeo4j(t *testing.T) (*neo4jUniverse, ranke.Id) {
+// connectTestNeo4j connects to a live neo4j and flushes it, returning an empty
+// cache Universe and the driver (so a test can read the projection directly).
+func connectTestNeo4j(t *testing.T) (*neo4jUniverse, neo4jdriver.DriverWithContext) {
 	t.Helper()
 	if os.Getenv("RANKE_NEO4J_BOLT") == "" && !neo4jReachable() {
 		t.Skip("no neo4j reachable (services/neo4j.sh native up)")
@@ -53,7 +53,14 @@ func openTestNeo4j(t *testing.T) (*neo4jUniverse, ranke.Id) {
 	_, err = neo4jdriver.ExecuteQuery(context.Background(), driver, "MATCH (n) DETACH DELETE n", nil,
 		neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase("neo4j"))
 	require.NoError(t, err)
-	u := New(driver, WithDatabase("neo4j"), WithContentCap(4096)).(*neo4jUniverse)
+	return New(driver, WithDatabase("neo4j"), WithContentCap(4096)).(*neo4jUniverse), driver
+}
+
+// openTestNeo4j connects to a live neo4j, flushes, seeds a small graph, and
+// returns the *neo4jUniverse (so tests can read its query counter) and head id.
+func openTestNeo4j(t *testing.T) (*neo4jUniverse, ranke.Id) {
+	t.Helper()
+	u, _ := connectTestNeo4j(t)
 
 	ctx := context.Background()
 	mem := ranke.NewMemoryUniverse()

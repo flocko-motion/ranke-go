@@ -53,11 +53,8 @@ type Backend struct {
 // (ranke.DefaultQuery). Always available, so a matrix always has a baseline.
 func Reference() Backend { return Backend{Name: "mem", Open: openMem} }
 
-// All is the matrix. Durable byte-stores run standalone (mem, fs, sqlite, s3,
-// redis). Neo4j is a graph-native cache — it holds no canonical CBOR and drops
-// content over its cap, so it appears ONLY in stacks over a durable tier that
-// holds the bytes and serves content misses (neo4j/mem; the production
-// neo4j/redis/s3). Each row starts empty.
+// All is the matrix, each row starting empty. Durable byte-stores run standalone;
+// neo4j holds no CBOR and caps content, so it appears only stacked over one.
 func All() []Backend {
 	return []Backend{
 		{"mem", openMem},
@@ -201,11 +198,8 @@ func openNeo4j() (ranke.Universe, func(), error) {
 	}, nil
 }
 
-// Stacked composes openers top→bottom into one Universe. Each adapter already
-// carries its own write tier (Capabilities.Tier) — neo4j eager, redis lazy,
-// mem/s3 authoritative — so the stack routes by what the layers report; there
-// is nothing to wrap here. If any component is unavailable (ErrUnavailable) the
-// whole stack is, and any already-opened components are cleaned up.
+// Stacked composes openers top→bottom; each adapter reports its own write tier,
+// so the stack routes itself. One unavailable component makes the whole stack so.
 func Stacked(openers ...func() (ranke.Universe, func(), error)) func() (ranke.Universe, func(), error) {
 	return func() (ranke.Universe, func(), error) {
 		var cleanups []func()

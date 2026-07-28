@@ -52,15 +52,9 @@ func Timed(m *generator.Manifest, root ranke.Id) []NamedQuery {
 }
 
 // Corpus is the broad conformance set: every axis of the read language, each
-// entry grounded in a corner the generator actually produces (source/note and
-// source/blob, derivation/summary, entity/person, relation/knows with both
-// polarities, contribution/expiry and contribution/delete, diff chains,
-// external blobs). Every entry is expected to match at least one claim — the
-// matrix asserts that, so an entry that silently matches nothing fails rather
-// than passing as a trivial agreement.
-//
-// root is the "main" branch head; m.Head is the archive head the one unconfined
-// entry roots at.
+// entry grounded in a corner the generator produces. Every entry must match at
+// least one claim (the matrix asserts it), else backends agree on nothing.
+// root is the "main" branch head; m.Head the archive head.
 func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 	sel := func() ranke.Select { return ranke.Select{Branch: Branch, Claim: root} }
 	path := func(steps ...ranke.PathStep) ranke.Select {
@@ -71,10 +65,35 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 	midpoint := m.Spec.Base.Add(time.Duration(m.Spec.Size/2) * m.Spec.Step).Format(time.RFC3339Nano)
 
 	return []NamedQuery{
-		// ── traversal: the whole closure, in each scope ──────────────────────
+		// ── traversal: the whole closure, in each of the three scopes ────────
 		{"closure/branch", ranke.Query{Select: sel()}},
 		{"closure/universe", ranke.Query{
 			Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: m.Head},
+		}},
+		// $archive is the whole Ranke-Archive: the branch-table header's closure,
+		// so it reaches the spine and every branch. Its root defaults to the
+		// archive head, so Claim is deliberately left unset here.
+		{"closure/archive", ranke.Query{
+			Select: ranke.Select{Branch: ranke.BranchArchive},
+		}},
+		{"archive/where-branch-tables", ranke.Query{
+			Select: ranke.Select{Branch: ranke.BranchArchive},
+			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "contribution/branches"}},
+		}},
+
+		// ── the walk's starting point ────────────────────────────────────────
+		// Rooted mid-branch, not at the branch head: the walk starts here and the
+		// branch confines it, so the answer is smaller than the branch. A lowering
+		// that scans branch membership and ignores the root over-returns.
+		{"select/root-mid-branch", ranke.Query{
+			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead},
+		}},
+		{"select/root-mid-branch-path", ranke.Query{
+			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead,
+				Path: []ranke.PathStep{{Edges: []string{"contribution/*"}, Depth: 2}}},
+		}},
+		{"select/root-mid-archive", ranke.Query{
+			Select: ranke.Select{Branch: ranke.BranchArchive, Claim: m.DiffChainHead},
 		}},
 
 		// ── traversal: typed edges to a bounded depth ───────────────────────
@@ -90,11 +109,8 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 			ranke.PathStep{Edges: []string{"-contribution/*"}, Depth: 3})}},
 
 		// ── traversal: endpoint node constraints ────────────────────────────
-		// Two steps: reach the derivations, then follow their derivation edges to
-		// the sources they cite. A single derivation-only step cannot leave the
-		// root — the branch head is a contribution/head, whose edges are all
-		// contribution/* — so it would match nothing but the root, which the node
-		// filter then excludes.
+		// Two steps: a derivation-only step cannot leave the root (a
+		// contribution/head carries only contribution/* edges).
 		{"path/nodes-source", ranke.Query{Select: path(
 			ranke.PathStep{Nodes: []string{"derivation/*"}},
 			ranke.PathStep{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}})}},

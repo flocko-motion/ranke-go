@@ -37,15 +37,16 @@ func Scope(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ran
 // is compared as a sequence, never as a set.
 type Answer []string
 
-// Run executes q against u and returns its Answer. It asks for nothing the query
-// did not — the fingerprint reflects exactly the shape the query requested, so a
-// backend is judged on the answer it gives, not on how it arrived at one.
+// Run executes q through the Archive at archiveHead and returns its Answer. It
+// goes through the Archive, not Universe.Query, so the query meets the library's
+// own scope resolution — a hand-rolled Scope would test the helper's idea of
+// $universe/$archive/branch rather than the library's.
 func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (Answer, error) {
-	scope, err := Scope(ctx, u, q, archiveHead)
+	arc, err := ranke.NewArchive(ctx, u, archiveHead)
 	if err != nil {
 		return nil, err
 	}
-	rs, err := u.Query(ctx, q, scope)
+	rs, err := arc.Query(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -63,12 +64,9 @@ func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke
 	return out, nil
 }
 
-// Fingerprint renders one result deterministically, covering every part the
-// query could have asked for: the id (always present), the path when the shape
-// is a path, the claim's projected fields and edges when a detail level carried
-// a claim, and inlined content when the output requested it. Comparing ids alone
-// would leave the shape axes untested — two backends can return the same claims
-// while disagreeing about what each one carries.
+// Fingerprint renders one result deterministically — id, path, claim fields and
+// edges, content — so the shape axes are compared, not just which claims came
+// back. Two backends can return the same ids and disagree on their contents.
 func Fingerprint(r ranke.QueryResult) string {
 	var b strings.Builder
 	b.WriteString(idOf(r.Id))

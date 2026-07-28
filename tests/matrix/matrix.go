@@ -3,16 +3,9 @@
 // job:     the cross-backend agreement matrix — build one deterministic archive into every available backend, run the shared RQL corpus against each, and assert every backend's answer matches the reference's
 // limits:  correctness only, never timing (-> tests/performance); it asks whether an answer is right, never how a backend produced it — routing, lowering, and cache tiers are the backend's business
 //
-// Package matrix is the cross-backend conformance suite. Two backends that both
-// implement the Ranke-Graph read language must answer the same query with the
-// same result; a divergence is a conformance bug in at least one of them. A
-// downstream implementation runs the same matrix over its own rows:
-//
-//	func TestMyBackends(t *testing.T) {
-//	    matrix.Run(t, matrix.Config{Rows: []backends.Backend{
-//	        {Name: "mine", Open: openMine},
-//	    }})
-//	}
+// Two backends implementing the read language must answer a query identically;
+// a divergence is a conformance bug in at least one. Run it over your own rows
+// with matrix.Run(t, Config{Rows: ...}).
 package matrix
 
 import (
@@ -28,10 +21,8 @@ import (
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
-// defaultSize is the generator size the matrix runs at: small enough to build
-// into every backend quickly, large enough that the archive still carries every
-// corner (multiple revisions, diff chains, external blobs, both relation
-// polarities).
+// defaultSize builds fast into every backend while still carrying every corner
+// (revisions, diff chains, external blobs, both relation polarities).
 const defaultSize = 5
 
 // Config parameterises an agreement run.
@@ -50,10 +41,8 @@ type Config struct {
 	Only string
 }
 
-// Run builds the same deterministic archive into the reference and into every
-// available row, then asserts each row answers every corpus query exactly as the
-// reference does — fingerprint for fingerprint, in stream order. A row that
-// cannot run in this environment is skipped, not failed.
+// Run builds one deterministic archive into the reference and every available
+// row, then asserts each row answers the corpus identically, in stream order.
 func Run(t *testing.T, cfg Config) {
 	t.Helper()
 	ctx := context.Background()
@@ -155,12 +144,9 @@ func corpus(m *generator.Manifest, root ranke.Id, only string) []rql.NamedQuery 
 	return out
 }
 
-// build generates the archive into an open backend and returns its manifest and
-// the "main" branch head, read from the branch table. Nothing here prepares a
-// backend for the queries that follow: whatever bookkeeping an adapter keeps to
-// answer them — a tag overlay, an index, a cache tier — is internal to that
-// adapter, and a backend needing an external call to become correct is itself
-// the defect.
+// build writes the archive into an open backend, returning its manifest and the
+// "main" branch head. It prepares nothing: a backend needing an external call to
+// become correct is itself the defect.
 func build(t *testing.T, ctx context.Context, u ranke.Universe, spec generator.Spec) (*generator.Manifest, ranke.Id) {
 	t.Helper()
 	m, err := generator.Generate(ctx, u, spec)
