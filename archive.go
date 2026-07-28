@@ -1,293 +1,224 @@
 // package: ranke / archive
 // type:    logic
-// job:     composes a Universe and BranchTableHead into the (𝒰, B_h) Archive; commits graphs/claims to branches and verifies them
-// limits:  stores nothing itself (-> universe, branch_table_head); does not validate per-claim integrity (-> graph)
+// job:     an immutable Ranke-Archive snapshot RA_k = (𝒰, k); reads claims and branches through the head claim, delegating closure ops to the Universe
+// limits:  advances nothing — writes go through the Sequencer (-> sequencer); closure traversal belongs to the Universe (-> universe)
 package ranke
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"time"
+	"io"
+	"sort"
+	"strconv"
+	"sync"
 )
 
-// Archive is the (𝒰, B_h) tuple from spec §4.8. Branches and graphs
-// are projections of claims that live in the underlying Universe.
-// Every method takes a ctx threaded from the entry point.
+// Archive is an immutable read snapshot of a Ranke-Archive: the tuple
+// RA_k = (𝒰, k), held as the Universe plus the head claim 𝒰(k). Reads
+// resolve against the head's closure — membership and lookup are
+// delegated to the Universe (engine-dependent). It advances nothing; a
+// contribution is the Sequencer's job.
+//
+// The head claim 𝒰(k) plays the paper's *branch table* role (spec
+// §Branches): its named contribution/branch edges are the archive's
+// branches, and it may be a contribution/diff over previous tables. The
+// Archive implements that branch-table concept — materialising the diff
+// chain and exposing each named edge as a Branch. No other type needs it.
 type Archive interface {
-	HasClaim(ctx context.Context, id Id) bool
-	// GetClaim returns the claim at id. Call .Graph(ctx) on the
-	// result to materialize the provenance.
+	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
+	GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 
-	HasBranch(ctx context.Context, name string) bool
+	HasBranch(ctx context.Context, name string) (bool, error)
 	GetBranch(ctx context.Context, name string) (Branch, error)
-	Branches(ctx context.Context) []Branch
+	GetBranches(ctx context.Context) ([]Branch, error)
 
-	// AddClaim appends a single claim to the named branch. Loads
-	// the branch's current closure, adds the claim, commits via
-	// AddGraph. Use AddGraph directly for multi-claim transactions.
-	AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error
+	// Query answers an RQL read: resolve q.Select.Branch to a Scope, delegate to 𝒰.
+	Query(ctx context.Context, q Query) (ResultStream, error)
 
-	// AddGraph commits g to the named branch. Every claim in g is
-	// absorbed into 𝒰, a contribution/head claim wraps g's open
-	// heads (auto-consolidating multi-headed graphs), and a new
-	// contribution/branches table records the binding.
-	AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error
-
-	// VerifyBranch loads the claim at the branch's latest head and
-	// runs the §5.10 checks across its provenance.
-	VerifyBranch(ctx context.Context, name string) error
-}
-
-// NewArchive composes a Universe (𝒰) with a BranchTableHead (B_h)
-// into a Ranke-Archive (spec §4.8). The Archive holds no resources
-// of its own — closing it does not close u or bth; the caller
-// manages their lifetimes, which is what lets multiple Archives
-// share one Universe.
-func NewArchive(ctx context.Context, u Universe, bth BranchTableHead) (Archive, error) {
-	if u == nil {
-		return nil, errors.New("ranke.NewArchive: nil Universe")
-	}
-	if bth == nil {
-		return nil, errors.New("ranke.NewArchive: nil BranchTableHead")
-	}
-	bh, err := bth.Load(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewArchive: load B_h: %w", err)
-	}
-	table, err := LoadBranchTable(ctx, u, bh)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewArchive: load branch table: %w", err)
-	}
-	return &archive{
-		u:       u,
-		bth:     bth,
-		table:   table,
-		claims:  make(map[string]*claim),
-		content: make(map[string][]byte),
-	}, nil
+	Verify(ctx context.Context, opts ...VerifyOption) (VerificationRun, error)
 }
 
 type archive struct {
-	u     Universe
-	bth   BranchTableHead
-	table BranchTable
+	u   Universe
+	bth Claim // the head claim 𝒰(k) — a contribution/branches claim
 
-	claims  map[string]*claim
-	content map[string][]byte
+	// The archive is an immutable snapshot, so the branch set is stable —
+	// read it off the (already-materialised) head claim once and memoise it
+	// (safe for concurrent readers). Each entry is the naming
+	// contribution/branch edge, keyed by branch name.
+	branchOnce sync.Once
+	branches   map[string]Edge
 }
 
-func (a *archive) lookupClaim(ctx context.Context, id Id) (*claim, error) {
-	if id == nil {
-		return nil, errors.New("nil id")
-	}
-	k := id.String()
-	if c, ok := a.claims[k]; ok {
-		return c, nil
-	}
-	c, err := loadClaimAs(ctx, a.u, id)
-	if err != nil {
-		return nil, err
-	}
-	a.claims[k] = c
-	if err := a.loadClaimContent(ctx, c); err != nil {
-		delete(a.claims, k)
-		return nil, err
-	}
-	return c, nil
-}
-
-func (a *archive) loadClaimContent(ctx context.Context, c *claim) error {
-	if c.node.contentHash == nil || c.node.content != nil {
-		return nil
-	}
-	b, err := a.fetchContent(ctx, c.node.contentHash, c.node.size)
-	if err != nil {
-		return fmt.Errorf("node content %s: %w", c.node.contentHash.String(), err)
-	}
-	c.node.content = b
-	return nil
-}
-
-func (a *archive) fetchContent(ctx context.Context, id Id, expected uint64) ([]byte, error) {
-	k := id.String()
-	if b, ok := a.content[k]; ok {
-		return b, nil
-	}
-	b, err := GetContent(ctx, a.u, id, expected)
-	if err != nil {
-		return nil, err
-	}
-	a.content[k] = b
-	return b, nil
-}
-
-func (a *archive) absorbClaim(ctx context.Context, c *claim) error {
-	k := c.node.id.String()
-	if c.universe == nil {
-		c.universe = a.u
-	}
-	if _, ok := a.claims[k]; !ok {
-		a.claims[k] = c
-	}
-	if err := PutClaim(ctx, a.u, c); err != nil {
-		return err
-	}
-	if c.node.content != nil && c.node.contentHash != nil {
-		if err := a.absorbContent(ctx, c.node.contentHash, c.node.content); err != nil {
-			return err
+// loadBranches reads the branch set off the head claim once and caches it.
+// The head is materialised at open (NewArchive), so its contribution/branch
+// edges are already the merged set — no diff walk here.
+func (a *archive) loadBranches() map[string]Edge {
+	a.branchOnce.Do(func() {
+		entries := map[string]Edge{}
+		for _, e := range a.bth.Edges(EdgeFilterType{Type: EdgeTypeBranch}) {
+			name, _ := e.GetField(FieldName)
+			entries[name] = e
 		}
+		a.branches = entries
+	})
+	return a.branches
+}
+
+// NewArchive opens the immutable snapshot RA_k = (𝒰, k) by loading the
+// head claim at k from u.
+func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
+	if u == nil {
+		return nil, errNilUniverse
 	}
-	return nil
+	if k == nil {
+		return nil, errNilHeadID
+	}
+	// GetClaim materialises the head's diff chain, so a.bth's
+	// contribution/branch edges are already the merged branch set.
+	c, err := GetClaim(ctx, u, k)
+	if err != nil {
+		return nil, WrapDetail(errArchiveLoadHead, k.String(), err)
+	}
+	return &archive{u: u, bth: c}, nil
 }
 
-func (a *archive) absorbContent(ctx context.Context, id Id, b []byte) error {
-	k := id.String()
-	a.content[k] = b
-	return PutContent(ctx, a.u, id, b)
-}
-
-func (a *archive) HasClaim(ctx context.Context, id Id) bool {
+func (a *archive) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
-		return false
+		return false, errNilID
 	}
-	_, err := a.lookupClaim(ctx, id)
-	return err == nil
+	return InClosure(ctx, a.u, BranchArchive, []Id{a.bth.ID()}, id)
 }
 
 func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
-		return nil, errors.New("ranke.Archive.GetClaim: nil id")
+		return nil, errNilID
 	}
-	c, err := a.lookupClaim(ctx, id)
+	// The Universe returns materialised claims (see GetClaims); the archive
+	// does not materialise itself.
+	return GetFromClosure(ctx, a.u, BranchArchive, []Id{a.bth.ID()}, id)
+}
+
+func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) {
+	c, err := a.GetClaim(ctx, id) // scope-checked; then read from the claim in hand
 	if err != nil {
-		return nil, fmt.Errorf("ranke.Archive.GetClaim: %s: %w", id.String(), err)
+		return nil, err
 	}
-	return c, nil
+	return c.GetContent(ctx, a.u)
+}
+
+// Query resolves the branch scope and delegates to 𝒰.
+// Select.Claim is the caller's traversal anchor, nil means unanchored
+func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
+	if err := validateSelect(q); err != nil {
+		return nil, err
+	}
+	scope, err := a.resolveScope(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return a.u.Query(ctx, q, scope)
+}
+
+// resolveScope maps Branch to its Scope: a name via its head, $archive via the
+// table head, $universe unconfined (Head nil — the caller pins Select.Head).
+// Height is always the branch-table height (the tag scale): a member's
+// _b_<branch> is the table height it joined at, so tag <= Height filters both
+// membership and point-in-time in one comparison.
+func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
+	if q.Select.Branch == "" {
+		return Scope{}, ErrQueryNoScope
+	}
+	if q.Select.Branch == BranchUniverse {
+		return Scope{Branch: BranchUniverse}, nil
+	}
+	scope := Scope{Branch: q.Select.Branch, Height: a.bth.Node().Height(), Revision: revisionOf(a.bth)}
+	if q.Select.Branch == BranchArchive {
+		scope.Head = a.bth.ID()
+		return scope, nil
+	}
+	br, err := a.GetBranch(ctx, q.Select.Branch)
+	if err != nil {
+		return Scope{}, err
+	}
+	scope.Head = br.Head()
+	return scope, nil
+}
+
+// validateSelect checks a read's shape on the way in, so the engines below trust
+// the query they are handed.
+func validateSelect(q Query) error {
+	sel := q.Select
+	if sel.Branch == "" {
+		return ErrQueryNoScope
+	}
+	if len(sel.Path) > 0 {
+		// Under $universe the scope bounds nothing, so the traversal's own anchor
+		// or a Head has to.
+		if sel.Branch == BranchUniverse && sel.Claim == nil && sel.Head == nil {
+			return ErrQueryNoHead
+		}
+		return nil
+	}
+	// A scan. Head bounds it; under $universe that is the only bound.
+	if sel.Branch == BranchUniverse && sel.Head == nil {
+		return ErrQueryNoHead
+	}
+	if q.Output.Shape == ShapePath {
+		return ErrQueryScanShape
+	}
+	if sel.Claim != nil {
+		return ErrQueryScanClaim
+	}
+	return nil
+}
+
+// revisionOf reads the spine revision
+func revisionOf(c Claim) int {
+	if v := c.Tag(SpineRevKey); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // --- Branches ---
+//
+// A branch table is a claim whose contribution/branch edges each carry a
+// branch name (the `name` field) and reference that branch's subgraph root.
+// A table may be a contribution/diff over previous tables, restating only
+// changed entries. The diff overlay is done by the generic claim
+// materialisation (name-keyed: inherit / overwrite-by-name / omit via
+// edges_diff_omit) at load time, so the head claim's contribution/branch
+// edges are already the full merged set — the Archive just reads them and
+// wraps each as a Branch.
 
-func (a *archive) HasBranch(_ context.Context, name string) bool {
-	return a.table.Has(name)
+func (a *archive) HasBranch(_ context.Context, name string) (bool, error) {
+	_, ok := a.loadBranches()[name]
+	return ok, nil
 }
 
-func (a *archive) GetBranch(ctx context.Context, name string) (Branch, error) {
-	return a.table.Get(ctx, name)
-}
-
-func (a *archive) Branches(ctx context.Context) []Branch {
-	out, err := a.table.List(ctx)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-func (a *archive) VerifyBranch(ctx context.Context, name string) error {
-	b, err := a.GetBranch(ctx, name)
-	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
-	}
-	c, err := a.GetClaim(ctx, b.Latest().Head())
-	if err != nil {
-		return fmt.Errorf("ranke.Archive.VerifyBranch: %w", err)
-	}
-	return c.Validate(ctx)
-}
-
-func (a *archive) AddClaim(ctx context.Context, branchName string, c Claim, createdAt ...time.Time) error {
-	if c == nil {
-		return errors.New("ranke.Archive.AddClaim: nil claim")
-	}
-	contributor := c.Contributor()
-	if contributor == nil {
-		return errors.New("ranke.Archive.AddClaim: claim has no contributor")
-	}
-	var g Graph
-	if a.table.Has(branchName) {
-		b, err := a.table.Get(ctx, branchName)
-		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
-		}
-		head, err := a.GetClaim(ctx, b.Latest().Head())
-		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddClaim: load branch head: %w", err)
-		}
-		g, err = head.Graph(ctx)
-		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddClaim: materialize branch closure: %w", err)
-		}
-	} else {
-		g = NewGraph(contributor)
-	}
-	if err := g.Add(c); err != nil {
-		return fmt.Errorf("ranke.Archive.AddClaim: %w", err)
-	}
-	return a.AddGraph(ctx, branchName, g, contributor, createdAt...)
-}
-
-// AddGraph advances the named branch per spec §4.7:
-//  1. Absorb every claim in g into U (atomic-creation rule).
-//  2. Build a contribution/head claim consolidating g's open heads.
-//  3. Delegate the branches-claim mint to a.table.Set.
-//  4. Persist the new B_h via a.bth.
-func (a *archive) AddGraph(ctx context.Context, branchName string, g Graph, contributor Contributor, createdAt ...time.Time) error {
-	if g == nil {
-		return errors.New("ranke.Archive.AddGraph: nil graph")
-	}
-	if contributor == nil {
-		return errors.New("ranke.Archive.AddGraph: contributor required")
-	}
-	if len(g.Heads()) == 0 {
-		return errors.New("ranke.Archive.AddGraph: graph has no open heads to bind")
-	}
-	cg, ok := g.(*graph)
+func (a *archive) GetBranch(_ context.Context, name string) (Branch, error) {
+	e, ok := a.loadBranches()[name]
 	if !ok {
-		return errors.New("ranke.Archive.AddGraph: graph from foreign implementation")
+		return nil, errBranchNotFound
 	}
-
-	for _, c := range cg.claims {
-		if err := a.absorbClaim(ctx, c); err != nil {
-			return fmt.Errorf("ranke.Archive.AddGraph: absorb claim: %w", err)
-		}
-	}
-
-	headEdges := make([]Edge, 0, len(g.Heads()))
-	for _, h := range g.Heads() {
-		e, err := NewEdge(EdgeConfig{
-			Reference: h,
-			TypeClass: EdgeContribution,
-			TypeSub:   "head",
-		})
-		if err != nil {
-			return fmt.Errorf("ranke.Archive.AddGraph: build head edge: %w", err)
-		}
-		headEdges = append(headEdges, e)
-	}
-	at := firstNonZero(createdAt)
-	headClaim, err := ClaimBuilder{
-		Type:        NodeHead,
-		Contributor: contributor,
-		Edges:       headEdges,
-		CreatedAt:   at,
-	}.Sign()
-	if err != nil {
-		return fmt.Errorf("ranke.Archive.AddGraph: build head claim: %w", err)
-	}
-	headC := headClaim.(*claim)
-	if err := a.absorbClaim(ctx, headC); err != nil {
-		return fmt.Errorf("ranke.Archive.AddGraph: absorb head claim: %w", err)
-	}
-
-	nextTable, err := a.table.Set(ctx, branchName, headC.node.id, contributor, at)
-	if err != nil {
-		return fmt.Errorf("ranke.Archive.AddGraph: %w", err)
-	}
-	if err := a.bth.Save(ctx, nextTable.Bh()); err != nil {
-		return fmt.Errorf("ranke.Archive.AddGraph: persist B_h: %w", err)
-	}
-	a.table = nextTable
-	return nil
+	return newBranch(a.u, e), nil
 }
+
+func (a *archive) GetBranches(_ context.Context) ([]Branch, error) {
+	entries := a.loadBranches()
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]Branch, 0, len(names))
+	for _, n := range names {
+		out = append(out, newBranch(a.u, entries[n]))
+	}
+	return out, nil
+}
+
+// Verify lives in verify.go.

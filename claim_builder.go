@@ -6,21 +6,23 @@ package ranke
 
 import (
 	"bytes"
+	"context"
 	"crypto"
-	"errors"
-	"fmt"
 	"sort"
 	"time"
 )
 
 // ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
 //
-// Required: a Type (either Type or TypeClass+TypeSub). Content and
-// ContentHash are mutually exclusive: set Content to have build
-// hash the bytes for you, or set ContentHash directly when the
-// content lives outside the graph. CreatedAt defaults to
-// time.Now().UTC() when zero. Contributor is required for every
-// claim except the root contribution/contributor claim — see §4.3.
+// Required: a Type (either Type or TypeClass+TypeSub). Content is
+// optional — a claim may carry none (structural claims: heads,
+// branches, contributors). InlineContent holds the bytes directly;
+// ContentHash+ContentSize instead reference external content stored
+// elsewhere. InlineContent and ContentHash are mutually exclusive —
+// set at most one. Encoding applies only when there is content.
+// CreatedAt defaults to time.Now().UTC() when zero. Contributor is
+// required for every claim except the root contribution/contributor
+// claim — see §4.3.
 type ClaimBuilder struct {
 	Type          string
 	TypeClass     NodeClass
@@ -28,40 +30,58 @@ type ClaimBuilder struct {
 	Encoding      string
 	EncodingClass EncodingClass
 	EncodingSub   string
-	Title         string
-	Content       []byte
+	InlineContent []byte
 	ContentHash   Id
+	ContentSize   uint64
 	CreatedAt     time.Time
 	Contributor   Contributor
-	Edges         []Edge
-	Fields        map[string]string
-	// Pubkey is the multikey-encoded public key for a contributor
-	// claim (§4.1, §5.7). Empty for non-contributor claims and for
-	// unsigned contributors (identity-Sign case).
-	Pubkey []byte
+	// DiffOf, when set, makes this claim a diff over the referenced
+	// predecessor: NewClaim adds a contribution/diff edge to it. The claim
+	// restates only what differs; the full claim is materialised by
+	// applying the diff chain (done transparently by the loader).
+	DiffOf Id
+	Edges  []Edge
+	Fields map[string]string
+	// Height is the claim's generation number (§4.1). A claim with
+	// references (any edges — including the auto-added contributor edge)
+	// must declare it as 1 + max(reference heights); since that value is
+	// always ≥ 1, a zero Height on a referencing claim reads as "not set"
+	// and Sign fails (errHeightRequired). An initial node (no edges) must
+	// leave it 0. Set it directly, via WithHeight, or let WithAutoHeight
+	// resolve it from a Universe. The builder never trusts it blindly — the
+	// verifier re-derives and enforces height against the closure.
+	Height uint64
+	// autoHeight* back WithAutoHeight: when autoHeightU is non-nil, Sign
+	// resolves Height itself by reading each referenced claim's committed
+	// height from the Universe. Unexported, so it is a chained-setter-only
+	// mode (it needs a Universe + context, not a literal value).
+	autoHeightU   Universe
+	autoHeightCtx context.Context
 	// SigningKey is the private key used to sign this claim's id.
 	// Optional; nil + empty resolved pubkey = identity Sign per §5.7.
+	// A contributor claim carries its pubkey as its content (§5.7), so
+	// there is no separate pubkey input — set InlineContent to the
+	// multikey-encoded public key.
 	SigningKey crypto.Signer
 }
 
-// NewClaim seeds a ClaimBuilder with the three most common required
-// fields. Chain With* setters to add optionals, then call .Sign()
-// to finalize:
+// NewClaim seeds a ClaimBuilder with the two required fields: the type
+// and the attributing contributor. Content is optional — add it (or
+// not) via WithInlineContent / WithExternalContent. Chain other With*
+// setters for optionals, then call .Sign() to finalize:
 //
-//	c, err := ranke.NewClaim("source/email", alice, body).
+//	c, err := ranke.NewClaim("source/email", alice).
+//	    WithInlineContent(body).
 //	    WithEncoding(ranke.EncodingMessage("rfc822")).
 //	    WithCreatedAt(at).
 //	    Sign()
 //
 // For full struct-literal control, build a ClaimBuilder directly
 // and call .Sign() on it.
-//
-//deadcode:keep
-func NewClaim(typ string, contributor Contributor, content []byte) ClaimBuilder {
+func NewClaim(typ string, contributor Contributor) ClaimBuilder {
 	return ClaimBuilder{
 		Type:        typ,
 		Contributor: contributor,
-		Content:     content,
 	}
 }
 
@@ -83,53 +103,57 @@ func (b ClaimBuilder) Sign(signingKey ...crypto.Signer) (Claim, error) {
 // alternative to the struct-literal form. All are public API.
 
 // WithType sets the claim type ("class/sub").
-//
-//deadcode:keep
 func (b ClaimBuilder) WithType(t string) ClaimBuilder { b.Type = t; return b }
 
 // WithEncoding sets the content media type ("class/sub").
-//
-//deadcode:keep
 func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; return b }
 
-// WithTitle sets the node's optional title.
-//
-//deadcode:keep
-func (b ClaimBuilder) WithTitle(t string) ClaimBuilder { b.Title = t; return b }
+// WithDiff makes this claim a diff over the predecessor at id (adds a
+// contribution/diff edge). The claim restates only what differs.
+func (b ClaimBuilder) WithDiff(id Id) ClaimBuilder { b.DiffOf = id; return b }
 
-// WithContent sets the inline content bytes.
-//
-//deadcode:keep
-func (b ClaimBuilder) WithContent(c []byte) ClaimBuilder { b.Content = c; return b }
+// WithInlineContent sets the inline content bytes (the claim carries the
+// content itself). Mutually exclusive with WithExternalContent.
+func (b ClaimBuilder) WithInlineContent(c []byte) ClaimBuilder { b.InlineContent = c; return b }
 
-// WithContentHash sets the content hash (for content stored out of band).
-//
-//deadcode:keep
-func (b ClaimBuilder) WithContentHash(h Id) ClaimBuilder { b.ContentHash = h; return b }
+// WithExternalContent references content stored elsewhere by its hash and
+// byte size (the claim carries only the reference). Mutually exclusive
+// with WithInlineContent.
+func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
+	b.ContentHash = hash
+	b.ContentSize = size
+	return b
+}
 
 // WithCreatedAt sets the creation timestamp.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
 
+// WithHeight sets the claim's generation number (§4.1) — 1 + max over the
+// heights of the claims it references, or 0 for an initial node. The caller
+// (or its tooling) computes it from the referenced claims it already holds;
+// HeightOf is the trivial reference computation. Mutually exclusive with
+// WithAutoHeight. The verifier re-derives and enforces it, so a wrong value
+// cannot pass verification.
+func (b ClaimBuilder) WithHeight(h uint64) ClaimBuilder { b.Height = h; return b }
+
+// WithAutoHeight makes Sign resolve the height itself: it reads each
+// referenced claim's committed height from u and sets 1 + max (0 when the
+// claim has no references). Convenience for callers that hold a Universe with
+// the references already stored; heavier callers precompute and cache heights
+// and use WithHeight instead. Mutually exclusive with WithHeight.
+func (b ClaimBuilder) WithAutoHeight(ctx context.Context, u Universe) ClaimBuilder {
+	b.autoHeightCtx = ctx
+	b.autoHeightU = u
+	return b
+}
+
 // WithContributor sets the attributing contributor.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithContributor(c Contributor) ClaimBuilder { b.Contributor = c; return b }
 
-// WithPubkey sets the contributor pubkey (§5.7).
-//
-//deadcode:keep
-func (b ClaimBuilder) WithPubkey(p []byte) ClaimBuilder { b.Pubkey = p; return b }
-
 // WithSigningKey sets the key used to sign the claim id.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithSigningKey(k crypto.Signer) ClaimBuilder { b.SigningKey = k; return b }
 
 // WithEdges appends the given edges to the builder's Edges slice.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 	b.Edges = append(b.Edges, edges...)
 	return b
@@ -137,8 +161,6 @@ func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 
 // WithField sets one implementation-defined node field (§4.1),
 // copying the existing map so the receiver stays unchanged.
-//
-//deadcode:keep
 func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	f := make(map[string]string, len(b.Fields)+1)
 	for k, v := range b.Fields {
@@ -149,88 +171,36 @@ func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	return b
 }
 
-// buildClaim constructs a Claim atomically per §4.3 from a fully
-// populated ClaimBuilder: validates type/encoding/content, enforces
-// the §3.5 provenance invariant, auto-builds the contribution/contributor
-// edge, sorts edges canonically, and computes the node id as
-// Sign(H(canonical(node))). The returned Claim is immutable.
+// buildClaim constructs a Claim atomically per §4.3. It reads as the
+// pipeline it is: resolve the type, content mode, and encoding; assemble and
+// validate the edge set (contributor, diff, invariants); build the node; then
+// sign it into an id. Each step is a helper below.
 func buildClaim(cfg ClaimBuilder) (Claim, error) {
-	// Type takes precedence over the split TypeClass + TypeSub form.
-	if cfg.Type != "" {
-		class, sub, err := splitType(cfg.Type)
-		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: Type: %w", err)
-		}
-		cfg.TypeClass = NodeClass(class)
-		cfg.TypeSub = sub
+	if err := resolveType(&cfg); err != nil {
+		return nil, err
 	}
-	if cfg.TypeClass == "" || cfg.TypeSub == "" {
-		return nil, errors.New("ranke.NewClaim: Type (or TypeClass + TypeSub) is required")
+	hasInline, hasExternal, err := resolveContentState(&cfg)
+	if err != nil {
+		return nil, err
 	}
-	if !validNodeClass(cfg.TypeClass) {
-		return nil, fmt.Errorf("ranke.NewClaim: unknown NodeClass %q", cfg.TypeClass)
-	}
-	if cfg.Encoding != "" {
-		class, sub, err := splitType(cfg.Encoding)
-		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: Encoding: %w", err)
-		}
-		cfg.EncodingClass = EncodingClass(class)
-		cfg.EncodingSub = sub
-	}
-	// Encoding is required per §4.1 — fall back to text/plain so
-	// scenarios don't have to spell it out on every structural claim.
-	if cfg.EncodingClass == "" {
-		cfg.EncodingClass = encText
-		cfg.EncodingSub = "plain"
-	}
-	if !validEncodingClass(cfg.EncodingClass) {
-		return nil, fmt.Errorf("ranke.NewClaim: unknown EncodingClass %q", cfg.EncodingClass)
-	}
-	if cfg.Content != nil && cfg.ContentHash != nil {
-		return nil, errors.New("ranke.NewClaim: Content and ContentHash are mutually exclusive")
+	if err := resolveEncoding(&cfg, hasInline || hasExternal); err != nil {
+		return nil, err
 	}
 
-	isRootContributor := cfg.TypeClass == NodeContribution &&
+	isRootContributor := cfg.TypeClass == NodeClassContribution &&
 		cfg.TypeSub == "contributor" &&
 		cfg.Contributor == nil
-
 	if !isRootContributor && cfg.Contributor == nil {
-		return nil, errors.New("ranke.NewClaim: Contributor is required (only the root contribution/contributor may omit it)")
+		return nil, errClaimContributorRequired
 	}
 
-	// Collect edges; auto-build the contribution/contributor edge unless root.
-	edges := make([]*edge, 0, len(cfg.Edges)+1)
-	for _, e := range cfg.Edges {
-		ce, err := asConcreteEdge(e)
-		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: %w", err)
-		}
-		edges = append(edges, ce)
-	}
-	if !isRootContributor {
-		ce, err := buildContributorEdge(cfg.Contributor)
-		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: build contribution/contributor edge: %w", err)
-		}
-		edges = append(edges, ce)
+	edges, err := assembleEdges(cfg, isRootContributor)
+	if err != nil {
+		return nil, err
 	}
 
-	// Provenance invariant (§3.5).
-	if requiresProvenance(cfg.TypeClass) && !hasDerivationEdge(edges) {
-		return nil, fmt.Errorf("ranke.NewClaim: %s/%s claims must carry at least one derivation/* edge (§3.5 provenance invariant)", cfg.TypeClass, cfg.TypeSub)
-	}
-
-	// Canonical edge order: by raw multihash bytes.
-	sort.SliceStable(edges, func(i, j int) bool {
-		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0
-	})
-
-	createdAt := cfg.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
-	} else {
-		createdAt = createdAt.UTC()
+	if err := checkFields(cfg.Fields); err != nil {
+		return nil, err
 	}
 
 	n := &node{
@@ -238,65 +208,26 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		typeSub:       cfg.TypeSub,
 		encodingClass: cfg.EncodingClass,
 		encodingSub:   cfg.EncodingSub,
-		title:         cfg.Title,
-		createdAt:     createdAt,
+		createdAt:     normalizeCreatedAt(cfg.CreatedAt),
 		fields:        cloneFields(cfg.Fields),
-		content:       cfg.Content,
-		pubkey:        cfg.Pubkey,
 	}
-
-	// Content hash + size. Size always tracks len(content); with only
-	// ContentHash supplied (no Content), size is 0.
-	if cfg.ContentHash != nil {
-		n.contentHash = cfg.ContentHash
-		n.size = uint64(len(cfg.Content))
-	} else if cfg.Content != nil {
-		ch, err := hashContent(cfg.Content)
-		if err != nil {
-			return nil, fmt.Errorf("ranke.NewClaim: content hash: %w", err)
-		}
-		n.contentHash = ch
-		n.size = uint64(len(cfg.Content))
+	if err := applyContent(n, cfg, hasInline, hasExternal); err != nil {
+		return nil, err
 	}
-
 	n.edges = make([]Id, len(edges))
 	for i, e := range edges {
 		n.edges[i] = e.id
 	}
 
-	// Resolve the pubkey this claim's signature must match (§4.1, §5.7),
-	// then fall back to the Contributor's wrapped key when no explicit
-	// SigningKey was given (a bare contributor returns nil → identity Sign).
-	resolvedPubkey, err := resolveSigningPubkey(isRootContributor, cfg)
+	height, err := resolveHeight(cfg, edges)
 	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
+		return nil, err
 	}
-	if cfg.SigningKey == nil && cfg.Contributor != nil {
-		cfg.SigningKey = cfg.Contributor.SigningKey()
-	}
-	if err := checkSigningConsistency(cfg.SigningKey, resolvedPubkey); err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: %w", err)
-	}
+	n.height = height
 
-	// id = Sign(H(S(node))). Identity-Sign (no key, empty pubkey) leaves
-	// the hash bytes unchanged, so id is just the multihash.
-	encoded, err := encodeNode(n)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: canonical encode: %w", err)
+	if err := signNode(n, edges, &cfg, isRootContributor); err != nil {
+		return nil, err
 	}
-	hash, err := hashContent(encoded)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: hash: %w", err)
-	}
-	idPayload, err := signHash(cfg.SigningKey, hash.raw)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: sign: %w", err)
-	}
-	nodeID, err := idFromBytes(idPayload)
-	if err != nil {
-		return nil, fmt.Errorf("ranke.NewClaim: wrap id: %w", err)
-	}
-	n.id = nodeID
 
 	c := &claim{node: n, edges: edges}
 	if isRootContributor {
@@ -305,4 +236,296 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		c.contributor = cfg.Contributor
 	}
 	return c, nil
+}
+
+// resolveType fills TypeClass/TypeSub from the combined Type (which takes
+// precedence) and validates the class (closed vocabulary) and subtype.
+func resolveType(cfg *ClaimBuilder) error {
+	if cfg.Type != "" {
+		class, sub, err := splitType(cfg.Type)
+		if err != nil {
+			return WrapDetail(errNewClaim, "Type", err)
+		}
+		cfg.TypeClass = NodeClass(class)
+		cfg.TypeSub = sub
+	}
+	if cfg.TypeClass == "" || cfg.TypeSub == "" {
+		return errClaimTypeRequired
+	}
+	if !validNodeClass(cfg.TypeClass) {
+		return WithDetail(errUnknownNodeClass, string(cfg.TypeClass))
+	}
+	return checkSubtype(cfg.TypeSub)
+}
+
+// resolveContentState reports the content mode — none / inline / external.
+// Content is manual and mutually exclusive; setting both is an error.
+// Structural claims (heads, branches, contributors) carry none.
+func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err error) {
+	hasInline = cfg.InlineContent != nil
+	hasExternal = cfg.ContentHash != nil
+	if hasInline && hasExternal {
+		return false, false, errClaimContentXOR
+	}
+	if hasInline && len(cfg.InlineContent) > maxInlineContent {
+		return false, false, errInlineContentTooLarge
+	}
+	return hasInline, hasExternal, nil
+}
+
+// maxInlineContent caps inline content at construction (NewClaim/NewEdge):
+// larger blobs belong in external content (dedup + streaming). Verification
+// and decode do not enforce it — an already-stored record is accepted as-is.
+const maxInlineContent = 1 << 20 // 1 MiB
+
+// resolveEncoding fills EncodingClass/Sub from the combined Encoding (or a
+// directly-set split form)
+func resolveEncoding(cfg *ClaimBuilder, hasContent bool) error {
+	enc := cfg.Encoding
+	if enc == "" && (cfg.EncodingClass != "" || cfg.EncodingSub != "") {
+		enc = string(cfg.EncodingClass) + "/" + cfg.EncodingSub
+	}
+	class, sub, err := resolveContentEncoding(enc, hasContent)
+	if err != nil {
+		return err
+	}
+	cfg.EncodingClass, cfg.EncodingSub = class, sub
+	return nil
+}
+
+// resolveContentEncoding parses the combined "class/sub" encoding and enforces
+// the content⇔encoding coupling shared by nodes (NewClaim) and edges (NewEdge):
+func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, string, error) {
+	var class EncodingClass
+	var sub string
+	if encoding != "" {
+		c, s, err := splitType(encoding)
+		if err != nil {
+			return "", "", WrapDetail(errNewClaim, "Encoding", err)
+		}
+		class, sub = EncodingClass(c), s
+	}
+	if !hasContent {
+		if class != "" || sub != "" {
+			return "", "", errEncodingWithoutContent
+		}
+		return "", "", nil
+	}
+	if class == "" {
+		return "", "", errContentWithoutEncoding
+	}
+	if !validEncodingClass(class) {
+		return "", "", WithDetail(errUnknownEncodingClass, string(class))
+	}
+	if err := checkEncodingSubtype(sub); err != nil {
+		return "", "", err
+	}
+	return class, sub, nil
+}
+
+// assembleEdges builds the claim's edge set: the caller's edges, the
+// auto-built contribution/contributor edge (unless root), and — for a diff
+// claim — the contribution/diff edge. It enforces the diff naming rule, the
+// per-claim edge cardinality, and the §3.5 provenance invariant, then returns
+// the edges in canonical (raw-multihash) order.
+func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
+	edges := make([]*edge, 0, len(cfg.Edges)+1)
+	for _, e := range cfg.Edges {
+		ce, err := asConcreteEdge(e)
+		if err != nil {
+			return nil, Wrap(errNewClaim, err)
+		}
+		edges = append(edges, ce)
+	}
+	if !isRootContributor {
+		ce, err := buildContributorEdge(cfg.Contributor)
+		if err != nil {
+			return nil, WrapDetail(errNewClaim, "build contribution/contributor edge", err)
+		}
+		edges = append(edges, ce)
+	}
+	// A diff claim overlays a predecessor: add the naming contribution/diff
+	// edge. Materialisation of the delta happens at load time.
+	if cfg.DiffOf != nil {
+		de, err := newEdge(EdgeConfig{
+			Reference: cfg.DiffOf,
+			TypeClass: EdgeClassContribution,
+			TypeSub:   string(EdgeSubtypeDiff),
+		})
+		if err != nil {
+			return nil, WrapDetail(errNewClaim, "diff edge", err)
+		}
+		edges = append(edges, de)
+		if err := checkDiffEdgeNames(edges); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkEdgeCardinality(edges); err != nil {
+		return nil, err
+	}
+	if requiresProvenance(cfg.TypeClass) && !hasDerivationEdge(edges) {
+		return nil, WithDetail(errProvenanceRequired, string(cfg.TypeClass)+"/"+cfg.TypeSub)
+	}
+	sort.SliceStable(edges, func(i, j int) bool {
+		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0
+	})
+	return edges, nil
+}
+
+// checkDiffEdgeNames enforces the diff naming rule: on a diff claim every
+// edge except the two per-claim singletons (contributor, diff) must carry a
+// unique, non-empty name — diff overlay is name-keyed.
+func checkDiffEdgeNames(edges []*edge) error {
+	seen := make(map[string]struct{}, len(edges))
+	for _, e := range edges {
+		if e.typeClass == EdgeClassContribution &&
+			(e.typeSub == "contributor" || e.typeSub == string(EdgeSubtypeDiff)) {
+			continue
+		}
+		name, ok := e.fields[FieldName]
+		if !ok || name == "" {
+			return errDiffEdgeUnnamed
+		}
+		if _, dup := seen[name]; dup {
+			return WithDetail(errDiffEdgeDupName, name)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
+}
+
+// checkEdgeCardinality enforces the per-claim singletons: a claim has exactly
+// one contributor and overlays at most one predecessor, so at most one
+// contribution/contributor edge and one contribution/diff edge.
+func checkEdgeCardinality(edges []*edge) error {
+	var nContrib, nDiff int
+	for _, e := range edges {
+		if e.typeClass != EdgeClassContribution {
+			continue
+		}
+		switch e.typeSub {
+		case "contributor":
+			nContrib++
+		case string(EdgeSubtypeDiff):
+			nDiff++
+		}
+	}
+	if nContrib > 1 {
+		return errTwoContributors
+	}
+	if nDiff > 1 {
+		return errTwoDiffEdges
+	}
+	return nil
+}
+
+// applyContent sets the node's content slots for the chosen mode: inline
+// carries the bytes (no content_hash — the id commits to the bytes directly,
+// §Content); external carries the caller's hash+size; none leaves the slots
+// zero. content and content_hash are mutually exclusive.
+func applyContent(n *node, cfg ClaimBuilder, hasInline, hasExternal bool) error {
+	switch {
+	case hasInline:
+		n.content = cfg.InlineContent
+		n.contentSize = uint64(len(cfg.InlineContent))
+	case hasExternal:
+		n.contentHash = cfg.ContentHash
+		n.contentSize = cfg.ContentSize
+	}
+	return nil
+}
+
+// resolveHeight determines the node's generation number (§4.1) from the
+// assembled edge set, enforcing the fail-early rules:
+//
+//   - WithAutoHeight: resolve 1 + max(reference heights) from the Universe
+//     (0 when there are no references). Rejects a conflicting explicit Height.
+//   - initial node (no edges): height must be 0.
+//   - referencing claim (≥1 edge): Height must be ≥ 1 (a valid 1+max is never
+//     0), so a zero here means "not set" and construction fails.
+func resolveHeight(cfg ClaimBuilder, edges []*edge) (uint64, error) {
+	if cfg.autoHeightU != nil {
+		if cfg.Height != 0 {
+			return 0, errHeightWithAuto
+		}
+		return computeAutoHeight(cfg.autoHeightCtx, cfg.autoHeightU, edges)
+	}
+	if len(edges) == 0 {
+		if cfg.Height != 0 {
+			return 0, errHeightOnInitial
+		}
+		return 0, nil
+	}
+	if cfg.Height == 0 {
+		return 0, errHeightRequired
+	}
+	return cfg.Height, nil
+}
+
+// computeAutoHeight reads each referenced claim's committed height from u and
+// returns 1 + max (0 when there are no references). Each reference already
+// carries its own height, so this is a single-level lookup — the recursion is
+// amortised across the claims already in the Universe.
+func computeAutoHeight(ctx context.Context, u Universe, edges []*edge) (uint64, error) {
+	if len(edges) == 0 {
+		return 0, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ids := make([]Id, len(edges))
+	for i, e := range edges {
+		ids[i] = e.reference
+	}
+	heights, err := u.GetClaimHeights(ctx, ids)
+	if err != nil {
+		return 0, Wrap(errHeightResolve, err)
+	}
+	var max uint64
+	for _, h := range heights {
+		if h > max {
+			max = h
+		}
+	}
+	return max + 1, nil
+}
+
+// normalizeCreatedAt defaults a zero timestamp to now and normalises to UTC.
+func normalizeCreatedAt(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now().UTC()
+	}
+	return t.UTC()
+}
+
+// signNode computes id = Sign(H(S(node))) and stores it on n. It falls back
+// to the Contributor's session key when no explicit SigningKey was given (a
+// bare contributor returns nil → identity Sign), rejects a key/pubkey
+// mismatch before signing (§5.7), then signs. Identity-Sign (no key, no
+// pubkey) leaves the hash unchanged, so the id is just the multihash.
+func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool) error {
+	if cfg.SigningKey == nil && cfg.Contributor != nil {
+		cfg.SigningKey = cfg.Contributor.SigningKey()
+	}
+	if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
+		return Wrap(errNewClaim, err)
+	}
+	encoded, err := encodeNode(n, edges)
+	if err != nil {
+		return WrapDetail(errNewClaim, "canonical encode", err)
+	}
+	hash, err := hashContent(encoded)
+	if err != nil {
+		return WrapDetail(errNewClaim, "hash", err)
+	}
+	idPayload, err := signHash(cfg.SigningKey, hash.raw)
+	if err != nil {
+		return WrapDetail(errNewClaim, "sign", err)
+	}
+	nodeID, err := idFromBytes(idPayload)
+	if err != nil {
+		return WrapDetail(errNewClaim, "wrap id", err)
+	}
+	n.id = nodeID
+	return nil
 }

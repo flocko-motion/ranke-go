@@ -1,6 +1,7 @@
 bin/
 dist/
 coverage.out
+coverage-core.out
 
 # Stray binaries from `go build ./cmd/<tool>` at repo root.
 /scenariodoc
@@ -19,8 +20,20 @@ conformance/scenarios/*/data/
 /specification.typ
 /specification.txt
 
+# Foundational papers pulled fresh from ranke-graph by `make docs` —
+# fetched, never committed.
+docs/papers/
+
 # Local Claude config
 /.claude/
 
 # Sindri runtime hub (sockets, local db) — not source.
 /.sindri/
+
+# sindri hub artifacts (agent worktrees + hub state) — not for the repo
+.worktrees/
+.todos/
+
+/test
+/ranke 
+_scrap.go

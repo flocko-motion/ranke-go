@@ -7,14 +7,12 @@ package ranke
 import (
 	"bytes"
 	"crypto"
-	"errors"
-	"fmt"
 )
 
 // splitType parses "class/sub" into its two non-empty segments.
 func splitType(s string) (class, sub string, err error) {
 	if s == "" {
-		return "", "", errors.New("empty")
+		return "", "", errEmptyType
 	}
 	slash := -1
 	for i := 0; i < len(s); i++ {
@@ -24,55 +22,88 @@ func splitType(s string) (class, sub string, err error) {
 		}
 	}
 	if slash <= 0 || slash == len(s)-1 {
-		return "", "", fmt.Errorf("expected \"class/sub\", got %q", s)
+		return "", "", WithDetail(errExpectedClassSub, s)
 	}
 	return s[:slash], s[slash+1:], nil
 }
 
-// matchAll reports whether e satisfies every filter (AND).
+// matchAll reports whether e satisfies every edge filter (AND). Node-only
+// filters are skipped — checking IsEdgeFilter once avoids a MatchEdge call
+// per edge for filters that don't apply to edges at all.
 func matchAll(e Edge, filters []Filter) bool {
 	for _, f := range filters {
-		if !f.Match(e) {
+		if f.IsEdgeFilter() && !f.MatchEdge(e) {
 			return false
 		}
 	}
 	return true
 }
 
-// resolveSigningPubkey returns the pubkey whose private key must produce
-// this claim's signature: cfg.Pubkey for the root contributor, else the
-// referenced contributor's node pubkey.
-func resolveSigningPubkey(isRootContributor bool, cfg ClaimBuilder) ([]byte, error) {
-	if isRootContributor {
-		return cfg.Pubkey, nil
+// checkSigningConsistency verifies the SigningKey matches the pubkey this
+// claim declares (§5.7) and classifies the identity-Sign case (no key, no
+// pubkey). It never needs a Universe:
+//
+//   - Non-root: the contributor's pubkey was resolved to bytes — inline or
+//     external — when it was obtained via AsContributor; match on bytes.
+//   - Root: this claim declares its own pubkey as its content. Inline bytes
+//     are matched directly; an external declaration (ContentHash only) is
+//     matched by hashing the key's own pubkey — H(key.Public()) ==
+//     ContentHash — so external storage works here too, no fetch required.
+func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
+	hasSigner := cfg.SigningKey != nil && !isTypedNil(cfg.SigningKey)
+	if !isRoot {
+		return checkKeyAgainstPubkey(hasSigner, cfg.SigningKey, cfg.Contributor.Pubkey())
 	}
-	if cfg.Contributor == nil {
-		return nil, errors.New("missing contributor")
+	switch {
+	case cfg.InlineContent != nil:
+		return checkKeyAgainstPubkey(hasSigner, cfg.SigningKey, cfg.InlineContent)
+	case cfg.ContentHash != nil:
+		// External pubkey declaration — match by hash, no fetch.
+		if !hasSigner {
+			return errResolvedNoKey
+		}
+		encoded, err := EncodePublicKey(cfg.SigningKey.Public())
+		if err != nil {
+			return Wrap(errEncodeSigningKey, err)
+		}
+		h, err := HashContent(encoded)
+		if err != nil {
+			return err
+		}
+		if !h.Equal(cfg.ContentHash) {
+			return errResolvedMismatch
+		}
+		return nil
+	default:
+		// No declared pubkey: identity-Sign (no key), or a key with nothing
+		// to attest to (error).
+		if hasSigner {
+			return errResolvedNoPubkey
+		}
+		return nil
 	}
-	return cfg.Contributor.Node().Pubkey(), nil
 }
 
-// checkSigningConsistency rejects mismatches between the supplied
-// SigningKey and the resolved contributor pubkey — key-without-pubkey,
-// pubkey-without-key, or a key whose public part names a different
-// contributor. Both absent is the identity-Sign case.
-func checkSigningConsistency(signingKey interface{ Public() crypto.PublicKey }, resolvedPubkey []byte) error {
-	hasSigner := signingKey != nil && !isTypedNil(signingKey)
-	hasPubkey := len(resolvedPubkey) > 0
+// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes
+// and classifies the missing-half cases: neither → identity Sign; key without
+// pubkey or pubkey without key → error; both → the key's public part must
+// equal pubkey.
+func checkKeyAgainstPubkey(hasSigner bool, key crypto.Signer, pubkey []byte) error {
+	hasPubkey := len(pubkey) > 0
 	switch {
 	case !hasSigner && !hasPubkey:
 		return nil // identity-Sign case
 	case hasSigner && !hasPubkey:
-		return errors.New("SigningKey supplied but resolved contributor has no pubkey")
+		return errResolvedNoPubkey
 	case !hasSigner && hasPubkey:
-		return errors.New("resolved contributor has a pubkey but no SigningKey was supplied")
+		return errResolvedNoKey
 	}
-	encoded, err := EncodePublicKey(signingKey.Public())
+	encoded, err := EncodePublicKey(key.Public())
 	if err != nil {
-		return fmt.Errorf("encode signing key's pubkey: %w", err)
+		return Wrap(errEncodeSigningKey, err)
 	}
-	if !bytes.Equal(encoded, resolvedPubkey) {
-		return errors.New("SigningKey's public key does not match the resolved contributor pubkey")
+	if !bytes.Equal(encoded, pubkey) {
+		return errResolvedMismatch
 	}
 	return nil
 }
@@ -93,11 +124,34 @@ func isTypedNil(i any) bool {
 	return false
 }
 
+// HeightOf returns the generation number a new claim referencing refs must
+// carry: 1 + max(refs' heights), or 0 when refs is empty (an initial node).
+// It is the trivial reference computation for ClaimBuilder.Height /
+// WithHeight — callers must pass every claim the new one references,
+// including its contributor and (for a diff) its predecessor, since those
+// edges count toward height too. Tooling at scale caches id→height instead of
+// re-walking; this is the uncached, in-memory equivalent.
+func HeightOf(refs ...Claim) uint64 {
+	var max uint64
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		if h := r.Node().Height(); h > max {
+			max = h
+		}
+	}
+	if len(refs) == 0 {
+		return 0
+	}
+	return max + 1
+}
+
 // requiresProvenance reports whether claims of this class need at least
 // one derivation/* edge (§3.5).
 func requiresProvenance(c NodeClass) bool {
 	switch c {
-	case NodeDerivation, NodeEntity, NodeRelation:
+	case NodeClassDerivation, NodeClassEntity, NodeClassRelation:
 		return true
 	}
 	return false
@@ -106,38 +160,31 @@ func requiresProvenance(c NodeClass) bool {
 // hasDerivationEdge reports whether edges contains a derivation/* edge.
 func hasDerivationEdge(edges []*edge) bool {
 	for _, e := range edges {
-		if e.typeClass == EdgeDerivation {
+		if e.typeClass == EdgeClassDerivation {
 			return true
 		}
 	}
 	return false
 }
 
-// asConcreteEdge unwraps an Edge into the concrete *edge type.
+// asConcreteEdge unwraps an Edge into the concrete *edge. Edge is sealed, so
+// this cannot fail on a foreign type — only nil is rejected.
 func asConcreteEdge(e Edge) (*edge, error) {
 	if e == nil {
-		return nil, errors.New("nil edge")
+		return nil, errNilEdge
 	}
-	ce, ok := e.(*edge)
-	if !ok {
-		return nil, errors.New("edge from foreign implementation")
-	}
-	return ce, nil
+	return e.unwrap(), nil
 }
 
 // buildContributorEdge constructs the contribution/contributor edge that
 // references c.
 func buildContributorEdge(c Contributor) (*edge, error) {
 	if c == nil {
-		return nil, errors.New("nil contributor")
+		return nil, errNilContributor
 	}
-	e, err := NewEdge(EdgeConfig{
+	return newEdge(EdgeConfig{
 		Reference: c.ID(),
-		TypeClass: EdgeContribution,
+		TypeClass: EdgeClassContribution,
 		TypeSub:   "contributor",
 	})
-	if err != nil {
-		return nil, err
-	}
-	return e.(*edge), nil
 }

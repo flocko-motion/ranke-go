@@ -15,8 +15,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/flocko-motion/ranke-go"
+)
+
+var (
+	errNilID    = errors.New("adapter: nil id")
+	errNilClaim = errors.New("adapter: nil claim or id")
+	errNilHash  = errors.New("adapter: nil content hash")
 )
 
 // BlobStore is the minimal backing store a Universe adapter must provide:
@@ -62,51 +69,162 @@ type Streamer interface {
 // backends. A complete adapter is then just a BlobStore implementation.
 //
 //deadcode:keep
-func NewBlobUniverse(store BlobStore) ranke.Universe {
-	return &blobUniverse{store: store}
+func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
+	u := &blobUniverse{store: store, concurrency: 1, tier: ranke.StorageTierAuthoritative, heights: ranke.NewHeightCache()}
+	for _, o := range opts {
+		o(u)
+	}
+	if u.concurrency > 1 {
+		// One semaphore for the whole Universe — the concurrency cap is a
+		// TOTAL across every (possibly concurrent) call, not per call.
+		u.sem = make(chan struct{}, u.concurrency)
+	}
+	return u
+}
+
+// BlobUniverseOption configures the Universe wrapper.
+type BlobUniverseOption func(*blobUniverse)
+
+// WithConcurrency caps how many per-key store operations run at once — a
+// TOTAL over the whole Universe, shared across all concurrent calls, so N
+// simultaneous bulk calls never exceed n in-flight requests. n<=1 keeps ops
+// sequential (the default). Network backends (s3, rest) set it to fan out
+// over request latency without overwhelming the endpoint; local backends
+// leave it sequential.
+func WithConcurrency(n int) BlobUniverseOption {
+	return func(u *blobUniverse) {
+		if n > 0 {
+			u.concurrency = n
+		}
+	}
+}
+
+// WithTier sets the write-durability role this byte store serves in a stack
+// (Capabilities.Tier). A blob store keeps claims verbatim and holds content of
+// any size, so it may serve in ANY tier — authoritative source of truth by
+// default (NewBlobUniverse), or a lower tier (e.g. redis as a lazy cache) when
+// the deployment stacks it under a source of truth.
+func WithTier(t ranke.StorageTier) BlobUniverseOption {
+	return func(u *blobUniverse) { u.tier = t }
 }
 
 type blobUniverse struct {
-	store BlobStore
+	store       BlobStore
+	concurrency int
+	// tier is the write role this store is configured in, reported as
+	// Capabilities.Tier for a stack to route by. Defaults to authoritative.
+	tier ranke.StorageTier
+	// sem bounds concurrent store operations across the whole Universe (nil
+	// when concurrency<=1 → sequential). Shared by every forEach call, so the
+	// cap is a total, not per-call.
+	sem chan struct{}
+	// heights memoises id→height so GetClaimHeights rarely re-decodes a claim.
+	// Warmed opportunistically by GetClaims/PutClaims (every claim handled is
+	// Noted), so it fills with normal traffic. Heights are immutable, so the
+	// memo never goes stale.
+	heights *ranke.HeightCache
+}
+
+// forEach runs fn for each index in [0,n). When the Universe has a shared
+// concurrency semaphore, up to that many run at once — the cap is a TOTAL
+// across all concurrent forEach calls on this Universe, not per call — else
+// it runs sequentially. fn must write its result to a distinct per-index slot
+// (no shared state); the first error is returned and cancels the rest.
+func (u *blobUniverse) forEach(ctx context.Context, n int, fn func(context.Context, int) error) error {
+	if u.sem == nil {
+		for i := 0; i < n; i++ {
+			if err := fn(ctx, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		ferr error
+	)
+launch:
+	for i := 0; i < n; i++ {
+		select {
+		case <-ctx.Done(): // cancelled (or a sibling failed) while waiting for a slot
+			break launch
+		case u.sem <- struct{}{}: // acquire a shared slot
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-u.sem }()
+			if err := fn(ctx, i); err != nil {
+				mu.Lock()
+				if ferr == nil {
+					ferr = err
+					cancel()
+				}
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if ferr != nil {
+		return ferr
+	}
+	return ctx.Err()
 }
 
 //deadcode:keep
 func (u *blobUniverse) Close() error { return u.store.Close() }
 
 //deadcode:keep
-func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, error) {
+func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
-	for i, id := range ids {
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
 		if id == nil {
-			return nil, errors.New("adapter.GetClaims: nil id")
+			return errNilID
 		}
 		data, err := u.store.Get(ctx, id.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		c, err := ranke.DecodeClaim(id, data)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		out[i] = c
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	// Warm the height cache from what we just decoded (heights are on the raw
+	// claims, before materialisation), so later GetClaimHeights avoids a reload.
+	u.heights.NoteClaims(out...)
+	// A byte store returns raw claims; the read path materialises diff overlays
+	// via the ADT default, honouring WithNotDiffMaterialized (passed through).
+	// Materialisation runs after the parallel fetch, so it sees complete claims.
+	return ranke.DefaultMaterialize(ctx, u, out, opts...)
 }
 
 //deadcode:keep
 func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
-	for _, c := range cs {
+	if err := u.forEach(ctx, len(cs), func(ctx context.Context, i int) error {
+		c := cs[i]
 		if c == nil || c.ID() == nil {
-			return errors.New("adapter.PutClaims: nil claim or id")
+			return errNilClaim
 		}
 		data, err := c.Encode()
 		if err != nil {
 			return err
 		}
-		if err := u.store.Put(ctx, c.ID().String(), data); err != nil {
-			return err
-		}
+		return u.store.Put(ctx, c.ID().String(), data)
+	}); err != nil {
+		return err
 	}
+	// Every stored claim is one we hold in hand — warm the height cache.
+	u.heights.NoteClaims(cs...)
 	return nil
 }
 
@@ -118,18 +236,23 @@ func (u *blobUniverse) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, e
 //deadcode:keep
 func (u *blobUniverse) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
 	out := make([][]byte, len(refs))
-	for i, ref := range refs {
+	err := u.forEach(ctx, len(refs), func(ctx context.Context, i int) error {
+		ref := refs[i]
 		if ref.Hash == nil {
-			return nil, errors.New("adapter.GetContents: nil hash")
+			return errNilHash
 		}
 		data, err := u.store.Get(ctx, ref.Hash.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if err := ranke.VerifyContent(ref.Hash, ref.Size, data); err != nil {
-			return nil, err
+		if err := ranke.VerifyContent(ref.Hash, ref.ContentSize, data); err != nil {
+			return err
 		}
 		out[i] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -137,7 +260,7 @@ func (u *blobUniverse) GetContents(ctx context.Context, refs []ranke.ContentRef)
 //deadcode:keep
 func (u *blobUniverse) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	if hash == nil {
-		return nil, errors.New("adapter.StreamContent: nil hash")
+		return nil, errNilHash
 	}
 	// True streaming when the store can hand back a raw stream; otherwise
 	// load the whole blob and stream from memory.
@@ -164,7 +287,7 @@ func (u *blobUniverse) StreamContent(ctx context.Context, hash ranke.Id, size ui
 func (u *blobUniverse) PutContents(ctx context.Context, blobs []ranke.ContentBlob) error {
 	for _, bl := range blobs {
 		if bl.Hash == nil {
-			return errors.New("adapter.PutContents: nil hash")
+			return errNilHash
 		}
 		if err := u.store.Put(ctx, bl.Hash.String(), bl.Content); err != nil {
 			return err
@@ -182,27 +305,32 @@ func (u *blobUniverse) HasContents(ctx context.Context, hashes []ranke.Id) ([]bo
 // key namespace whether each id is present, tolerating nil entries.
 func (u *blobUniverse) hasAll(ctx context.Context, ids []ranke.Id) ([]bool, error) {
 	out := make([]bool, len(ids))
-	for i, id := range ids {
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
 		if id == nil {
-			continue
+			return nil
 		}
 		has, err := u.store.Has(ctx, id.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		out[i] = has
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
 
 //deadcode:keep
 func (u *blobUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return DefaultCopyClaims(ctx, u, src, ids, opts...)
+	return ranke.DefaultCopyClaims(ctx, u, src, ids, opts...)
 }
 
 //deadcode:keep
 func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return DefaultCopyContents(ctx, u, src, refs, opts...)
+	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
 // Capabilities surfaces the backing store's declared capabilities as the
@@ -210,5 +338,71 @@ func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, ref
 //
 //deadcode:keep
 func (u *blobUniverse) Capabilities() ranke.Capabilities {
-	return u.store.Capabilities()
+	c := u.store.Capabilities()
+	c.RawClaims = true       // a blob store keeps each claim's verbatim canonical bytes
+	c.ExternalContent = true // and holds externalized content of any size (no cap)
+	c.Tier = u.tier          // the write role the deployment configured (default authoritative)
+	return c
+}
+
+// Sync fills from src (a no-op when src is nil).
+func (u *blobUniverse) Sync(ctx context.Context, src ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	return ranke.DefaultSync(ctx, u, src, id)
+}
+
+// GetClaimHeights answers from the id→height cache, decoding only the ids it
+// has not seen (and caching those). With normal get/put traffic warming the
+// cache, a repeat lookup almost never touches the store.
+func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	return u.heights.GetClaimHeights(ctx, u, ids)
+}
+
+// Query answers an RQL read via the reference executor over this byte store;
+// uses/connections work via closure inversion (no native reverse index).
+func (u *blobUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, u, q, scope)
+}
+
+// GetClaimsRaw returns each claim's stored bytes verbatim — a byte store holds
+// exactly the CBOR the id was signed over, so no decode (and no re-encode) is
+// involved.
+//
+// GetClaimTags is unsupported: an opaque byte store holds no mutable side-data
+// (Capabilities.Tags is false).
+//
+//deadcode:keep
+func (u *blobUniverse) GetClaimTags(_ context.Context, _ []ranke.Id) ([]map[string]string, error) {
+	return nil, ranke.ErrUnsupported
+}
+
+// SetClaimsTags is unsupported (see GetClaimTags).
+//
+//deadcode:keep
+func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ map[string]map[string]string) error {
+	return ranke.ErrUnsupported
+}
+
+// Tag is a no-op: an opaque byte store holds no tags to bring up to date, and a
+// read against it never consults them.
+func (u *blobUniverse) Tag(_ context.Context, _ ranke.Id) error { return nil }
+
+//deadcode:keep
+func (u *blobUniverse) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	out := make([][]byte, len(ids))
+	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		id := ids[i]
+		if id == nil {
+			return errNilID
+		}
+		data, err := u.store.Get(ctx, id.String())
+		if err != nil {
+			return err
+		}
+		out[i] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

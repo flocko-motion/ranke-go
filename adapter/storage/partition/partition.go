@@ -18,7 +18,13 @@ import (
 	"io"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
+)
+
+var (
+	errNoShards = errors.New("partition: at least one shard required")
+	errNilShard = errors.New("partition: nil shard Universe")
+	errNilClaim = errors.New("partition: nil claim or id")
+	errNilHash  = errors.New("partition: nil content hash")
 )
 
 type partition struct {
@@ -29,11 +35,11 @@ type partition struct {
 // one shard is required; the shard set is fixed for the partition's lifetime.
 func NewPartition(shards ...ranke.Universe) (ranke.Universe, error) {
 	if len(shards) == 0 {
-		return nil, errors.New("partition: at least one shard required")
+		return nil, errNoShards
 	}
 	for _, s := range shards {
 		if s == nil {
-			return nil, errors.New("partition: nil shard Universe")
+			return nil, errNilShard
 		}
 	}
 	if len(shards) == 1 {
@@ -62,7 +68,7 @@ func (p *partition) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	groups := make([][]ranke.Claim, len(p.shards))
 	for _, c := range cs {
 		if c == nil || c.ID() == nil {
-			return errors.New("partition.PutClaims: nil claim or id")
+			return errNilClaim
 		}
 		s := p.shardOf(c.ID())
 		groups[s] = append(groups[s], c)
@@ -82,7 +88,7 @@ func (p *partition) PutContents(ctx context.Context, blobs []ranke.ContentBlob) 
 	groups := make([][]ranke.ContentBlob, len(p.shards))
 	for _, b := range blobs {
 		if b.Hash == nil {
-			return errors.New("partition.PutContents: nil hash")
+			return errNilHash
 		}
 		s := p.shardOf(b.Hash)
 		groups[s] = append(groups[s], b)
@@ -98,14 +104,20 @@ func (p *partition) PutContents(ctx context.Context, blobs []ranke.ContentBlob) 
 	return nil
 }
 
-func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Claim, error) {
+func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, len(ids))
 	groups := p.groupIds(ids)
 	for s, idx := range groups {
 		if len(idx) == 0 {
 			continue
 		}
-		got, err := p.shards[s].GetClaims(ctx, at(ids, idx))
+		if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
+			ranke.ReportEvent(ctx, "partition", "route", ranke.ReportDebug, "",
+				map[string]any{"shard": s, "ids": len(idx)})
+		}
+		// Fetch raw delta from the shard; materialise at the partition level
+		// (below) so a diff's predecessor resolves across shards.
+		got, err := p.shards[s].GetClaims(ctx, at(ids, idx), ranke.WithNotDiffMaterialized())
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +125,8 @@ func (p *partition) GetClaims(ctx context.Context, ids []ranke.Id) ([]ranke.Clai
 			out[idx[k]] = c
 		}
 	}
-	return out, nil
+	// Materialise diff overlays at the partition level, honouring read opts.
+	return ranke.DefaultMaterialize(ctx, p, out, opts...)
 }
 
 func (p *partition) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
@@ -121,7 +134,7 @@ func (p *partition) GetContents(ctx context.Context, refs []ranke.ContentRef) ([
 	groups := make([][]int, len(p.shards))
 	for i, r := range refs {
 		if r.Hash == nil {
-			return nil, errors.New("partition.GetContents: nil hash")
+			return nil, errNilHash
 		}
 		s := p.shardOf(r.Hash)
 		groups[s] = append(groups[s], i)
@@ -183,33 +196,136 @@ func (p *partition) HasContents(ctx context.Context, hashes []ranke.Id) ([]bool,
 
 func (p *partition) StreamContent(ctx context.Context, hash ranke.Id, size uint64) (io.ReadCloser, error) {
 	if hash == nil {
-		return nil, errors.New("partition.StreamContent: nil hash")
+		return nil, errNilHash
 	}
 	return p.shards[p.shardOf(hash)].StreamContent(ctx, hash, size)
 }
 
 func (p *partition) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyClaims(ctx, p, src, ids, opts...)
+	return ranke.DefaultCopyClaims(ctx, p, src, ids, opts...)
 }
 
 func (p *partition) CopyContents(ctx context.Context, src ranke.Universe, refs []ranke.ContentRef, opts ...ranke.CopyOption) error {
-	return storage.DefaultCopyContents(ctx, p, src, refs, opts...)
+	return ranke.DefaultCopyContents(ctx, p, src, refs, opts...)
 }
 
-// Capabilities reports an ability only if every shard has it: a key may land on
-// any shard, so the partition can promise a capability only when all shards can
-// (Enumerate and a GQL query likewise span every shard).
+// GetClaimHeights resolves heights through the partition's own GetClaims (which
+// routes each id to its shard), then reads each committed height. Delegating to
+// DefaultGetClaimHeights avoids reimplementing the shard routing here.
+func (p *partition) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
+	return ranke.DefaultGetClaimHeights(ctx, p, ids)
+}
+
+// Query resolves an RQL read through the partition's own read path (GetClaims,
+// which routes each id to its shard) via the reference executor.
+func (p *partition) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return ranke.DefaultQuery(ctx, p, q, scope)
+}
+
+// GetClaimsRaw routes each id to its shard and gathers the stored CBOR.
+func (p *partition) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
+	out := make([][]byte, len(ids))
+	groups := p.groupIds(ids)
+	for s, idx := range groups {
+		if len(idx) == 0 {
+			continue
+		}
+		got, err := p.shards[s].GetClaimsRaw(ctx, at(ids, idx))
+		if err != nil {
+			return nil, err
+		}
+		for k, b := range got {
+			out[idx[k]] = b
+		}
+	}
+	return out, nil
+}
+
+// GetClaimTags routes each id to its shard (a claim's tags live wherever the
+// claim does) and gathers them positionally.
+func (p *partition) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
+	out := make([]map[string]string, len(claims))
+	groups := p.groupIds(claims)
+	for s, idx := range groups {
+		if len(idx) == 0 {
+			continue
+		}
+		got, err := p.shards[s].GetClaimTags(ctx, at(claims, idx))
+		if err != nil {
+			return nil, err
+		}
+		for k, t := range got {
+			out[idx[k]] = t
+		}
+	}
+	return out, nil
+}
+
+// SetClaimsTags routes each claim (by id) to its shard, grouping the per-claim
+// tag maps per shard; clearTags applies on every shard touched.
+// Tag broadcasts to every shard: a branch's closure is spread across all of them
+// (claims route by id), so each has its own share to index.
+func (p *partition) Tag(ctx context.Context, head ranke.Id) error {
+	for sh := range p.shards {
+		if err := p.shards[sh].Tag(ctx, head); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
+	groups := make([]map[string]map[string]string, len(p.shards))
+	for s, kv := range tags {
+		id, err := ranke.ParseId(s)
+		if err != nil {
+			return err
+		}
+		sh := p.shardOf(id)
+		if groups[sh] == nil {
+			groups[sh] = map[string]map[string]string{}
+		}
+		groups[sh][s] = kv
+	}
+	for sh, g := range groups {
+		if len(g) == 0 {
+			continue
+		}
+		if err := p.shards[sh].SetClaimsTags(ctx, clearTags, g); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *partition) Capabilities() ranke.Capabilities {
-	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, GQL: true}
-	for _, s := range p.shards {
+	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, ReverseWalk: true, RawClaims: true, ExternalContent: true, Tags: true}
+	for i, s := range p.shards {
 		sc := s.Capabilities()
 		c.Overwrite = c.Overwrite && sc.Overwrite
 		c.Delete = c.Delete && sc.Delete
 		c.Enumerate = c.Enumerate && sc.Enumerate
 		c.Persistent = c.Persistent && sc.Persistent
-		c.GQL = c.GQL && sc.GQL
+		c.ReverseWalk = c.ReverseWalk && sc.ReverseWalk
+		c.RawClaims = c.RawClaims && sc.RawClaims
+		c.ExternalContent = c.ExternalContent && sc.ExternalContent
+		c.Tags = c.Tags && sc.Tags
+		if i == 0 {
+			// Shards are one backend sharded by key, so they share a tier; adopt
+			// the first shard's. (A mixed-tier partition is a misconfiguration.)
+			c.Tier = sc.Tier
+		}
 	}
 	return c
+}
+
+// Sync is not implemented — no-op for now. A shard can be any Universe (even a
+// stack), so a real Sync must orchestrate across the shards. TODO.
+func (p *partition) Sync(_ context.Context, _ ranke.Universe, id ranke.Id) <-chan ranke.SyncResult {
+	// TODO: this is currently a no-op. Syncing a partition is not trivial, as shards are
+	// incomplete by nature it would be the responsibility of the partition layer to guarantee
+	// completeness.
+	return ranke.SyncedNow(id)
 }
 
 // Close closes every shard (best-effort: all attempted, errors joined).

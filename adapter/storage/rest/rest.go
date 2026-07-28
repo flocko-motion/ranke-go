@@ -19,6 +19,7 @@ package rest
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,12 @@ import (
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage"
+)
+
+var (
+	errEmptyBaseURL = errors.New("adapter/rest.New: empty baseURL")
+	errNoTier       = errors.New("adapter/rest.New: caps declare no valid tier")
+	errStatus       = errors.New("adapter/rest: unexpected status")
 )
 
 // New returns a Universe backed by the blob API rooted at baseURL, using
@@ -38,16 +45,23 @@ import (
 //deadcode:keep
 func New(baseURL string, client *http.Client, caps ranke.Capabilities) (ranke.Universe, error) {
 	if baseURL == "" {
-		return nil, fmt.Errorf("adapter/rest.New: empty baseURL")
+		return nil, errEmptyBaseURL
 	}
 	if client == nil {
 		client = http.DefaultClient
+	}
+	// The remote can't be probed, so the caller must declare a valid tier — a
+	// blob store keeps claims verbatim, so any tier is allowed but not none.
+	eff := caps
+	eff.RawClaims, eff.ExternalContent = true, true
+	if !eff.AllowsTier(caps.Tier) {
+		return nil, fmt.Errorf("%w (%q)", errNoTier, caps.Tier)
 	}
 	return storage.NewBlobUniverse(&store{
 		base:   strings.TrimRight(baseURL, "/"),
 		client: client,
 		caps:   caps,
-	}), nil
+	}, storage.WithTier(caps.Tier)), nil
 }
 
 type store struct {
@@ -75,7 +89,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	case http.StatusNotFound:
 		return nil, ranke.ErrNotFound
 	default:
-		return nil, fmt.Errorf("GET %s: %s", key, resp.Status)
+		return nil, fmt.Errorf("%w: GET %s: %s", errStatus, key, resp.Status)
 	}
 }
 
@@ -91,7 +105,7 @@ func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("PUT %s: %s", key, resp.Status)
+		return fmt.Errorf("%w: PUT %s: %s", errStatus, key, resp.Status)
 	}
 	return nil
 }
@@ -113,7 +127,7 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	case http.StatusNotFound:
 		return false, nil
 	default:
-		return false, fmt.Errorf("HEAD %s: %s", key, resp.Status)
+		return false, fmt.Errorf("%w: HEAD %s: %s", errStatus, key, resp.Status)
 	}
 }
 

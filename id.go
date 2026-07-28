@@ -7,8 +7,6 @@ package ranke
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
-	"fmt"
 
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multicodec"
@@ -24,6 +22,10 @@ type Id interface {
 	// Algorithm names the scheme that built this id, e.g. "sha2-256"
 	// or "ed25519-pub".
 	Algorithm() string
+	// rawBytes returns the self-describing payload. Being unexported, it
+	// seals Id: only this package's *id can satisfy the interface (no
+	// foreign Id), and the canonical encoder reads the bytes without a cast.
+	rawBytes() []byte
 }
 
 // id is the concrete Id: a self-describing payload (multihash for
@@ -40,7 +42,7 @@ type id struct {
 func idFromBytes(raw []byte) (*id, error) {
 	str, err := multibase.Encode(multibase.Base32, raw)
 	if err != nil {
-		return nil, fmt.Errorf("multibase encode: %w", err)
+		return nil, WrapDetail(errID, "multibase encode", err)
 	}
 	return &id{raw: raw, str: str}, nil
 }
@@ -49,7 +51,7 @@ func idFromBytes(raw []byte) (*id, error) {
 // validating the framing.
 func hashFromMultihashBytes(raw []byte) (*id, error) {
 	if _, err := multihash.Decode(raw); err != nil {
-		return nil, fmt.Errorf("invalid multihash: %w", err)
+		return nil, WrapDetail(errID, "invalid multihash", err)
 	}
 	return idFromBytes(raw)
 }
@@ -58,7 +60,7 @@ func hashFromMultihashBytes(raw []byte) (*id, error) {
 func hashContent(content []byte) (*id, error) {
 	mh, err := multihash.Sum(content, multihash.SHA2_256, -1)
 	if err != nil {
-		return nil, fmt.Errorf("multihash sum: %w", err)
+		return nil, WrapDetail(errID, "multihash sum", err)
 	}
 	return hashFromMultihashBytes(mh)
 }
@@ -74,22 +76,26 @@ func HashContent(content []byte) (Id, error) {
 func ParseId(s string) (Id, error) {
 	_, raw, err := multibase.Decode(s)
 	if err != nil {
-		return nil, fmt.Errorf("multibase decode: %w", err)
+		return nil, WrapDetail(errID, "multibase decode", err)
 	}
 	return idFromBytes(raw)
 }
 
 func (h *id) String() string { return h.str }
 
-// Equal compares by raw payload when both sides are *id, else by string.
+func (h *id) rawBytes() []byte {
+	if h == nil {
+		return nil
+	}
+	return h.raw
+}
+
+// Equal compares by raw payload.
 func (h *id) Equal(other Id) bool {
 	if h == nil || other == nil {
 		return h == nil && other == nil
 	}
-	if o, ok := other.(*id); ok {
-		return bytes.Equal(h.raw, o.raw)
-	}
-	return h.str == other.String()
+	return bytes.Equal(h.raw, other.rawBytes())
 }
 
 // Algorithm reads the leading multicodec varint to name the scheme
@@ -103,6 +109,3 @@ func (h *id) Algorithm() string {
 	}
 	return "unknown"
 }
-
-// errInvalidId is returned when an Id parameter is required but missing.
-var errInvalidId = errors.New("invalid id")

@@ -1,157 +1,117 @@
 // package: ranke / graph
 // type:    logic
-// job:     in-memory Ranke-Graph (RG ⊆ 𝒰) — adds claims under the atomic-creation rule, tracks heads, consolidates, and validates closures
-// limits:  does not persist claims (-> universe); does not bind graphs to branches (-> archive)
+// job:     a Ranke-Graph handle RG ⊆ 𝒰 — stages claims into a Universe under the atomic-creation rule, tracks open heads, consolidates
+// limits:  claims live in the Universe (-> universe); does not bind graphs to branches (-> archive); verification lives in verify.go
 package ranke
 
 import (
-	"errors"
-	"fmt"
+	"context"
 	"time"
 )
 
-// Graph is a Ranke-Graph instance RG ⊆ 𝒰 (spec §4.5), in memory.
-// Built standalone via NewGraph for fresh contributions, or
-// materialized from a loaded Claim via Claim.Graph(ctx).
+// Graph is a Ranke-Graph handle: a subset RG ⊆ 𝒰 (spec §4.5). The claims
+// live in the Universe; the handle holds only the open-head frontier, so
+// membership and provenance are closure(heads, 𝒰) resolved on demand. Built
+// via NewGraph for fresh contributions, or NewGraphFromClosure to open at an
+// existing head.
 type Graph interface {
-	// Add inserts claims atomically. Every edge reference must
-	// already be reachable in the graph (atomic creation rule, §4.3).
-	// Non-root claims must have at least one edge. Idempotent.
-	Add(claims ...Claim) error
-	Contains(id Id) bool
-	Get(id Id) (Claim, bool)
-	// Heads returns the open heads — claims no other claim in the
-	// graph references (§4.5). A single-headed graph is a closure
-	// (RG_h); multi-headed means concurrent open heads.
+	// AddClaims stores claims in the Universe and advances the open-head
+	// frontier: each added claim becomes a head, and the ids it references
+	// drop out. Idempotent (PutClaim is).
+	AddClaims(ctx context.Context, claims ...Claim) error
+	// ContainsClaim reports whether id is reachable in this graph — in the
+	// closure of any open head. A closure query to the Universe.
+	ContainsClaim(ctx context.Context, id Id) (bool, error)
+	// GetClaim returns the claim at id if it is reachable from any open
+	// head, loaded (materialised) from the Universe; ErrNotFound otherwise.
+	GetClaim(ctx context.Context, id Id) (Claim, error)
+	// Heads returns the open heads — claims no other claim in the graph
+	// references (§4.5). A single-headed graph is a closure (RG_h);
+	// multi-headed means concurrent open heads.
 	Heads() []Id
 	// IsConsolidated reports len(Heads()) == 1.
 	IsConsolidated() bool
-	// Consolidate builds a contribution/head claim wrapping every
-	// open head, adds it, and returns it. After this the graph is
-	// single-headed at the new claim's id. createdAt defaults to
-	// time.Now().UTC() when zero / omitted; must satisfy
-	// monotonicity (§4.3).
-	Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error)
-	// Validate walks the closure from every open head and runs the
-	// §5.10 per-claim integrity + authenticity check. Walks the
-	// full closure (so verbose callers see every claim) and returns
-	// the first error, or nil. Optional report callbacks are called
-	// once per visited claim with its depth and result.
-	Validate(report ...func(c Claim, depth int, err error)) error
-	// ValidateWithExceptions skips integrity checks for ids in skip
-	// (known-good subsets). Other checks still run.
-	ValidateWithExceptions(skip ...Id) error
+	// Consolidate builds a contribution/head claim wrapping every open
+	// head, adds it, and returns it. After this the graph is single-headed
+	// at the new claim's id. createdAt defaults to time.Now().UTC() when
+	// zero / omitted; must satisfy monotonicity (§4.3).
+	Consolidate(ctx context.Context, contributor Contributor, createdAt ...time.Time) (Claim, error)
+	// Verify walks the closure from every open head and verifies each claim
+	// (§5.10 integrity + authenticity) against the Universe, returning a
+	// live run. See verify.go for options.
+	Verify(opts ...VerifyOption) VerificationRun
 }
 
-// graph is the concrete implementation of Graph (= RG ⊆ 𝒰, spec §4.5).
-// claims is keyed by Id.String(); referenced tracks every claim id
-// that some other claim references via an edge — so Heads() =
-// claims \ referenced.
+// graph is the concrete Graph: a Universe plus the open-head frontier
+// (id string → Id). Nothing else is stored — membership, provenance, and
+// interior-vs-head are all closure(heads, u), resolved on demand.
 type graph struct {
-	claims     map[string]*claim
-	referenced map[string]struct{}
+	u     Universe
+	heads map[string]Id
 }
 
-// NewGraph creates a graph and adds the given contribution/contributor
-// claim . This claim might be an initial node without edges or a full
-// clojure.
-func NewGraph(root Contributor) Graph {
-	g := &graph{
-		claims:     make(map[string]*claim),
-		referenced: make(map[string]struct{}),
+// NewGraph opens an empty graph over u — no heads yet; populate it with
+// AddClaims. u may be nil, in which case an ephemeral in-memory Universe is
+// used. An empty graph is a valid handle, though not yet a valid RG.
+func NewGraph(ctx context.Context, u Universe) (Graph, error) {
+	if u == nil {
+		u = NewMemoryUniverse()
 	}
-	if c := unwrapClaim(root); c != nil {
-		g.claims[c.node.id.String()] = c
-	}
-	return g
+	return &graph{u: u, heads: map[string]Id{}}, nil
 }
 
-// unwrapClaim peels any wrapper (e.g. *signedContributor) off a
-// Contributor to reach the underlying persisted *claim. Returns nil
-// if the chain doesn't end at our concrete type — i.e. the caller
-// passed a foreign implementation.
-func unwrapClaim(c Contributor) *claim {
-	for c != nil {
-		switch v := c.(type) {
-		case *claim:
-			return v
-		case *signedContributor:
-			c = v.contributor
-		default:
-			return nil
+// NewGraphFromClosure opens a graph at an existing head in universe. The
+// closure RG_head = closure(head, 𝒰) is recovered on demand from the
+// Universe — per §Closures the id alone suffices, so nothing is walked here.
+func NewGraphFromClosure(ctx context.Context, head Id, universe Universe) (Graph, error) {
+	if universe == nil {
+		return nil, errNilUniverse
+	}
+	if head == nil {
+		return nil, errNilID
+	}
+	return &graph{u: universe, heads: map[string]Id{head.String(): head}}, nil
+}
+
+// AddClaims stores each claim in the Universe and updates the open-head
+// frontier: the new claim becomes a head, and every id it references drops
+// out (it is now interior). Pure public API — the graph never unwraps.
+func (g *graph) AddClaims(ctx context.Context, claims ...Claim) error {
+	for _, cl := range claims {
+		if cl == nil {
+			return errNilClaim
+		}
+		if err := PutClaim(ctx, g.u, cl); err != nil {
+			return WrapDetail(errGraphAddClaim, cl.ID().String(), err)
+		}
+		g.heads[cl.ID().String()] = cl.ID()
+		for _, e := range cl.Edges() {
+			delete(g.heads, e.Reference().String())
 		}
 	}
 	return nil
 }
 
-func (g *graph) Add(claims ...Claim) error {
-	for i, cl := range claims {
-		if err := g.addOne(cl); err != nil {
-			return fmt.Errorf("Graph.Add: claim %d: %w", i, err)
-		}
-	}
-	return nil
-}
-
-func (g *graph) addOne(cl Claim) error {
-	if cl == nil {
-		return errors.New("nil claim")
-	}
-	c, ok := cl.(*claim)
-	if !ok {
-		return errors.New("claim from foreign implementation")
-	}
-	// Idempotency: same id ⇒ no-op.
-	key := c.node.id.String()
-	if _, exists := g.claims[key]; exists {
-		return nil
-	}
-	// Only the root may have no edges; the root was set at NewGraph.
-	if len(c.edges) == 0 {
-		return errors.New("only the root contribution/contributor (set at NewGraph) may have no edges")
-	}
-	// Atomic creation rule (§4.3): every edge reference must already
-	// be present in the graph.
-	for _, e := range c.edges {
-		refKey := e.reference.String()
-		if _, ok := g.claims[refKey]; !ok {
-			return fmt.Errorf("edge references unknown claim %s (atomic creation rule, §4.3)", refKey)
-		}
-	}
-	// Insert the claim and mark each referenced claim.
-	g.claims[key] = c
-	for _, e := range c.edges {
-		g.referenced[e.reference.String()] = struct{}{}
-	}
-	return nil
-}
-
-func (g *graph) Contains(id Id) bool {
+// ContainsClaim reports whether id is reachable in this graph — in the
+// closure of any open head. One closure query to the Universe (which decides
+// how to answer it); no local state.
+func (g *graph) ContainsClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
-		return false
+		return false, nil
 	}
-	_, ok := g.claims[id.String()]
-	return ok
+	return InClosure(ctx, g.u, BranchUniverse, g.Heads(), id)
 }
 
-func (g *graph) Get(id Id) (Claim, bool) {
-	if id == nil {
-		return nil, false
-	}
-	c, ok := g.claims[id.String()]
-	if !ok {
-		return nil, false
-	}
-	return c, true
+// GetClaim returns the claim at id if it is reachable from any open head,
+// loaded (materialised) from the Universe; ErrNotFound otherwise.
+func (g *graph) GetClaim(ctx context.Context, id Id) (Claim, error) {
+	return GetFromClosure(ctx, g.u, BranchUniverse, g.Heads(), id)
 }
 
 func (g *graph) Heads() []Id {
-	out := make([]Id, 0)
-	for k, c := range g.claims {
-		if _, ref := g.referenced[k]; ref {
-			continue
-		}
-		out = append(out, c.node.id)
+	out := make([]Id, 0, len(g.heads))
+	for _, id := range g.heads {
+		out = append(out, id)
 	}
 	return out
 }
@@ -160,44 +120,51 @@ func (g *graph) IsConsolidated() bool {
 	return len(g.Heads()) == 1
 }
 
-func (g *graph) Consolidate(contributor Contributor, createdAt ...time.Time) (Claim, error) {
+func (g *graph) Consolidate(ctx context.Context, contributor Contributor, createdAt ...time.Time) (Claim, error) {
 	heads := g.Heads()
 	if len(heads) == 0 {
-		return nil, errors.New("ranke.Graph.Consolidate: empty graph")
+		return nil, errEmptyGraph
 	}
 	if len(heads) == 1 {
-		return nil, errors.New("ranke.Graph.Consolidate: graph is already consolidated")
+		// Already consolidated — consolidate(RG) = RG (§Consolidation).
+		return GetClaim(ctx, g.u, heads[0])
 	}
 	edges := make([]Edge, 0, len(heads))
+	// refs collects the claims the new head references, for its height
+	// (§4.1): the consolidated open heads plus the contributor. The heads
+	// live in the Universe; the contributor is in hand.
+	refs := make([]Claim, 0, len(heads)+1)
+	refs = append(refs, contributor)
 	for _, h := range heads {
-		e, err := NewEdge(EdgeConfig{
-			Reference: h,
-			TypeClass: EdgeContribution,
-			TypeSub:   "head",
-		})
+		e, err := NewEdge(EdgeConfig{Reference: h, Type: EdgeTypeHead})
 		if err != nil {
-			return nil, fmt.Errorf("ranke.Graph.Consolidate: build head edge: %w", err)
+			return nil, WrapDetail(errConsolidate, "build head edge", err)
 		}
 		edges = append(edges, e)
+		hc, err := GetClaim(ctx, g.u, h)
+		if err != nil {
+			return nil, WrapDetail(errConsolidate, "load head for height", err)
+		}
+		refs = append(refs, hc)
 	}
 	head, err := ClaimBuilder{
 		Type:        NodeHead,
 		Contributor: contributor,
 		Edges:       edges,
 		CreatedAt:   firstNonZero(createdAt),
+		Height:      HeightOf(refs...),
 	}.Sign()
 	if err != nil {
 		return nil, err
 	}
-	if err := g.Add(head); err != nil {
-		return nil, fmt.Errorf("ranke.Graph.Consolidate: add head: %w", err)
+	if err := g.AddClaims(ctx, head); err != nil {
+		return nil, WrapDetail(errConsolidate, "add head", err)
 	}
 	return head, nil
 }
 
-// firstNonZero returns the first non-zero time in ts, or the zero
-// time.Time if all are zero / ts is empty. Used to absorb the
-// variadic createdAt parameter on Consolidate / AddGraph.
+// firstNonZero returns the first non-zero time in ts, or the zero time.Time
+// if all are zero / ts is empty. Absorbs the variadic createdAt parameter.
 func firstNonZero(ts []time.Time) time.Time {
 	for _, t := range ts {
 		if !t.IsZero() {
@@ -207,111 +174,4 @@ func firstNonZero(ts []time.Time) time.Time {
 	return time.Time{}
 }
 
-func (g *graph) Validate(report ...func(c Claim, depth int, err error)) error {
-	seen := map[string]bool{}
-	var firstErr error
-	for _, h := range g.Heads() {
-		g.validateRecursive(h, 0, seen, report, &firstErr)
-	}
-	return firstErr
-}
-
-func (g *graph) ValidateWithExceptions(skip ...Id) error {
-	skipSet := make(map[string]struct{}, len(skip))
-	for _, s := range skip {
-		if s != nil {
-			skipSet[s.String()] = struct{}{}
-		}
-	}
-	var firstErr error
-	g.Validate(func(c Claim, _ int, err error) {
-		if firstErr != nil || err == nil {
-			return
-		}
-		if _, sk := skipSet[c.ID().String()]; sk {
-			return
-		}
-		firstErr = fmt.Errorf("validate %s: %w", c.ID().String(), err)
-	})
-	return firstErr
-}
-
-func (g *graph) validateRecursive(id Id, depth int, seen map[string]bool, report []func(Claim, int, error), firstErr *error) {
-	k := id.String()
-	if seen[k] {
-		return
-	}
-	seen[k] = true
-	c, ok := g.claims[k]
-	if !ok {
-		return
-	}
-	err := g.verifyOne(c)
-	for _, r := range report {
-		r(c, depth, err)
-	}
-	if err != nil && *firstErr == nil {
-		*firstErr = fmt.Errorf("validate %s: %w", k, err)
-	}
-	for _, e := range c.edges {
-		g.validateRecursive(e.reference, depth+1, seen, report, firstErr)
-	}
-}
-
-// verifyOne runs the §5.10 checks on a single claim:
-//   - every edge reference resolves to a claim in the graph;
-//   - canonical re-encode + recompute H(S(v)) + signature check
-//     against id(v) (record integrity + authenticity, §5.2 + §5.7);
-//   - if content_hash is set, re-hash the actual content bytes and
-//     compare (content integrity).
-func (g *graph) verifyOne(c *claim) error {
-	for _, e := range c.edges {
-		if _, ok := g.claims[e.reference.String()]; !ok {
-			return fmt.Errorf("edge references missing claim %s", e.reference.String())
-		}
-	}
-	encoded, err := encodeNode(c.node)
-	if err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
-	recomputed, err := hashContent(encoded)
-	if err != nil {
-		return fmt.Errorf("hash: %w", err)
-	}
-	pubkey, err := g.resolveClaimPubkey(c)
-	if err != nil {
-		return fmt.Errorf("resolve pubkey: %w", err)
-	}
-	idH, ok := c.node.id.(*id)
-	if !ok {
-		return errors.New("id not a concrete *id (foreign id type)")
-	}
-	if err := verifySignature(pubkey, recomputed.raw, idH.raw); err != nil {
-		return fmt.Errorf("§5.7: %w", err)
-	}
-	// Content integrity (§5.10) is enforced at Universe.GetContent /
-	// StreamContent time; bytes reaching verifyOne are already verified.
-	return nil
-}
-
-// resolveClaimPubkey returns the pubkey whose matching private key
-// signed this claim's id (§5.7). For the initial contributor (a
-// claim with no edges, per §4.3), the pubkey is on the claim's own
-// node. For every other claim, it is on the node of the contributor
-// referenced by the claim's contribution/contributor edge.
-func (g *graph) resolveClaimPubkey(c *claim) ([]byte, error) {
-	if len(c.edges) == 0 {
-		// Initial node (the only no-edge claim a graph may contain).
-		return c.node.pubkey, nil
-	}
-	for _, e := range c.edges {
-		if e.typeClass == EdgeContribution && e.typeSub == "contributor" {
-			contributor, ok := g.claims[e.reference.String()]
-			if !ok {
-				return nil, fmt.Errorf("contributor claim %s not in graph", e.reference.String())
-			}
-			return contributor.node.pubkey, nil
-		}
-	}
-	return nil, errors.New("non-initial claim missing contribution/contributor edge")
-}
+// Verify lives in verify.go (the configurable closure verifier).

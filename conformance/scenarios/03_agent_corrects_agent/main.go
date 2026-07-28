@@ -19,7 +19,8 @@
 // graph documents the disagreement, it does not decide.
 //
 // Maps to spec §2.2 ("contradictions in the evidence base are
-// themselves evidence") and §3.5 (conviction values).
+// themselves evidence") and §3.5 (conviction values). A referencing
+// claim declares its Height (§4.1): 1 + the max reference height.
 
 // package: main / scenario
 // type:    cmd
@@ -29,18 +30,20 @@ package main
 
 import (
 	"context"
-	"path/filepath"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/sequencer/file"
+	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
+	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
 )
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "bciqi4cldyiqgmwbwpjbt4hwyg4yyq5rgcpcaqiue3bwjmdwyekyruni"
+const expectedMainHead = "b5ua5pbze2jr6aqt67odxs35aiavqr4odivigxauqk6vkfw3mfmbvompmf6igau5tikk5ip7y4wf2b6h23qrkezzvtvi4tqdrqyhru4vaau"
 
 func main() {
 	ctx := context.Background()
@@ -50,120 +53,136 @@ func main() {
 	strong := map[string]string{"conviction": "1.0"}
 	negate := map[string]string{"conviction": "-1.0"}
 
-	// --- 1. Operator + two extraction agents. ---
+	// --- 1. Operator (the Sequencer's Ed25519-keyed self, stored at
+	// bootstrap) plus two extraction agents, each vouched for by the
+	// operator with the agent's public key as content (§5.7). ---
+	opSeed := sha256.Sum256([]byte("operator@example.com"))
+	opPriv := ed25519.NewKeyFromSeed(opSeed[:])
+	opPub := must(ranke.EncodePublicKey(opPriv.Public()))
 	operatorClaim := must(ranke.ClaimBuilder{
-		Type:      ranke.NodeContributor,
-		Content:   []byte("operator@example.com"),
-		CreatedAt: s.NextTimestamp(time.Second),
+		Type:          ranke.NodeContributor,
+		InlineContent: opPub,
+		Encoding:      ranke.EncodingOctetStream,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		SigningKey:    opPriv,
 	}.Sign())
-	operator := must(operatorClaim.AsContributor())
-	g := ranke.NewGraph(operator)
+	operator := must(operatorClaim.AsContributor(ctx, nil, opPriv))
 
 	agentAKey := must(ranke.LoadPrivateKey(helpers.KeyPath("agentA.pem")))
 	agentAClaim := must(ranke.ClaimBuilder{
-		Type:        ranke.NodeContributor,
-		Content:     []byte("extraction-agent-A"),
-		Pubkey:      agentAKey.Pubkey,
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.NodeContributor,
+		InlineContent: agentAKey.Pubkey,
+		Encoding:      ranke.EncodingOctetStream,
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	agentA := must(agentAClaim.AsContributor(agentAKey.Private))
-	must(g.Add(agentAClaim))
+	agentA := must(agentAClaim.AsContributor(ctx, nil, agentAKey.Private))
 
 	agentBKey := must(ranke.LoadPrivateKey(helpers.KeyPath("agentB.pem")))
 	agentBClaim := must(ranke.ClaimBuilder{
-		Type:        ranke.NodeContributor,
-		Content:     []byte("extraction-agent-B"),
-		Pubkey:      agentBKey.Pubkey,
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.NodeContributor,
+		InlineContent: agentBKey.Pubkey,
+		Encoding:      ranke.EncodingOctetStream,
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	agentB := must(agentBClaim.AsContributor(agentBKey.Private))
-	must(g.Add(agentBClaim))
+	agentB := must(agentBClaim.AsContributor(ctx, nil, agentBKey.Private))
 
 	// --- 2. Source email — ambiguous reference to "brother". ---
 	email := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeSource("email"),
-		Encoding:    ranke.EncodingMessage("rfc822"),
-		Content:     []byte("From: alice@example.com\r\nTo: bob@example.com\r\n\r\nBob, please tell my brother to call me. — Alice\r\n"),
-		Contributor: operator,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeSource("email"),
+		Encoding:      ranke.EncodingMessage("rfc822"),
+		InlineContent: []byte("From: alice@example.com\r\nTo: bob@example.com\r\n\r\nBob, please tell my brother to call me. — Alice\r\n"),
+		Contributor:   operator,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(operator),
 	}.Sign())
-	must(g.Add(email))
 
 	// --- 3. Entities (Alice + Bob), extracted by agentA. ---
 	alice := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Alice"),
-		Contributor: agentA,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Alice"),
+		Encoding:      ranke.EncodingPlain,
+		Contributor:   agentA,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agentA, email),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: email.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(alice))
 	bob := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeEntity("person"),
-		Content:     []byte("Bob"),
-		Contributor: agentA,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeEntity("person"),
+		InlineContent: []byte("Bob"),
+		Encoding:      ranke.EncodingPlain,
+		Contributor:   agentA,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agentA, email),
 		Edges: []ranke.Edge{must(ranke.NewEdge(ranke.EdgeConfig{
 			Reference: email.ID(),
 			Type:      ranke.TypeDerivation("source"),
 		}))},
 	}.Sign())
-	must(g.Add(bob))
 
 	// --- 4. agentA's original (wrong) extraction: Alice — sibling → Bob. ---
 	siblingA := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("sibling"),
-		Content:     []byte("Alice mentions 'my brother' in a note to Bob; agentA infers they are siblings."),
-		Contributor: agentA,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("sibling"),
+		InlineContent: []byte("Alice mentions 'my brother' in a note to Bob; agentA infers they are siblings."),
+		Encoding:      ranke.EncodingPlain,
+		Contributor:   agentA,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agentA, email, alice, bob),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: email.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("sibling"), RelationDirection: ranke.RelationFrom, Fields: strong})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bob.ID(), Type: ranke.TypeRelation("sibling"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
-	must(g.Add(siblingA))
 
 	// --- 5. A month later, agentB reviews and corrects. ---
 	// First a NEGATION — identical relation shape but conviction=-1.0,
 	// attributed to agentB. Says: "agentA's claim is wrong."
 	siblingNeg := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("sibling"),
-		Content:     []byte("Re-reading the source: 'my brother' refers to a third party, not Bob. agentA's sibling claim is incorrect."),
-		Contributor: agentB,
-		CreatedAt:   s.NextTimestamp(31 * 24 * time.Hour),
+		Type:          ranke.TypeRelation("sibling"),
+		InlineContent: []byte("Re-reading the source: 'my brother' refers to a third party, not Bob. agentA's sibling claim is incorrect."),
+		Encoding:      ranke.EncodingPlain,
+		Contributor:   agentB,
+		CreatedAt:     s.NextTimestamp(31 * 24 * time.Hour),
+		Height:        ranke.HeightOf(agentB, email, alice, bob),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: email.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("sibling"), RelationDirection: ranke.RelationFrom, Fields: negate})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bob.ID(), Type: ranke.TypeRelation("sibling"), RelationDirection: ranke.RelationTo, Fields: negate})),
 		},
 	}.Sign())
-	must(g.Add(siblingNeg))
 
 	// Then the CORRECTION — Alice is employed by Bob, conviction=+1.0.
 	employedBy := must(ranke.ClaimBuilder{
-		Type:        ranke.TypeRelation("employed_by"),
-		Content:     []byte("Cross-referenced employment records: Alice works for Bob's company."),
-		Contributor: agentB,
-		CreatedAt:   s.NextTimestamp(time.Second),
+		Type:          ranke.TypeRelation("employed_by"),
+		InlineContent: []byte("Cross-referenced employment records: Alice works for Bob's company."),
+		Encoding:      ranke.EncodingPlain,
+		Contributor:   agentB,
+		CreatedAt:     s.NextTimestamp(time.Second),
+		Height:        ranke.HeightOf(agentB, email, alice, bob),
 		Edges: []ranke.Edge{
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: email.ID(), Type: ranke.TypeDerivation("source")})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: alice.ID(), Type: ranke.TypeRelation("employed_by"), RelationDirection: ranke.RelationFrom, Fields: strong})),
 			must(ranke.NewEdge(ranke.EdgeConfig{Reference: bob.ID(), Type: ranke.TypeRelation("employed_by"), RelationDirection: ranke.RelationTo, Fields: strong})),
 		},
 	}.Sign())
-	must(g.Add(employedBy))
 
-	// --- 6. AddGraph — archive auto-consolidates the open heads. ---
+	// --- 6. Merge one contribution carrying every claim; the dev Sequencer
+	// verifies, auto-consolidates the open heads, seeds, and mints the branch
+	// table, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	bth := must(file.New(filepath.Join(helpers.DataDir, "branches", "B_h")))
-	arc := must(ranke.NewArchive(ctx, u, bth))
-	must(arc.AddGraph(ctx, "main", g, operator, s.NextTimestamp(time.Second)))
+	hist := must(histfile.New(helpers.BranchTableHeadPath))
+	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	must(seq.AddClaims(ctx, []ranke.Claim{
+		agentAClaim, agentBClaim, email,
+		alice, bob, siblingA, siblingNeg, employedBy,
+	}))
 
 	// --- 7. Reload, verify every branch, dump ids, assert head. ---
 	s.ReloadAndVerify(ctx, "main", expectedMainHead)

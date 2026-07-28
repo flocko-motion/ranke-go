@@ -1,10 +1,10 @@
 # Makefile — ranke-go
 #
-# Library-only for now: `go build ./...` verifies compilation but
-# produces no binary. The bin/ directory is reserved for future
-# tools (e.g. a conformance-suite runner) and currently empty.
+# `make build` compiles the repo's binaries into bin/: the ranke CLI
+# (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
+# generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test-verbose coverage coverage-gaps vet fmt tidy lint check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -31,16 +31,26 @@ COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... .
 
 BINDIR ?= $(HOME)/.local/bin
 
+# Foundational papers live in the ranke-graph repo. `make docs` pulls a
+# fresh copy into docs/papers/ for local reference; the directory is
+# gitignored and never committed — always fetched, never vendored.
+RANKE_GRAPH_REPO ?= https://github.com/flocko-motion/ranke-graph
+RANKE_GRAPH_REF  ?= main
+PAPERS_DIR       := docs/papers
+
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
 # Default target: build, run unit tests, run every scenario, and
 # assert the scenarios are byte-deterministic + docs are in sync.
 all: build test verify-scenarios verify-docs
 
-# Build the ranke CLI into bin/ranke.
+# Build all binaries into bin/: the ranke CLI, the ranke-test harness,
+# and the scenariodoc generator.
 build:
 	@mkdir -p bin
 	go build -o bin/ranke ./cmd/ranke
+	go build -o bin/ranke-test ./cmd/test
+	go build -o bin/scenariodoc ./cmd/scenariodoc
 
 # Copy the built CLI to $(BINDIR)/ranke (default: ~/.local/bin).
 # No sudo needed; just make sure $(BINDIR) is on your PATH.
@@ -51,16 +61,61 @@ install: build
 uninstall:
 	rm -f $(BINDIR)/ranke
 
-# Run user-perspective tests in /tests. The fs integration test
-# uses a fixed directory (RANKE_FS_DIR, default /tmp/ranke-go-test)
-# that TestMain wipes and recreates each run. Path echoed at end so
-# it's visible on plain `make test` without `-v`.
+# test/core — the datatype unit layer (root package): claims, codec,
+# content, id, signing, graph, guarantees. No infrastructure, no fs, no
+# adapters. Fast; the correctness of the datatype itself lives here.
+test/core:
+	go test .
+
+# test/core/coverage — the datatype layer with statement coverage. Prints a
+# per-file breakdown (from the raw profile, statement-weighted) and the core
+# total. Drill into one file's functions with:
+#   go tool cover -func=coverage-core.out | grep node.go
+# or open the annotated source with:
+#   go tool cover -html=coverage-core.out
+test/core/coverage:
+	@go test . -covermode=atomic -coverprofile=coverage-core.out
+	@echo ""
+	@echo "coverage by file:"
+	@awk 'NR>1 { split($$1,a,":"); f=a[1]; sub(/.*\//,"",f); t[f]+=$$2; if ($$3>0) c[f]+=$$2 } \
+		END { for (f in t) printf "  %5.1f%%  %s\n", 100*c[f]/t[f], f }' coverage-core.out | sort -k2
+	@echo ""
+	@printf "core "; go tool cover -func=coverage-core.out | tail -1
+
+# test/integration — the blackbox suite in /tests: the Archive/Sequencer
+# layer driven across adapters. The fs test uses a fixed directory
+# (RANKE_FS_DIR, default /tmp/ranke-go-test) that TestMain wipes and
+# recreates each run; the path is echoed so it's visible without `-v`.
 RANKE_FS_DIR ?= /tmp/ranke-go-test
-test:
+test/integration:
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./tests/... && \
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
 	echo "  $(RANKE_FS_DIR)"
+
+# test/matrix — the cross-backend conformance matrix: build the same
+# deterministic archive into every backend that can run here and assert each
+# one answers the whole RQL corpus exactly as the mem reference does. Rows
+# needing a service that is not up skip themselves, so this is green on a bare
+# checkout and grows teeth as services come up:
+#   services/neo4j.sh native up    # adds the neo4j/mem row
+#   services/redis.sh native up    # adds the redis row
+# Verbose so the per-row, per-query sub-tests are visible.
+test/matrix:
+	go test ./tests/matrix/ -v -count=1
+
+# test/performance/N — the backend matrix: generate the same deterministic
+# size-N archive into each storage backend and time build + verify, one row
+# per backend. N is the generator size knob (SpecForSize); ~5*N claims. E.g.
+#   make test/performance/2000   # a 10k+-claim archive per backend
+# Verbose so the per-backend timing rows print; generous timeout for large N.
+test/performance/%:
+	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
+
+# test — the layers in order of foundation: the datatype, then the feature
+# suite, then cross-backend agreement (which skips the rows whose services
+# aren't up).
+test: test/core test/integration test/matrix
 
 test-verbose:
 	go test -v ./tests/...
@@ -94,6 +149,14 @@ vet:
 
 fmt:
 	gofmt -w .
+
+# Fail if any Go file is not gofmt-clean (lists the offenders). The check half
+# of `fmt`; wired into `verify`. Skips .worktrees (sibling agent checkouts).
+fmt-check:
+	@out="$$(find . -path ./.worktrees -prune -o -name '*.go' -print | xargs gofmt -l)"; \
+	if [ -n "$$out" ]; then \
+		echo "gofmt needed (run 'make fmt'):"; echo "$$out"; exit 1; \
+	fi
 
 tidy:
 	go mod tidy
@@ -177,10 +240,34 @@ conformance-bundle: verify-scenarios scenarios-docs
 	rm -rf "$$WORK"; \
 	echo "wrote dist/$$BUNDLE.tar.gz"
 
+# Pull the latest ranke-graph papers into docs/papers/ for reference.
+# Not committed — fetched fresh (see .gitignore).
+docs:
+	@echo ">> fetching ranke-graph papers into $(PAPERS_DIR)/"
+	@tmp=$$(mktemp -d) && \
+		git clone --depth 1 --branch $(RANKE_GRAPH_REF) $(RANKE_GRAPH_REPO) $$tmp >/dev/null 2>&1 && \
+		rm -rf $(PAPERS_DIR) && mkdir -p $(PAPERS_DIR) && \
+		cp -r $$tmp/[0-9]*-* $(PAPERS_DIR)/ && \
+		for d in shared spec glossary; do \
+			[ -d $$tmp/$$d ] && cp -r $$tmp/$$d $(PAPERS_DIR)/; \
+		done; \
+		cp $$tmp/LICENSE $(PAPERS_DIR)/LICENSE 2>/dev/null || true; \
+		rm -rf $$tmp; \
+		echo ">> pulled $$(find $(PAPERS_DIR) -name '*.typ' | wc -l | tr -d ' ') paper(s)"
+
+# Remove the pulled paper references.
+docs-clean:
+	rm -rf $(PAPERS_DIR)
+
 # brokkr static-analysis gate: canonical headers, exported-doc coverage,
 # deadcode (with --test), and the line-count limit.
 lint:
 	brokkr lint
+
+# Quick quality gate: build the binaries, check formatting, and run the lint
+# gate — the fast "does it compile, is it gofmt-clean, does it pass lint"
+# without vet or the full test suite (-> check).
+verify: build fmt-check lint
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance
