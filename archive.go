@@ -151,18 +151,14 @@ func validateSelect(q Query) error {
 	if sel.Branch == "" {
 		return ErrQueryNoScope
 	}
-	if len(sel.Path) > 0 {
-		// Under $universe the scope bounds nothing, so the traversal's own anchor
-		// or a Head has to.
-		if sel.Branch == BranchUniverse && sel.Claim == nil && sel.Head == nil {
-			return ErrQueryNoHead
-		}
-		return nil
-	}
-	// A scan. Head bounds it; under $universe that is the only bound.
+	// $universe is the whole set, so only Select.Head bounds a read there.
 	if sel.Branch == BranchUniverse && sel.Head == nil {
 		return ErrQueryNoHead
 	}
+	if len(sel.Path) > 0 {
+		return nil
+	}
+	// A scan.
 	if q.Output.Shape == ShapePath {
 		return ErrQueryScanShape
 	}

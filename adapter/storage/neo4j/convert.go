@@ -86,25 +86,46 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) map[string]any {
 	return np
 }
 
-// inlineText returns the content bytes as a legible string when the content is
-// inline, within cap, eligible to be text, and valid UTF-8 — so the browser
-// shows readable content (a claim's body, or an edge's reasoning/proof/detail
-// like "is the sister of"). Otherwise nil: the property is absent, and the claim
-// still reconstructs as internal (content_size marks that content exists) with
-// the bytes served from the byte layer by claim. Storing readable text (not
-// base64) is the point — the graph is meant to be inspected.
-//
-// eligible gates text-ness — ranke.IsTextEncoding(encoding) for both a node and
-// an edge (both carry an encoding): binary content is left out, never base64'd.
+// inlineText returns the content as a legible string, up to the cap
 func (u *neo4jUniverse) inlineText(eligible bool, size uint64, external bool, get func() ([]byte, error)) any {
-	if external || u.contentCap == 0 || size > uint64(u.contentCap) || !eligible {
+	if external || u.contentCap == 0 || size == 0 || !eligible {
 		return nil
 	}
 	b, err := get()
-	if err != nil || len(b) == 0 || len(b) > u.contentCap || !utf8.Valid(b) {
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	if len(b) > u.contentCap {
+		b = truncateUTF8(b, u.contentCap)
+	}
+	if len(b) == 0 || !utf8.Valid(b) {
 		return nil
 	}
 	return string(b)
+}
+
+// contentFrom returns the stored content only when it is the WHOLE content: its
+// byte length matches the claim's content_size. A shorter string is a prefix kept
+// for inspection, written under whatever cap was configured at the time, and the
+// cap may have changed since — so length, not configuration, decides.
+func contentFrom(props map[string]any, size uint64) []byte {
+	s := asString(props["content"])
+	if s == "" || uint64(len(s)) != size {
+		return nil
+	}
+	return []byte(s)
+}
+
+// truncateUTF8 cuts b to at most n bytes on a rune boundary, so the stored prefix
+// stays valid text.
+func truncateUTF8(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
+	}
+	for n > 0 && !utf8.Valid(b[:n]) {
+		n--
+	}
+	return b[:n]
 }
 
 // partsFromNode reconstructs ClaimParts from a claim node's properties, its
@@ -134,15 +155,15 @@ func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []a
 	// `content` property (or, when the cache didn't hold the bytes, just a
 	// content_size) means internal. No flag — AssembleClaim derives external from
 	// content_hash presence.
-	switch {
+	switch size := uint64(asInt(props["content_size"])); {
 	case ch != nil: // external — the byte layer serves the blob by hash
 		p.ContentHash = ch
-		p.ContentSize = uint64(asInt(props["content_size"]))
-	case asString(props["content"]) != "": // inline text the cache holds
-		p.InlineContent = []byte(asString(props["content"]))
-		p.ContentSize = uint64(asInt(props["content_size"]))
-	case asInt(props["content_size"]) > 0: // inline, but not held here (binary/over-cap)
-		p.ContentSize = uint64(asInt(props["content_size"]))
+		p.ContentSize = size
+	case contentFrom(props, size) != nil: // inline text the cache holds in full
+		p.InlineContent = contentFrom(props, size)
+		p.ContentSize = size
+	case size > 0: // inline, but not whole here — the byte layer serves it
+		p.ContentSize = size
 	}
 	p.Fields = fieldsFrom(props, nodeStructural)
 	p.Tags = tagsFrom(props)

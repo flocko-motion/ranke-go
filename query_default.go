@@ -15,9 +15,8 @@ import (
 	"time"
 )
 
-// scopeOrigin is where this walker enumerates a scope from: Select.Head, else the
-// scope's own anchor. An index-free walker's own business, not a Select default.
-func scopeOrigin(sel Select, scope Scope) (Id, error) {
+// closureOrigin heads the closure a read sees: Select.Head, else the scope's own.
+func closureOrigin(sel Select, scope Scope) (Id, error) {
 	if sel.Head != nil {
 		return sel.Head, nil
 	}
@@ -44,23 +43,20 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		defer cancel()
 	}
 
+	origin, err := closureOrigin(q.Select, scope)
+	if err != nil {
+		return nil, err
+	}
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
-	switch {
-	case len(sel.Path) == 0:
-		// A scan: the scope's claim set, reached by closing over an anchor. The
-		// anchor belongs to that set, so the sweep starts at zero hops.
-		origin, err := scopeOrigin(sel, scope)
-		if err != nil {
-			return nil, err
-		}
+	if len(sel.Path) == 0 {
+		// A scan: the scope's claim set, one unbounded step from the origin inward,
+		// the origin itself included.
 		sel.Claim = origin
 		sel.Path = []PathStep{{Min: Hops(0)}}
 		needPaths = false
-	case sel.Claim == nil:
-		return nil, ErrQueryUnanchored
 	}
-	reached, routes, err := queryTraverse(ctx, u, sel, scope.Head, needPaths, rc)
+	reached, routes, err := queryTraverse(ctx, u, sel, origin, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}
@@ -95,14 +91,18 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	}
 
 	needPaths := q.Output.Shape == ShapePath
+	idsOnly := q.Output.Detail == DetailID
 	results := make([]QueryResult, 0, len(filtered))
 	for _, c := range filtered {
-		r := QueryResult{Id: c.ID(), Claim: c}
+		r := QueryResult{Id: c.ID()}
+		if !idsOnly { // DetailID asks for identity alone
+			r.Claim = c
+		}
 		if needPaths {
 			r.Path = routes[c.ID().String()]
 		}
 		if q.Output.Content != nil {
-			r.Content = queryContent(ctx, u, c, q.Output)
+			r.Content = ShapeContent(ctx, u, c, q.Output)
 		}
 		results = append(results, r)
 	}
@@ -162,11 +162,12 @@ func queryFieldValue(c Claim, field string) (any, bool) {
 	case "type":
 		return n.Type(), true
 	case "encoding":
-		return n.Encoding(), true
+		return n.Encoding(), n.ContentKind() != ContentNone
 	case "created_at":
 		return n.CreatedAt(), true
 	case "content_size":
-		return n.GetContentSize(), true
+		// content_size and encoding are emitted only with content (§Content).
+		return n.GetContentSize(), n.ContentKind() != ContentNone
 	case "height":
 		return n.Height(), true
 	default:
@@ -378,10 +379,10 @@ func compareValues(a, b any, col Collation) int {
 	}
 }
 
-// queryContent loads up to Output.Content bytes of a claim's content, applying
+// ShapeContent loads up to Output.Content bytes of a claim's content, applying
 // the overflow policy when the content is larger. Reads through u so external
 // content is fetched transparently; a read error yields no content.
-func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
+func ShapeContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	n := c.Node()
 	inline, _ := n.GetInlineContent() // nil for external or no content
 	if inline == nil && n.GetContentHash() == nil {

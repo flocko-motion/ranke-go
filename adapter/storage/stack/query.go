@@ -13,18 +13,16 @@ import (
 var errNoOriginals = ranke.WithDetail(ranke.ErrUnsupported,
 	"adapter/stack: original form — no layer keeps canonical claims")
 
-// Query runs the read on the top layer — which layer answers is a routing
-// decision, and the selection is the expensive part. The form asked for is a
-// separate question: original form is the stored, id-defining claim, which only a
-// RawClaims layer keeps. When the engine has it, the engine answers alone; when it
-// does not, the engine still decides WHICH claims (the costly half) and the claims
-// themselves are re-read from a layer that holds the originals.
+// Query runs the read on the engine layer, then re-reads the claims from a layer
+// that holds the form asked for.
 func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	engine := s.layers[0]
-	if q.Output.Form != ranke.FormOriginal || engine.caps.RawClaims {
+	wantOriginals := q.Output.Form == ranke.FormOriginal && !engine.caps.RawClaims
+	wantContent := q.Output.Content != nil
+	if !wantOriginals && !wantContent {
 		return engine.u.Query(ctx, q, scope)
 	}
-	if !s.holdsRawClaims() {
+	if wantOriginals && !s.holdsRawClaims() {
 		return nil, errNoOriginals
 	}
 	rs, err := engine.u.Query(ctx, q, scope)
@@ -35,14 +33,58 @@ func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ra
 	if err != nil {
 		return nil, err
 	}
-	if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
-		ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "original form from a RawClaims layer",
-			map[string]any{"results": len(results)})
+	if wantOriginals {
+		if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
+			ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "original form from a RawClaims layer",
+				map[string]any{"results": len(results)})
+		}
+		if err := s.hydrateOriginals(ctx, results); err != nil {
+			return nil, err
+		}
 	}
-	if err := s.hydrateOriginals(ctx, results); err != nil {
-		return nil, err
+	if wantContent {
+		if err := s.hydrateContent(ctx, q, results); err != nil {
+			return nil, err
+		}
 	}
 	return &hydratedStream{results: results, report: report}, nil
+}
+
+// hydrateContent reads missing content from a layer holding it, offering each
+// fetched claim to the content-holding layers.
+func (s *stack) hydrateContent(ctx context.Context, q ranke.Query, results []ranke.QueryResult) error {
+	var missing []ranke.Id
+	var at []int
+	for i, r := range results {
+		if r.Content == nil && r.Id != nil {
+			missing = append(missing, r.Id)
+			at = append(at, i)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
+		ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "content from a holding layer",
+			map[string]any{"results": len(missing)})
+	}
+	// GetClaims descends to a layer holding the bytes.
+	got, err := s.GetClaims(ctx, missing)
+	if err != nil {
+		return err
+	}
+	for j, c := range got {
+		if c == nil {
+			continue
+		}
+		results[at[j]].Content = ranke.ShapeContent(ctx, s, c, q.Output)
+		for li := range s.layers {
+			if s.layers[li].caps.ContentCap > 0 || s.layers[li].caps.ExternalContent {
+				s.heal.offer(ctx, li, c)
+			}
+		}
+	}
+	return nil
 }
 
 // holdsRawClaims reports whether any layer keeps the canonical claim bytes.

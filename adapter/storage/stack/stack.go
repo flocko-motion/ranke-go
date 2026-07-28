@@ -35,6 +35,7 @@ func (l layer) synchronous() bool {
 
 type stack struct {
 	layers []layer
+	heal   *filler // opportunistic cache writes, off the read path
 }
 
 // couldHoldContent reports whether a layer with caps could hold a content blob
@@ -74,7 +75,9 @@ func NewStack(us ...ranke.Universe) (ranke.Universe, error) {
 	if auth == 0 {
 		return nil, errNoAuthoritative
 	}
-	return &stack{layers: layers}, nil
+	s := &stack{layers: layers}
+	s.heal = newFiller(s.writeBatch)
+	return s, nil
 }
 
 // PutClaims routes by tier: authoritative+eager in parallel (only an
@@ -537,6 +540,7 @@ func (s *stack) Sync(ctx context.Context, _ ranke.Universe, id ranke.Id) <-chan 
 
 // Close closes every layer (best-effort: all are attempted, errors joined).
 func (s *stack) Close() error {
+	s.heal.close() // drains the filler while its target layers are still open
 	var errs []error
 	for _, l := range s.layers {
 		if err := l.u.Close(); err != nil {
