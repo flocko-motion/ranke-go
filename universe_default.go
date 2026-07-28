@@ -32,6 +32,11 @@ func newGetConfig(opts ...GetOption) getConfig {
 	return c
 }
 
+// WantsDelta reports whether opts ask for stored delta form. A backend checks it
+// to fail a read its Capabilities cannot honour — a layer keeping no delta must
+// miss rather than answer with materialised data.
+func WantsDelta(opts ...GetOption) bool { return newGetConfig(opts...).rawDelta }
+
 // DefaultMaterialize is the fallback a Universe applies to its freshly
 // loaded (raw) claims: it resolves each claim's contribution/diff overlay
 // in place and returns the same slice. A byte-store backend calls it from

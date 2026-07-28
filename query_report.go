@@ -187,3 +187,17 @@ func ReportEnabled(ctx context.Context, level ReportLevel) bool {
 func ReportEvent(ctx context.Context, engine, op string, level ReportLevel, detail string, attrs map[string]any) {
 	reportFrom(ctx).log(engine, op, level, detail, attrs)
 }
+
+// WithReport returns a ctx collecting events at or above level, plus a snapshot
+// func. It makes the log readable for calls no ResultStream covers — which layer
+// of a stack served a GetClaims, what a copy walk visited. An outer collector, if
+// ctx already has one, is reused and its events included.
+func WithReport(ctx context.Context, level ReportLevel) (context.Context, func() []QueryEvent) {
+	ctx, rc, _ := beginReport(ctx, level, time.Now())
+	return ctx, func() []QueryEvent {
+		if rep := rc.finalize(0, false); rep != nil {
+			return rep.Events
+		}
+		return nil
+	}
+}
