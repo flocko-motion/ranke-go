@@ -1,4 +1,4 @@
-// package: generator / testkit
+// package: tests/generator / testkit
 // type:    tool
 // job:     the toy specs — each the SMALLEST archive exhibiting one corner, so a test asserting on that corner has nothing else in the graph to explain
 // limits:  specs only, built by the same builder as the sized graphs (-> generate.go); for breadth at scale use SpecForSize instead

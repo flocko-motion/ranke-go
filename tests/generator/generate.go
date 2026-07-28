@@ -1,4 +1,4 @@
-// package: generator / testkit
+// package: tests/generator / testkit
 // type:    tool
 // job:     Generate — build a deterministic kitchen-sink Ranke-Archive from a Spec, driving the dev Sequencer's write path; return a Manifest naming every corner
 // limits:  builds via the public ranke API + the dev testkit adapters; the caller supplies the Universe (-> adapter); asserts nothing (-> tests).

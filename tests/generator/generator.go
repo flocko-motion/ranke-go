@@ -1,4 +1,4 @@
-// package: generator / testkit
+// package: tests/generator / testkit
 // type:    tool
 // job:     deterministic "kitchen-sink" Ranke-Graph generator for integration + conformance testing — one size knob, every corner baked in
 // limits:  builds via the public ranke API; the caller supplies the Universe to store into (-> adapter); does not assert (-> tests)

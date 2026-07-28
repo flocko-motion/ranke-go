@@ -1,4 +1,4 @@
-// package: generator / testkit
+// package: tests/generator / testkit
 // type:    tool
 // job:     Spec — the full knob set the generator builds from, plus SpecForSize which derives every knob from a single `size`
 // limits:  pure configuration + derivation, no building (-> generate.go); knobs the ranke API cannot yet express are marked BLOCKED and ignored by the builder
