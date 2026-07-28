@@ -248,7 +248,9 @@ docs:
 		git clone --depth 1 --branch $(RANKE_GRAPH_REF) $(RANKE_GRAPH_REPO) $$tmp >/dev/null 2>&1 && \
 		rm -rf $(PAPERS_DIR) && mkdir -p $(PAPERS_DIR) && \
 		cp -r $$tmp/[0-9]*-* $(PAPERS_DIR)/ && \
-		{ [ -d $$tmp/shared ] && cp -r $$tmp/shared $(PAPERS_DIR)/ || true; } && \
+		for d in shared spec glossary; do \
+			[ -d $$tmp/$$d ] && cp -r $$tmp/$$d $(PAPERS_DIR)/; \
+		done; \
 		cp $$tmp/LICENSE $(PAPERS_DIR)/LICENSE 2>/dev/null || true; \
 		rm -rf $$tmp; \
 		echo ">> pulled $$(find $(PAPERS_DIR) -name '*.typ' | wc -l | tr -d ' ') paper(s)"
