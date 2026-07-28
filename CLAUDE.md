@@ -65,6 +65,15 @@ Agents tend to forget details from the papers. The papers specify all details, s
   runs packages in parallel — so they wipe each other. Run `go test -p 1` for
   anything involving neo4j until that is fixed.
 
+# Generator
+
+- `tests/generator` generates every variation the ADT allows, including the
+  awkward ones: cross-branch references, diff chains, external content,
+  oversized fields, multiple contributors. A corner it omits is a corner
+  nothing tests, so breadth is the point — not realism.
+- `Toy*` specs are the opposite: the smallest archive exhibiting ONE corner, so
+  a test asserting on it has nothing else in the graph to explain.
+
 # Architecture
 
 - `DefaultX` implementations are the slow, simple reference for a Universe port.
