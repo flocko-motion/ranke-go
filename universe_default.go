@@ -201,7 +201,7 @@ func (c *HeightCache) GetClaimHeights(ctx context.Context, u Universe, ids []Id)
 // DiscoveryComplete stays false until the walk drains, then flips true.
 func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ...CopyOption) error {
 	if dst == nil || src == nil {
-		return withDetail(errCopyClaims, "nil Universe")
+		return WithDetail(errCopyClaims, "nil Universe")
 	}
 	cfg := NewCopyConfig(opts...)
 
@@ -216,7 +216,7 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 	queue := make([]Id, 0, len(ids))
 	for _, id := range ids {
 		if id == nil {
-			return withDetail(errCopyClaims, "nil id")
+			return WithDetail(errCopyClaims, "nil id")
 		}
 		queue = append(queue, id)
 	}
@@ -239,7 +239,7 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 		// idempotent and lets re-runs short-circuit.
 		has, err := HasClaim(ctx, dst, cur)
 		if err != nil {
-			return wrapDetail(errCopyClaims, "dst.HasClaim "+k, err)
+			return WrapDetail(errCopyClaims, "dst.HasClaim "+k, err)
 		}
 		if has {
 			continue
@@ -247,10 +247,10 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 
 		c, err := GetClaim(ctx, src, cur)
 		if err != nil {
-			return wrapDetail(errCopyClaims, "src.GetClaim "+k, err)
+			return WrapDetail(errCopyClaims, "src.GetClaim "+k, err)
 		}
 		if err := PutClaim(ctx, dst, c); err != nil {
-			return wrapDetail(errCopyClaims, "dst.PutClaim "+k, err)
+			return WrapDetail(errCopyClaims, "dst.PutClaim "+k, err)
 		}
 		prog.ClaimsCopied++
 
@@ -262,10 +262,10 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 			ch := c.Node().GetContentHash()
 			bs, err := src.GetContents(ctx, []ContentRef{{Hash: ch, ContentSize: c.Node().GetContentSize()}})
 			if err != nil {
-				return wrapDetail(errCopyClaims, "src.GetContents "+ch.String(), err)
+				return WrapDetail(errCopyClaims, "src.GetContents "+ch.String(), err)
 			}
 			if err := PutContent(ctx, dst, ch, bs[0]); err != nil {
-				return wrapDetail(errCopyClaims, "dst.PutContent "+ch.String(), err)
+				return WrapDetail(errCopyClaims, "dst.PutContent "+ch.String(), err)
 			}
 			prog.BytesCopied += uint64(len(bs[0]))
 		}
@@ -293,7 +293,7 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 // are ignored; WithProgress is honoured.
 func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentRef, opts ...CopyOption) error {
 	if dst == nil || src == nil {
-		return withDetail(errCopyContents, "nil Universe")
+		return WithDetail(errCopyContents, "nil Universe")
 	}
 	cfg := NewCopyConfig(opts...)
 
@@ -303,19 +303,19 @@ func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentR
 			return err
 		}
 		if ref.Hash == nil {
-			return withDetail(errCopyContents, "nil hash")
+			return WithDetail(errCopyContents, "nil hash")
 		}
 		has, err := HasContent(ctx, dst, ref.Hash)
 		if err != nil {
-			return wrapDetail(errCopyContents, "dst.HasContent "+ref.Hash.String(), err)
+			return WrapDetail(errCopyContents, "dst.HasContent "+ref.Hash.String(), err)
 		}
 		if !has {
 			bs, err := src.GetContents(ctx, []ContentRef{{Hash: ref.Hash, ContentSize: ref.ContentSize}})
 			if err != nil {
-				return wrapDetail(errCopyContents, "src.GetContents "+ref.Hash.String(), err)
+				return WrapDetail(errCopyContents, "src.GetContents "+ref.Hash.String(), err)
 			}
 			if err := PutContent(ctx, dst, ref.Hash, bs[0]); err != nil {
-				return wrapDetail(errCopyContents, "dst.PutContent "+ref.Hash.String(), err)
+				return WrapDetail(errCopyContents, "dst.PutContent "+ref.Hash.String(), err)
 			}
 			prog.BytesCopied += uint64(len(bs[0]))
 		}

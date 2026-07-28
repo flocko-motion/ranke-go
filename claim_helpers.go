@@ -22,7 +22,7 @@ func splitType(s string) (class, sub string, err error) {
 		}
 	}
 	if slash <= 0 || slash == len(s)-1 {
-		return "", "", withDetail(errExpectedClassSub, s)
+		return "", "", WithDetail(errExpectedClassSub, s)
 	}
 	return s[:slash], s[slash+1:], nil
 }
@@ -64,7 +64,7 @@ func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 		}
 		encoded, err := EncodePublicKey(cfg.SigningKey.Public())
 		if err != nil {
-			return wrap(errEncodeSigningKey, err)
+			return Wrap(errEncodeSigningKey, err)
 		}
 		h, err := HashContent(encoded)
 		if err != nil {
@@ -100,7 +100,7 @@ func checkKeyAgainstPubkey(hasSigner bool, key crypto.Signer, pubkey []byte) err
 	}
 	encoded, err := EncodePublicKey(key.Public())
 	if err != nil {
-		return wrap(errEncodeSigningKey, err)
+		return Wrap(errEncodeSigningKey, err)
 	}
 	if !bytes.Equal(encoded, pubkey) {
 		return errResolvedMismatch

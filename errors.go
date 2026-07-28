@@ -167,17 +167,17 @@ func (e *wrapErr) Unwrap() []error {
 	return []error{e.sentinel, e.cause}
 }
 
-// withDetail returns sentinel with detail appended lazily.
-func withDetail(sentinel error, detail string) error {
+// WithDetail returns sentinel with detail appended lazily.
+func WithDetail(sentinel error, detail string) error {
 	return &wrapErr{sentinel: sentinel, detail: detail}
 }
 
-// wrap returns sentinel wrapping cause; both are matchable via errors.Is.
-func wrap(sentinel, cause error) error {
+// Wrap returns sentinel wrapping cause; both are matchable via errors.Is.
+func Wrap(sentinel, cause error) error {
 	return &wrapErr{sentinel: sentinel, cause: cause}
 }
 
-// wrapDetail returns sentinel with detail and a wrapped cause.
-func wrapDetail(sentinel error, detail string, cause error) error {
+// WrapDetail returns sentinel with detail and a wrapped cause.
+func WrapDetail(sentinel error, detail string, cause error) error {
 	return &wrapErr{sentinel: sentinel, detail: detail, cause: cause}
 }

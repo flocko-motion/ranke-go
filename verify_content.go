@@ -28,17 +28,17 @@ func VerifyContent(hash Id, size uint64, data []byte) error {
 	}
 	decoded, err := multihash.Decode(idBytes(hash))
 	if err != nil {
-		return wrapDetail(errVerifyContentOp, "expected hash not a multihash", err)
+		return WrapDetail(errVerifyContentOp, "expected hash not a multihash", err)
 	}
 	if decoded.Code != multihash.SHA2_256 {
-		return withDetail(errVerifyContentOp, "unsupported hash algorithm "+decoded.Name+" (only sha2-256)")
+		return WithDetail(errVerifyContentOp, "unsupported hash algorithm "+decoded.Name+" (only sha2-256)")
 	}
 	if uint64(len(data)) != size {
-		return withDetail(ErrIntegrity, "content "+hash.String()+" size mismatch — got "+strconv.Itoa(len(data))+" bytes, expected "+strconv.FormatUint(size, 10))
+		return WithDetail(ErrIntegrity, "content "+hash.String()+" size mismatch — got "+strconv.Itoa(len(data))+" bytes, expected "+strconv.FormatUint(size, 10))
 	}
 	digest := sha256.Sum256(data)
 	if !bytes.Equal(digest[:], decoded.Digest) {
-		return withDetail(ErrIntegrity, "content "+hash.String()+" hash mismatch — bytes have been modified")
+		return WithDetail(ErrIntegrity, "content "+hash.String()+" hash mismatch — bytes have been modified")
 	}
 	return nil
 }
@@ -54,10 +54,10 @@ func NewVerifyingReader(src io.ReadCloser, hash Id, size uint64) (io.ReadCloser,
 	}
 	decoded, err := multihash.Decode(idBytes(hash))
 	if err != nil {
-		return nil, wrapDetail(errVerifyingReader, "expected hash not a multihash", err)
+		return nil, WrapDetail(errVerifyingReader, "expected hash not a multihash", err)
 	}
 	if decoded.Code != multihash.SHA2_256 {
-		return nil, withDetail(errVerifyingReader, "unsupported hash algorithm "+decoded.Name+" (only sha2-256)")
+		return nil, WithDetail(errVerifyingReader, "unsupported hash algorithm "+decoded.Name+" (only sha2-256)")
 	}
 	return &verifyingReader{
 		src:            src,
@@ -109,19 +109,19 @@ func (vr *verifyingReader) Read(p []byte) (int, error) {
 		m, probeErr := vr.src.Read(probe[:])
 		vr.done = true
 		if m > 0 {
-			return 0, withDetail(errContent, vr.id+": file longer than expected "+strconv.FormatUint(vr.expectedSize, 10)+" bytes")
+			return 0, WithDetail(errContent, vr.id+": file longer than expected "+strconv.FormatUint(vr.expectedSize, 10)+" bytes")
 		}
 		if probeErr != nil && probeErr != io.EOF {
 			return 0, probeErr
 		}
 		if !bytes.Equal(vr.hasher.Sum(nil), vr.expectedDigest) {
-			return 0, withDetail(errContent, vr.id+": hash mismatch — bytes have been modified")
+			return 0, WithDetail(errContent, vr.id+": hash mismatch — bytes have been modified")
 		}
 		return n, io.EOF
 	}
 	if err == io.EOF {
 		vr.done = true
-		return n, withDetail(errContent, vr.id+": truncated — got "+strconv.FormatUint(vr.read, 10)+" bytes, expected "+strconv.FormatUint(vr.expectedSize, 10))
+		return n, WithDetail(errContent, vr.id+": truncated — got "+strconv.FormatUint(vr.read, 10)+" bytes, expected "+strconv.FormatUint(vr.expectedSize, 10))
 	}
 	return n, err
 }

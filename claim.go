@@ -190,18 +190,18 @@ func (c *claim) IsContributor() bool {
 
 func (c *claim) AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error) {
 	if !c.IsContributor() {
-		return nil, withDetail(errNotContributorClaim, c.node.Type())
+		return nil, WithDetail(errNotContributorClaim, c.node.Type())
 	}
 	// Resolve the pubkey once, transparently — inline is served from the
 	// node, external is streamed from u (§5.7). Cached on the wrapper so
 	// signing later needs no Universe.
 	rdr, err := c.node.GetContent(ctx, u)
 	if err != nil {
-		return nil, wrap(errResolveContributorPubkey, err)
+		return nil, Wrap(errResolveContributorPubkey, err)
 	}
 	pubkey, err := io.ReadAll(rdr)
 	if err != nil {
-		return nil, wrap(errResolveContributorPubkey, err)
+		return nil, Wrap(errResolveContributorPubkey, err)
 	}
 	var key crypto.Signer
 	if len(signingKey) > 0 {
@@ -213,7 +213,7 @@ func (c *claim) AsContributor(ctx context.Context, u Universe, signingKey ...cry
 		}
 		keyPubkey, err := EncodePublicKey(key.Public())
 		if err != nil {
-			return nil, wrap(errEncodeSigningKey, err)
+			return nil, Wrap(errEncodeSigningKey, err)
 		}
 		if !bytes.Equal(keyPubkey, pubkey) {
 			return nil, errSigningKeyMismatch

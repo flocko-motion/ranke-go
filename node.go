@@ -211,7 +211,7 @@ func (n *node) HasField(name string) bool {
 func (n *node) GetField(name string) (string, error) {
 	v, ok := n.fieldMap()[name]
 	if !ok {
-		return "", withDetail(errFieldNotSet, name)
+		return "", WithDetail(errFieldNotSet, name)
 	}
 	return v, nil
 }

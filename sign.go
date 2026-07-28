@@ -44,7 +44,7 @@ func EncodePublicKey(pub crypto.PublicKey) ([]byte, error) {
 	case ed25519.PublicKey:
 		return prependCode(multicodec.Ed25519Pub, k), nil
 	default:
-		return nil, withDetail(errEncodePubkey, reflect.TypeOf(pub).String())
+		return nil, WithDetail(errEncodePubkey, reflect.TypeOf(pub).String())
 	}
 }
 
@@ -53,16 +53,16 @@ func EncodePublicKey(pub crypto.PublicKey) ([]byte, error) {
 func DecodePublicKey(b []byte) (multicodec.Code, crypto.PublicKey, error) {
 	code, rest, err := readCode(b)
 	if err != nil {
-		return 0, nil, wrap(errDecodePubkey, err)
+		return 0, nil, Wrap(errDecodePubkey, err)
 	}
 	switch code {
 	case multicodec.Ed25519Pub:
 		if len(rest) != ed25519.PublicKeySize {
-			return code, nil, withDetail(errDecodePubkey, "ed25519 pubkey has "+strconv.Itoa(len(rest))+" bytes, want "+strconv.Itoa(ed25519.PublicKeySize))
+			return code, nil, WithDetail(errDecodePubkey, "ed25519 pubkey has "+strconv.Itoa(len(rest))+" bytes, want "+strconv.Itoa(ed25519.PublicKeySize))
 		}
 		return code, ed25519.PublicKey(rest), nil
 	default:
-		return code, nil, withDetail(errDecodePubkey, "unsupported multicodec "+code.String()+" (0x"+strconv.FormatUint(uint64(code), 16)+")")
+		return code, nil, WithDetail(errDecodePubkey, "unsupported multicodec "+code.String()+" (0x"+strconv.FormatUint(uint64(code), 16)+")")
 	}
 }
 
@@ -80,11 +80,11 @@ func signHash(signingKey crypto.Signer, hash []byte) ([]byte, error) {
 		// ignored because Ed25519 is deterministic.
 		sig, err := signingKey.Sign(rand.Reader, hash, crypto.Hash(0))
 		if err != nil {
-			return nil, wrapDetail(errSignHash, "ed25519 sign", err)
+			return nil, WrapDetail(errSignHash, "ed25519 sign", err)
 		}
 		return prependCode(multicodec.Ed25519Pub, sig), nil
 	default:
-		return nil, withDetail(errSignHash, "unsupported signer public key type "+reflect.TypeOf(pub).String())
+		return nil, WithDetail(errSignHash, "unsupported signer public key type "+reflect.TypeOf(pub).String())
 	}
 }
 
@@ -101,30 +101,30 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 	}
 	pubCode, pub, err := DecodePublicKey(pubkey)
 	if err != nil {
-		return wrapDetail(errVerifySig, "decode pubkey", err)
+		return WrapDetail(errVerifySig, "decode pubkey", err)
 	}
 	sigCode, sig, err := splitCode(idPayload)
 	if err != nil {
-		return wrapDetail(errVerifySig, "decode signature", err)
+		return WrapDetail(errVerifySig, "decode signature", err)
 	}
 	if pubCode != sigCode {
-		return withDetail(errVerifySig, "scheme mismatch (pubkey="+pubCode.String()+", sig="+sigCode.String()+")")
+		return WithDetail(errVerifySig, "scheme mismatch (pubkey="+pubCode.String()+", sig="+sigCode.String()+")")
 	}
 	switch pubCode {
 	case multicodec.Ed25519Pub:
 		edPub, ok := pub.(ed25519.PublicKey)
 		if !ok {
-			return withDetail(errVerifySig, "ed25519 pubkey type "+reflect.TypeOf(pub).String())
+			return WithDetail(errVerifySig, "ed25519 pubkey type "+reflect.TypeOf(pub).String())
 		}
 		if len(sig) != ed25519.SignatureSize {
-			return withDetail(errVerifySig, "ed25519 sig has "+strconv.Itoa(len(sig))+" bytes, want "+strconv.Itoa(ed25519.SignatureSize))
+			return WithDetail(errVerifySig, "ed25519 sig has "+strconv.Itoa(len(sig))+" bytes, want "+strconv.Itoa(ed25519.SignatureSize))
 		}
 		if !ed25519.Verify(edPub, hash, sig) {
 			return errEd25519Verify
 		}
 		return nil
 	default:
-		return withDetail(errVerifySig, "unsupported scheme "+pubCode.String())
+		return WithDetail(errVerifySig, "unsupported scheme "+pubCode.String())
 	}
 }
 
@@ -147,7 +147,7 @@ func LoadPrivateKey(path string) (Keypair, error) {
 	}
 	pubkey, err := EncodePublicKey(priv.Public())
 	if err != nil {
-		return Keypair{}, wrapDetail(errLoadKeypair, "encode pubkey", err)
+		return Keypair{}, WrapDetail(errLoadKeypair, "encode pubkey", err)
 	}
 	return Keypair{Private: priv, Pubkey: pubkey}, nil
 }
@@ -158,19 +158,19 @@ func LoadPrivateKey(path string) (Keypair, error) {
 func LoadEd25519PrivateKeyPEM(path string) (ed25519.PrivateKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, wrapDetail(errLoadPrivKey, "read "+path, err)
+		return nil, WrapDetail(errLoadPrivKey, "read "+path, err)
 	}
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, withDetail(errLoadPrivKey, path+": no PEM block found")
+		return nil, WithDetail(errLoadPrivKey, path+": no PEM block found")
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, wrapDetail(errLoadPrivKey, path+": parse PKCS#8", err)
+		return nil, WrapDetail(errLoadPrivKey, path+": parse PKCS#8", err)
 	}
 	ed, ok := key.(ed25519.PrivateKey)
 	if !ok {
-		return nil, withDetail(errLoadPrivKey, path+": not an Ed25519 key (got "+reflect.TypeOf(key).String()+")")
+		return nil, WithDetail(errLoadPrivKey, path+": not an Ed25519 key (got "+reflect.TypeOf(key).String()+")")
 	}
 	return ed, nil
 }
@@ -181,19 +181,19 @@ func LoadEd25519PrivateKeyPEM(path string) (ed25519.PrivateKey, error) {
 func LoadEd25519PublicKeyPEM(path string) (ed25519.PublicKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, wrapDetail(errLoadPubKey, "read "+path, err)
+		return nil, WrapDetail(errLoadPubKey, "read "+path, err)
 	}
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, withDetail(errLoadPubKey, path+": no PEM block found")
+		return nil, WithDetail(errLoadPubKey, path+": no PEM block found")
 	}
 	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return nil, wrapDetail(errLoadPubKey, path+": parse SPKI", err)
+		return nil, WrapDetail(errLoadPubKey, path+": parse SPKI", err)
 	}
 	ed, ok := key.(ed25519.PublicKey)
 	if !ok {
-		return nil, withDetail(errLoadPubKey, path+": not an Ed25519 key (got "+reflect.TypeOf(key).String()+")")
+		return nil, WithDetail(errLoadPubKey, path+": not an Ed25519 key (got "+reflect.TypeOf(key).String()+")")
 	}
 	return ed, nil
 }

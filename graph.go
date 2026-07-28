@@ -82,7 +82,7 @@ func (g *graph) AddClaims(ctx context.Context, claims ...Claim) error {
 			return errNilClaim
 		}
 		if err := PutClaim(ctx, g.u, cl); err != nil {
-			return wrapDetail(errGraphAddClaim, cl.ID().String(), err)
+			return WrapDetail(errGraphAddClaim, cl.ID().String(), err)
 		}
 		g.heads[cl.ID().String()] = cl.ID()
 		for _, e := range cl.Edges() {
@@ -138,12 +138,12 @@ func (g *graph) Consolidate(ctx context.Context, contributor Contributor, create
 	for _, h := range heads {
 		e, err := NewEdge(EdgeConfig{Reference: h, Type: EdgeTypeHead})
 		if err != nil {
-			return nil, wrapDetail(errConsolidate, "build head edge", err)
+			return nil, WrapDetail(errConsolidate, "build head edge", err)
 		}
 		edges = append(edges, e)
 		hc, err := GetClaim(ctx, g.u, h)
 		if err != nil {
-			return nil, wrapDetail(errConsolidate, "load head for height", err)
+			return nil, WrapDetail(errConsolidate, "load head for height", err)
 		}
 		refs = append(refs, hc)
 	}
@@ -158,7 +158,7 @@ func (g *graph) Consolidate(ctx context.Context, contributor Contributor, create
 		return nil, err
 	}
 	if err := g.AddClaims(ctx, head); err != nil {
-		return nil, wrapDetail(errConsolidate, "add head", err)
+		return nil, WrapDetail(errConsolidate, "add head", err)
 	}
 	return head, nil
 }

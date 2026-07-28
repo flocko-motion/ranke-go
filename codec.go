@@ -248,7 +248,7 @@ func (c *claim) Encode() ([]byte, error) {
 	// so the storage shape is just the node record.
 	data, err := encodingMode.Marshal(encClaimFile{Node: en})
 	if err != nil {
-		return nil, wrapDetail(errEncodeClaim, c.node.id.String(), err)
+		return nil, WrapDetail(errEncodeClaim, c.node.id.String(), err)
 	}
 	return data, nil
 }
@@ -261,11 +261,11 @@ func (c *claim) Encode() ([]byte, error) {
 func DecodeClaim(id Id, b []byte) (Claim, error) {
 	var ec encClaimFile
 	if err := cbor.Unmarshal(b, &ec); err != nil {
-		return nil, wrap(errDecodeClaim, err)
+		return nil, Wrap(errDecodeClaim, err)
 	}
 	n, err := decodeNode(ec.Node)
 	if err != nil {
-		return nil, wrapDetail(errDecodeClaim, "node", err)
+		return nil, WrapDetail(errDecodeClaim, "node", err)
 	}
 	n.id = id
 	// Node inline content (if any) is set by decodeNode from the node record.
@@ -278,15 +278,15 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 	for i, raw := range ec.Node.Edges {
 		eid, err := hashContent(raw)
 		if err != nil {
-			return nil, wrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i)+" id", err)
+			return nil, WrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i)+" id", err)
 		}
 		var ee encEdge
 		if err := cbor.Unmarshal(raw, &ee); err != nil {
-			return nil, wrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
+			return nil, WrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
 		}
 		e, err := decodeEdge(ee)
 		if err != nil {
-			return nil, wrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
+			return nil, WrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i), err)
 		}
 		e.id = eid
 		edges[i] = e
@@ -304,10 +304,10 @@ func nodePreimage(raw []byte) ([]byte, error) {
 		Node cbor.RawMessage `cbor:"1,keyasint"`
 	}
 	if err := cbor.Unmarshal(raw, &rf); err != nil {
-		return nil, wrap(errDecodeClaim, err)
+		return nil, Wrap(errDecodeClaim, err)
 	}
 	if len(rf.Node) == 0 {
-		return nil, wrap(errDecodeClaim, errNodePreimage)
+		return nil, Wrap(errDecodeClaim, errNodePreimage)
 	}
 	return rf.Node, nil
 }

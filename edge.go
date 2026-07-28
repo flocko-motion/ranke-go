@@ -118,7 +118,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
 		if err != nil {
-			return nil, wrapDetail(errNewEdge, "Type", err)
+			return nil, WrapDetail(errNewEdge, "Type", err)
 		}
 		cfg.TypeClass = EdgeClass(class)
 		cfg.TypeSub = sub
@@ -127,7 +127,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		return nil, errEdgeTypeRequired
 	}
 	if !validEdgeClass(cfg.TypeClass) {
-		return nil, withDetail(errUnknownEdgeClass, string(cfg.TypeClass))
+		return nil, WithDetail(errUnknownEdgeClass, string(cfg.TypeClass))
 	}
 	if err := checkSubtype(cfg.TypeSub); err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		}
 	} else {
 		if cfg.RelationDirection != 0 {
-			return nil, withDetail(errRelationDirNonRel, string(cfg.TypeClass)+"/*")
+			return nil, WithDetail(errRelationDirNonRel, string(cfg.TypeClass)+"/*")
 		}
 	}
 
@@ -186,11 +186,11 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	// Compute the edge's own id over its canonical encoding.
 	b, err := encodeEdge(e)
 	if err != nil {
-		return nil, wrapDetail(errNewEdge, "canonical encode", err)
+		return nil, WrapDetail(errNewEdge, "canonical encode", err)
 	}
 	id, err := hashContent(b)
 	if err != nil {
-		return nil, wrapDetail(errNewEdge, "hash", err)
+		return nil, WrapDetail(errNewEdge, "hash", err)
 	}
 	e.id = id
 	return e, nil
@@ -257,7 +257,7 @@ func (e *edge) HasField(name string) bool {
 func (e *edge) GetField(name string) (string, error) {
 	v, ok := e.fields[name]
 	if !ok {
-		return "", withDetail(errFieldNotSet, name)
+		return "", WithDetail(errFieldNotSet, name)
 	}
 	return v, nil
 }

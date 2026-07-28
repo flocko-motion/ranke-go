@@ -62,7 +62,7 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	}
 	nClass, nSub, err := splitType(parts.Type)
 	if err != nil {
-		return nil, wrapDetail(errAssemble, "type", err)
+		return nil, WrapDetail(errAssemble, "type", err)
 	}
 	n := &node{
 		typeClass:   NodeClass(nClass),
@@ -78,7 +78,7 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if parts.Encoding != "" {
 		eClass, eSub, err := splitType(parts.Encoding)
 		if err != nil {
-			return nil, wrapDetail(errAssemble, "encoding", err)
+			return nil, WrapDetail(errAssemble, "encoding", err)
 		}
 		n.encodingClass = EncodingClass(eClass)
 		n.encodingSub = eSub
@@ -86,11 +86,11 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	edges := make([]*edge, len(parts.Edges))
 	for i, ep := range parts.Edges {
 		if ep.Reference == nil {
-			return nil, wrapDetail(errAssemble, "edge "+strconv.Itoa(i), errEdgeRefRequired)
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i), errEdgeRefRequired)
 		}
 		class, sub, err := splitType(ep.Type)
 		if err != nil {
-			return nil, wrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" type", err)
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" type", err)
 		}
 		e := &edge{
 			reference:         ep.Reference,
@@ -105,13 +105,13 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		if ep.Encoding != "" {
 			eeClass, eeSub, err := splitType(ep.Encoding)
 			if err != nil {
-				return nil, wrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" encoding", err)
+				return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" encoding", err)
 			}
 			e.encodingClass = EncodingClass(eeClass)
 			e.encodingSub = eeSub
 		}
 		if ep.ID == nil {
-			return nil, withDetail(errAssemble, "edge "+strconv.Itoa(i)+": id required")
+			return nil, WithDetail(errAssemble, "edge "+strconv.Itoa(i)+": id required")
 		}
 		e.id = ep.ID
 		edges[i] = e

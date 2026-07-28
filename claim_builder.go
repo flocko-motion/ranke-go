@@ -244,7 +244,7 @@ func resolveType(cfg *ClaimBuilder) error {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
 		if err != nil {
-			return wrapDetail(errNewClaim, "Type", err)
+			return WrapDetail(errNewClaim, "Type", err)
 		}
 		cfg.TypeClass = NodeClass(class)
 		cfg.TypeSub = sub
@@ -253,7 +253,7 @@ func resolveType(cfg *ClaimBuilder) error {
 		return errClaimTypeRequired
 	}
 	if !validNodeClass(cfg.TypeClass) {
-		return withDetail(errUnknownNodeClass, string(cfg.TypeClass))
+		return WithDetail(errUnknownNodeClass, string(cfg.TypeClass))
 	}
 	return checkSubtype(cfg.TypeSub)
 }
@@ -301,7 +301,7 @@ func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, st
 	if encoding != "" {
 		c, s, err := splitType(encoding)
 		if err != nil {
-			return "", "", wrapDetail(errNewClaim, "Encoding", err)
+			return "", "", WrapDetail(errNewClaim, "Encoding", err)
 		}
 		class, sub = EncodingClass(c), s
 	}
@@ -315,7 +315,7 @@ func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, st
 		return "", "", errContentWithoutEncoding
 	}
 	if !validEncodingClass(class) {
-		return "", "", withDetail(errUnknownEncodingClass, string(class))
+		return "", "", WithDetail(errUnknownEncodingClass, string(class))
 	}
 	if err := checkEncodingSubtype(sub); err != nil {
 		return "", "", err
@@ -333,14 +333,14 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	for _, e := range cfg.Edges {
 		ce, err := asConcreteEdge(e)
 		if err != nil {
-			return nil, wrap(errNewClaim, err)
+			return nil, Wrap(errNewClaim, err)
 		}
 		edges = append(edges, ce)
 	}
 	if !isRootContributor {
 		ce, err := buildContributorEdge(cfg.Contributor)
 		if err != nil {
-			return nil, wrapDetail(errNewClaim, "build contribution/contributor edge", err)
+			return nil, WrapDetail(errNewClaim, "build contribution/contributor edge", err)
 		}
 		edges = append(edges, ce)
 	}
@@ -353,7 +353,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 			TypeSub:   string(EdgeSubtypeDiff),
 		})
 		if err != nil {
-			return nil, wrapDetail(errNewClaim, "diff edge", err)
+			return nil, WrapDetail(errNewClaim, "diff edge", err)
 		}
 		edges = append(edges, de)
 		if err := checkDiffEdgeNames(edges); err != nil {
@@ -364,7 +364,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 		return nil, err
 	}
 	if requiresProvenance(cfg.TypeClass) && !hasDerivationEdge(edges) {
-		return nil, withDetail(errProvenanceRequired, string(cfg.TypeClass)+"/"+cfg.TypeSub)
+		return nil, WithDetail(errProvenanceRequired, string(cfg.TypeClass)+"/"+cfg.TypeSub)
 	}
 	sort.SliceStable(edges, func(i, j int) bool {
 		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0
@@ -387,7 +387,7 @@ func checkDiffEdgeNames(edges []*edge) error {
 			return errDiffEdgeUnnamed
 		}
 		if _, dup := seen[name]; dup {
-			return withDetail(errDiffEdgeDupName, name)
+			return WithDetail(errDiffEdgeDupName, name)
 		}
 		seen[name] = struct{}{}
 	}
@@ -479,7 +479,7 @@ func computeAutoHeight(ctx context.Context, u Universe, edges []*edge) (uint64, 
 	}
 	heights, err := u.GetClaimHeights(ctx, ids)
 	if err != nil {
-		return 0, wrap(errHeightResolve, err)
+		return 0, Wrap(errHeightResolve, err)
 	}
 	var max uint64
 	for _, h := range heights {
@@ -508,23 +508,23 @@ func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool)
 		cfg.SigningKey = cfg.Contributor.SigningKey()
 	}
 	if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
-		return wrap(errNewClaim, err)
+		return Wrap(errNewClaim, err)
 	}
 	encoded, err := encodeNode(n, edges)
 	if err != nil {
-		return wrapDetail(errNewClaim, "canonical encode", err)
+		return WrapDetail(errNewClaim, "canonical encode", err)
 	}
 	hash, err := hashContent(encoded)
 	if err != nil {
-		return wrapDetail(errNewClaim, "hash", err)
+		return WrapDetail(errNewClaim, "hash", err)
 	}
 	idPayload, err := signHash(cfg.SigningKey, hash.raw)
 	if err != nil {
-		return wrapDetail(errNewClaim, "sign", err)
+		return WrapDetail(errNewClaim, "sign", err)
 	}
 	nodeID, err := idFromBytes(idPayload)
 	if err != nil {
-		return wrapDetail(errNewClaim, "wrap id", err)
+		return WrapDetail(errNewClaim, "wrap id", err)
 	}
 	n.id = nodeID
 	return nil

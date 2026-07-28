@@ -18,7 +18,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPat
 	rootStart := reportStart(rc)
 	root, err := GetClaim(ctx, u, sel.Claim)
 	if err != nil {
-		return nil, nil, wrapDetail(errQuery, "root "+sel.Claim.String(), err)
+		return nil, nil, WrapDetail(errQuery, "root "+sel.Claim.String(), err)
 	}
 	rc.timed("native", "load-root", ReportInfo, rootStart, sel.Claim.String(), nil)
 
@@ -35,7 +35,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPat
 		if head != nil && !head.Equal(sel.Claim) {
 			anchor, err = GetClaim(ctx, u, head)
 			if err != nil {
-				return nil, nil, wrapDetail(errQuery, "scope head "+head.String(), err)
+				return nil, nil, WrapDetail(errQuery, "scope head "+head.String(), err)
 			}
 		}
 		idxStart := reportStart(rc)
@@ -103,7 +103,7 @@ func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollec
 			seen[k] = true
 			child, err := GetClaim(ctx, u, ref)
 			if err != nil {
-				return nil, wrapDetail(errQuery, "reverse-index "+k, err)
+				return nil, WrapDetail(errQuery, "reverse-index "+k, err)
 			}
 			rc.log("native", "fetch", ReportTrace, k, nil)
 			queue = append(queue, child)
@@ -197,7 +197,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 					}
 					child, err := GetClaim(ctx, u, ref)
 					if err != nil {
-						return nil, wrapDetail(errQuery, "traverse "+ref.String(), err)
+						return nil, WrapDetail(errQuery, "traverse "+ref.String(), err)
 					}
 					rc.log("native", "fetch", ReportTrace, ref.String(), nil)
 					consider(cur, child)

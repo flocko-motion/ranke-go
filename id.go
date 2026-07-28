@@ -42,7 +42,7 @@ type id struct {
 func idFromBytes(raw []byte) (*id, error) {
 	str, err := multibase.Encode(multibase.Base32, raw)
 	if err != nil {
-		return nil, wrapDetail(errID, "multibase encode", err)
+		return nil, WrapDetail(errID, "multibase encode", err)
 	}
 	return &id{raw: raw, str: str}, nil
 }
@@ -51,7 +51,7 @@ func idFromBytes(raw []byte) (*id, error) {
 // validating the framing.
 func hashFromMultihashBytes(raw []byte) (*id, error) {
 	if _, err := multihash.Decode(raw); err != nil {
-		return nil, wrapDetail(errID, "invalid multihash", err)
+		return nil, WrapDetail(errID, "invalid multihash", err)
 	}
 	return idFromBytes(raw)
 }
@@ -60,7 +60,7 @@ func hashFromMultihashBytes(raw []byte) (*id, error) {
 func hashContent(content []byte) (*id, error) {
 	mh, err := multihash.Sum(content, multihash.SHA2_256, -1)
 	if err != nil {
-		return nil, wrapDetail(errID, "multihash sum", err)
+		return nil, WrapDetail(errID, "multihash sum", err)
 	}
 	return hashFromMultihashBytes(mh)
 }
@@ -76,7 +76,7 @@ func HashContent(content []byte) (Id, error) {
 func ParseId(s string) (Id, error) {
 	_, raw, err := multibase.Decode(s)
 	if err != nil {
-		return nil, wrapDetail(errID, "multibase decode", err)
+		return nil, WrapDetail(errID, "multibase decode", err)
 	}
 	return idFromBytes(raw)
 }

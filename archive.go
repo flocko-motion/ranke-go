@@ -78,7 +78,7 @@ func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	// contribution/branch edges are already the merged branch set.
 	c, err := GetClaim(ctx, u, k)
 	if err != nil {
-		return nil, wrapDetail(errArchiveLoadHead, k.String(), err)
+		return nil, WrapDetail(errArchiveLoadHead, k.String(), err)
 	}
 	return &archive{u: u, bth: c}, nil
 }

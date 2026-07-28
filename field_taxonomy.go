@@ -76,7 +76,7 @@ func checkUserFieldName(name string) error {
 		return errFieldNameTooLong // don't echo a possibly-huge name
 	}
 	if !validFieldChars(name) {
-		return withDetail(errInvalidFieldName, name)
+		return WithDetail(errInvalidFieldName, name)
 	}
 	return nil
 }
@@ -88,14 +88,14 @@ func checkUserFieldName(name string) error {
 // data belongs in content (inline or external), not a field.
 func checkFields(fields map[string]string) error {
 	if len(fields) > maxFieldsPerRecord {
-		return withDetail(errTooManyFields, strconv.Itoa(len(fields)))
+		return WithDetail(errTooManyFields, strconv.Itoa(len(fields)))
 	}
 	for k, v := range fields {
 		if err := checkUserFieldName(k); err != nil {
 			return err
 		}
 		if len(v) > maxFieldValueLen {
-			return withDetail(errFieldValueTooLong, k)
+			return WithDetail(errFieldValueTooLong, k)
 		}
 	}
 	return nil
@@ -128,7 +128,7 @@ func validFieldChars(name string) bool {
 // Same charset as field names: [a-z0-9] then [a-z0-9_].
 func checkSubtype(sub string) error {
 	if !validFieldChars(sub) {
-		return withDetail(errInvalidSubtype, sub)
+		return WithDetail(errInvalidSubtype, sub)
 	}
 	return nil
 }
@@ -138,7 +138,7 @@ func checkSubtype(sub string) error {
 // digits, and the real-MIME specials "_", ".", "+", "-".
 func checkEncodingSubtype(sub string) error {
 	if !validEncodingSubtypeChars(sub) {
-		return withDetail(errInvalidEncodingSubtype, sub)
+		return WithDetail(errInvalidEncodingSubtype, sub)
 	}
 	return nil
 }

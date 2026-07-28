@@ -305,11 +305,11 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 func verifyClaim(ctx context.Context, c Claim, raw []byte, cfg *verifyConfig, u Universe) error {
 	pubkey, err := resolveClaimPubkey(ctx, c, u)
 	if err != nil {
-		return wrapDetail(errVerify, "resolve pubkey", err)
+		return WrapDetail(errVerify, "resolve pubkey", err)
 	}
 	t := &claimUnderVerification{claim: c, raw: raw, pubkey: pubkey, cfg: cfg, u: u}
 	fail := func(r verifyRule, err error) error {
-		return wrapDetail(errVerify, r.name+" — "+r.rule, err) // name the rule + its statement
+		return WrapDetail(errVerify, r.name+" — "+r.rule, err) // name the rule + its statement
 	}
 	// Per claim, and per content carrier (the node).
 	for _, r := range verifyRules {
@@ -357,7 +357,7 @@ func verifyArchiveHead(ctx context.Context, head Claim, u Universe, cfg *verifyC
 			continue
 		}
 		if err := r.archive(ctx, t); err != nil {
-			return wrapDetail(errVerify, r.name+" — "+r.rule, err)
+			return WrapDetail(errVerify, r.name+" — "+r.rule, err)
 		}
 	}
 	return nil
@@ -456,7 +456,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 		return err
 	}
 	if ref.Node().Type() == NodeBranches {
-		return withDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
+		return WithDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
 	}
 	return nil
 }
@@ -465,7 +465,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 // (contribution/branches) — the root of the branch-table lineage.
 func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 	if t.claim.Node().Type() != NodeBranches {
-		return withDetail(errNotBranchTable, "got "+t.claim.Node().Type())
+		return WithDetail(errNotBranchTable, "got "+t.claim.Node().Type())
 	}
 	return nil
 }
@@ -480,11 +480,11 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 func (c *claim) verifyID(pubkey, raw []byte) error {
 	preimage, err := nodePreimage(raw)
 	if err != nil {
-		return wrapDetail(errVerify, "preimage", err)
+		return WrapDetail(errVerify, "preimage", err)
 	}
 	recomputed, err := hashContent(preimage)
 	if err != nil {
-		return wrapDetail(errVerify, "hash", err)
+		return WrapDetail(errVerify, "hash", err)
 	}
 	return verifySignature(pubkey, recomputed.raw, idBytes(c.node.id))
 }
@@ -506,7 +506,7 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 		}
 		heights, err := u.GetClaimHeights(ctx, ids)
 		if err != nil {
-			return wrapDetail(errVerify, "resolve reference heights", err)
+			return WrapDetail(errVerify, "resolve reference heights", err)
 		}
 		var max uint64
 		for _, h := range heights {
@@ -517,7 +517,7 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 		want = max + 1
 	}
 	if got := c.Node().Height(); got != want {
-		return withDetail(errHeightMismatch, "got "+strconv.FormatUint(got, 10)+", want "+strconv.FormatUint(want, 10))
+		return WithDetail(errHeightMismatch, "got "+strconv.FormatUint(got, 10)+", want "+strconv.FormatUint(want, 10))
 	}
 	return nil
 }
@@ -543,14 +543,14 @@ func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error
 		}
 		cc, err := GetClaim(ctx, u, target)
 		if err != nil {
-			return nil, wrapDetail(errContributorUnresolved, target.String(), err)
+			return nil, WrapDetail(errContributorUnresolved, target.String(), err)
 		}
 		src, viaEdge = cc, true
 	}
 	rdr, err := src.GetContent(ctx, u)
 	if err != nil {
 		if viaEdge {
-			return nil, wrapDetail(errContributorUnresolved, src.ID().String(), err)
+			return nil, WrapDetail(errContributorUnresolved, src.ID().String(), err)
 		}
 		return nil, err
 	}

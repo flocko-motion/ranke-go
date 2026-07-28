@@ -12,7 +12,7 @@ import (
 // either the sentinel or the underlying cause.
 
 func TestWrapErrDetail(t *testing.T) {
-	err := withDetail(ErrNotFound, "claim abc")
+	err := WithDetail(ErrNotFound, "claim abc")
 	require.ErrorIs(t, err, ErrNotFound, "matches the sentinel")
 	require.Contains(t, err.Error(), ErrNotFound.Error())
 	require.Contains(t, err.Error(), "claim abc", "detail appears in the message")
@@ -20,7 +20,7 @@ func TestWrapErrDetail(t *testing.T) {
 
 func TestWrapErrCause(t *testing.T) {
 	cause := errors.New("disk gone")
-	err := wrap(ErrNotFound, cause)
+	err := Wrap(ErrNotFound, cause)
 	require.ErrorIs(t, err, ErrNotFound, "matches the sentinel")
 	require.ErrorIs(t, err, cause, "and the wrapped cause")
 	require.Contains(t, err.Error(), "disk gone")
@@ -28,7 +28,7 @@ func TestWrapErrCause(t *testing.T) {
 
 func TestWrapErrDetailAndCause(t *testing.T) {
 	cause := errors.New("bad bytes")
-	err := wrapDetail(ErrIntegrity, "content xyz", cause)
+	err := WrapDetail(ErrIntegrity, "content xyz", cause)
 	require.ErrorIs(t, err, ErrIntegrity)
 	require.ErrorIs(t, err, cause)
 	msg := err.Error()
