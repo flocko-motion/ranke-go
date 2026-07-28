@@ -79,6 +79,9 @@ var (
 	errNilID    = errors.New("adapter/neo4j: nil id")
 	errNilHash  = errors.New("adapter/neo4j: nil content hash")
 	errQuery    = errors.New("adapter/neo4j: query")
+	// Joined so errors.Is still matches ranke.ErrUnsupported across the port.
+	errDeltaForm = errors.Join(ranke.ErrUnsupported,
+		errors.New("adapter/neo4j: delta form — this cache stores materialised claims only"))
 )
 
 // query runs a Cypher statement in an auto-commit transaction, scoped to the
@@ -186,10 +189,12 @@ RETURN properties(n) AS node, labels(n) AS labels,
 // cache is a miss (ranke.ErrNotFound) so the stack falls through to the durable
 // layer.
 func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
-	// This cache keeps materialised claims and no canonical CBOR, so it has no
-	// delta to serve. Miss, so a stack descends to a RawClaims layer.
+	// Materialised claims are what this cache stores, so it serves those natively
+	// and cannot serve delta form at all. Unsupported, not a miss: a stack routes
+	// delta reads by capability, so being asked is a caller's bug and a miss would
+	// bury it in a silent fall-through.
 	if ranke.WantsDelta(opts...) {
-		return nil, fmt.Errorf("%w: delta form (this cache stores materialised claims only)", ranke.ErrNotFound)
+		return nil, errDeltaForm
 	}
 	out := make([]ranke.Claim, len(ids))
 	if len(ids) == 0 {

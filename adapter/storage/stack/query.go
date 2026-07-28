@@ -6,10 +6,14 @@ package stack
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/flocko-motion/ranke-go"
 )
+
+// Joined so errors.Is still matches ranke.ErrUnsupported across the port.
+var errNoOriginals = errors.Join(ranke.ErrUnsupported,
+	errors.New("adapter/stack: original form — no layer keeps canonical claims"))
 
 // Query runs the read on the top layer — which layer answers is a routing
 // decision, and the selection is the expensive part. The form asked for is a
@@ -23,7 +27,7 @@ func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ra
 		return engine.u.Query(ctx, q, scope)
 	}
 	if !s.holdsRawClaims() {
-		return nil, fmt.Errorf("%w: original form: no layer keeps canonical claims", ranke.ErrUnsupported)
+		return nil, errNoOriginals
 	}
 	rs, err := engine.u.Query(ctx, q, scope)
 	if err != nil {

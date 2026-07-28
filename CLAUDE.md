@@ -15,6 +15,7 @@ Agents tend to forget details from the papers. The papers specify all details, s
 
 ## brokkr
 
+- use `brokkr --help` to learn all available features
 - `brokkr map [path...]` — per file, the arch header plus each type/func with its
   doc and signature. The way to learn a package.
 - `brokkr map --grep <text>` — the grep replacement: shows the *declarations
@@ -45,6 +46,11 @@ Agents tend to forget details from the papers. The papers specify all details, s
 - Comments are short. Two lines is already long; a 10-line block is wrong.
   Say why, not what.
 - Say what a thing IS, not what it is not.
+- No `fmt.Errorf` in the codebase. Errors are static sentinels (`errors.New`,
+  one per fixed condition, collected per package) composed lazily — in package
+  ranke via `wrap` / `withDetail` / `wrapDetail`. `errors.Join(sentinel, ...)`
+  keeps `errors.Is` matching when a sentinel from another package must stay
+  matchable. `fmt.Errorf` is fine in tests.
 
 # Tests
 

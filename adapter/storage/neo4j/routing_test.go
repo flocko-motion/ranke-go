@@ -38,8 +38,8 @@ func TestStackRoutesByForm(t *testing.T) {
 }
 
 // TestDeniesDeltaForm asserts the cache refuses a delta read outright rather than
-// answering it with materialised data — silently wrong is worse than a miss, and a
-// miss is what lets a stack descend.
+// answering it with materialised data. Unsupported, not a miss: the stack routes by
+// capability, so an ask that reaches here is a caller's bug and must be loud.
 func TestDeniesDeltaForm(t *testing.T) {
 	cache, _ := connectTestNeo4j(t)
 	st, err := stack.NewStack(cache, mem.New())
@@ -48,8 +48,8 @@ func TestDeniesDeltaForm(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = cache.GetClaims(context.Background(), []ranke.Id{m.DiffChainHead}, ranke.WithNotDiffMaterialized())
-	require.ErrorIs(t, err, ranke.ErrNotFound,
-		"a materialised-only layer must miss on a delta read, not answer it")
+	require.ErrorIs(t, err, ranke.ErrUnsupported,
+		"a materialised-only layer must reject a delta read, not answer it")
 }
 
 // servedBy reads one claim through the stack and returns the index of the layer
