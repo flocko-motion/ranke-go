@@ -24,9 +24,8 @@ const (
 	kindWrite
 )
 
-// sample is one timed Universe operation. Keeping raw samples (rather than
-// pre-aggregating) lets the report slice by any dimension — op, read/write,
-// phase, and later by size — and compute exact percentiles.
+// sample is one timed Universe operation, kept raw so the report can slice by
+// op, kind or phase and compute exact percentiles.
 type sample struct {
 	phase string
 	op    string
@@ -35,22 +34,17 @@ type sample struct {
 	dur   time.Duration
 }
 
-// metered wraps a Universe and times every call. Round-trips to the backend
-// happen inside these methods; the decorator records one sample each, tagged
-// with the current phase so reads/writes can be attributed to generate vs
-// verify (etc.).
+// metered wraps a Universe and times every call, tagging each sample with the
+// current phase so I/O is attributable to generate vs verify.
 type metered struct {
 	inner   ranke.Universe
 	mu      sync.Mutex
 	phase   string
 	samples []sample
-	// readHits counts how many times each claim id is fetched (across all
-	// GetClaims). distinct ids vs total reads quantifies re-read redundancy —
-	// the exact waste a contributor-pubkey cache would remove.
+	// readHits counts fetches per claim id; distinct ids vs total reads is the
+	// re-read waste a contributor-pubkey cache would remove.
 	readHits map[string]int
-	// content bytes moved. Exact and raw (the []byte is right there). Claim
-	// record bytes are NOT counted here — they need the blob seam, where the
-	// actual stored delta is visible (a materialised claim would mis-count).
+	// content bytes moved, measured at the blob seam where the stored delta is visible.
 	contentBytesRead    int64
 	contentBytesWritten int64
 }
@@ -59,8 +53,7 @@ func newMetered(inner ranke.Universe) *metered {
 	return &metered{inner: inner, phase: "init", readHits: map[string]int{}}
 }
 
-// setPhase labels every subsequent sample until the next call — the caller
-// brackets Generate / Verify so the report can attribute I/O to each.
+// setPhase labels every subsequent sample until the next call.
 func (m *metered) setPhase(p string) {
 	m.mu.Lock()
 	m.phase = p
@@ -153,8 +146,7 @@ func (m *metered) StreamContent(ctx context.Context, hash ranke.Id, size uint64)
 	if err != nil {
 		return r, err
 	}
-	// Count bytes as the caller consumes them (flushed to the tally on Close),
-	// so streamed content reads are not invisible in the byte totals.
+	// Count bytes as the caller consumes them, flushed to the tally on Close.
 	return &countingReadCloser{r: r, m: m}, nil
 }
 
@@ -272,8 +264,7 @@ func pct(sorted []time.Duration, q int) time.Duration {
 	return sorted[idx]
 }
 
-// report prints the distributions: a TOTAL, WRITE and READ rollups, then a
-// line per operation. Exact percentiles from the raw samples.
+// report prints the TOTAL, per-phase read/write and per-operation distributions.
 func (m *metered) report() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -306,9 +297,8 @@ func (m *metered) report() string {
 			label, intCell(d.n), intCell(d.items),
 			durCell(d.avg), durCell(d.p50), durCell(d.p90), durCell(d.p99), durCell(d.min), durCell(d.max))
 	}
-	// Read-redundancy: total claim fetches vs distinct ids. The gap is the
-	// re-read waste a contributor-pubkey cache (ranke.Cache) would remove; the
-	// hottest id is the shared contributor fetched once per attributed claim.
+	// Read-redundancy: total claim fetches vs distinct ids — the gap a
+	// contributor-pubkey cache would remove, the hottest id being that contributor.
 	var totalReads, hottest int
 	var hottestID string
 	for id, n := range m.readHits {
@@ -344,9 +334,7 @@ func (m *metered) report() string {
 		"operation", "n", "items", "avg", "p50", "p90", "p99", "min", "max")
 	ruleWidth := len(header) - 3 // drop the leading "\n  "
 	b.printf("%s\n  %s", header, strings.Repeat("─", ruleWidth))
-	// section prints a blank line then a "label ────" divider spanning the table,
-	// separating the grand total, the per-chapter sequence, and the per-operation
-	// summary so the three readings don't run together.
+	// section prints a labelled divider spanning the table.
 	section := func(label string) {
 		dashes := ruleWidth - len(label) - 1
 		if dashes < 0 {
@@ -355,8 +343,7 @@ func (m *metered) report() string {
 		b.printf("\n\n  %s %s", label, strings.Repeat("─", dashes))
 	}
 	line("TOTAL", distOf(m.samples))
-	// By chapter, in sequence: reads and writes separately, so the cost of each
-	// chapter's walk is visible on its own.
+	// By chapter, reads and writes separately, so each walk's cost stands alone.
 	section("by chapter (in sequence)")
 	for _, p := range phaseOrder {
 		line(p+"/WRITE", distOf(byPhaseKind[p+"/WRITE"]))
@@ -368,16 +355,14 @@ func (m *metered) report() string {
 		line(op, distOf(byOp[op]))
 	}
 
-	// Outliers — the slowest few samples with their position within their
-	// phase/kind sequence (e.g. "#500/546"), so a fat tail reads as clustered
-	// at the start (warm-up), evenly spaced (periodic flush), or scattered
-	// (retry/GC). Only shown when the slowest is meaningfully above the median.
+	// Outliers, positioned in their phase/kind sequence, so a fat tail reads as
+	// warm-up (clustered early), periodic flush (evenly spaced) or retry/GC (scattered).
 	b.outliers(m.samples)
 	return b.String()
 }
 
-// outliers appends the top-K slowest samples, each located by its ordinal
-// within its own phase+kind stream, so "when" a stall happened is visible.
+// outliers appends the slowest samples, each located by its ordinal within its
+// own phase+kind stream, so "when" a stall happened is visible.
 func (b *strBuilder) outliers(samples []sample) {
 	if len(samples) < 8 {
 		return
@@ -401,8 +386,7 @@ func (b *strBuilder) outliers(samples []sample) {
 		seq[key]++
 	}
 	sort.Slice(locs, func(i, j int) bool { return locs[i].dur > locs[j].dur })
-	// Split by kind so a fat WRITE tail is visible on its own, not buried under
-	// the (expected) expensive closure reads.
+	// Split by kind so a fat WRITE tail shows on its own.
 	emit := func(label string, want opKind) {
 		shown := 0
 		var line string
@@ -430,9 +414,8 @@ func kindName(k opKind) string {
 	return "READ"
 }
 
-// phaseIO returns the read and write operation counts recorded in a phase —
-// the "reads used by this step" metric, the yardstick a caching change should
-// visibly shrink.
+// phaseIO returns the read and write operation counts recorded in a phase — the
+// yardstick a caching change should shrink.
 func (m *metered) phaseIO(phase string) (reads, writes int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -463,13 +446,10 @@ func bytesStr(n int64) string {
 	}
 }
 
-// durWidth is the visible width every latency cell is right-aligned to, so
-// columns line up whether the value is "0", "482ns", "723.3µs" or "218.34ms".
+// durWidth is the visible width every latency cell is right-aligned to.
 const durWidth = 9
 
-// ANSI colours follow the scale, so the unit reads at a glance: ns white
-// (negligible), µs grey, ms yellow (worth noticing), s red (alarming).
-// Disabled when NO_COLOR is set.
+// ANSI colours follow the scale so the unit reads at a glance; NO_COLOR disables.
 const (
 	cReset  = "\033[0m"
 	cGrey   = "\033[90m"   // nanoseconds — smallest, dim but legible
@@ -480,8 +460,8 @@ const (
 
 var useColor = os.Getenv("NO_COLOR") == ""
 
-// durStr formats a duration to a single unit (ns/µs/ms/s) with the unit at the
-// end, so the eye reads magnitude by the suffix.
+// durStr formats a duration to a single unit (ns/µs/ms/s), suffix last so the
+// eye reads magnitude from it.
 func durStr(d time.Duration) string {
 	switch {
 	case d == 0:
@@ -497,8 +477,8 @@ func durStr(d time.Duration) string {
 	}
 }
 
-// durCell right-aligns durStr(d) to durWidth (padding the plain text, so
-// invisible colour codes never break alignment) and colours it by scale.
+// durCell pads durStr(d) to durWidth before colouring, so escape codes never
+// break alignment.
 func durCell(d time.Duration) string {
 	s := fmt.Sprintf("%*s", durWidth, durStr(d))
 	if !useColor {

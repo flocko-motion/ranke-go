@@ -1,8 +1,5 @@
-// This file adds the BlobStore seam: every byte-oriented Universe backend
-// (mem, fs, sqlite, s3, …) differs only in how it stores and fetches
-// opaque bytes by key. The claim/content/copy machinery — codec, integrity
-// checks, bulk loops — is identical across all of them and lives here, so
-// a new adapter only has to implement three primitives.
+// Byte-oriented backends (mem, fs, sqlite, s3, …) differ only in how they store
+// bytes by key, so the shared claim/content/copy machinery lives here.
 
 // package: adapter / blobstore
 // type:    logic
@@ -26,47 +23,32 @@ var (
 	errNilHash  = errors.New("adapter: nil content hash")
 )
 
-// BlobStore is the minimal backing store a Universe adapter must provide:
-// opaque bytes addressed by a string key. Claims and content share one
-// namespace (keys are id strings — claim ids and content hashes). Implement
-// these three operations and NewBlobUniverse supplies the rest of
-// ranke.Universe for free.
+// BlobStore is the minimal backing store a Universe adapter must provide: opaque
+// bytes by string key, one namespace for claim ids and content hashes alike.
 type BlobStore interface {
-	// Get returns the bytes stored under key, or ranke.ErrNotFound if the
-	// key is absent.
+	// Get returns the bytes stored under key, or ranke.ErrNotFound.
 	Get(ctx context.Context, key string) ([]byte, error)
-	// Put stores data under key, overwriting any existing bytes. Keys are
-	// content-addressed, so a normal re-put writes identical bytes; the
-	// overwrite is what lets a read-through repair restore a corrupted
-	// entry. Callers that want to skip a redundant write check Has first.
+	// Put stores data under key, overwriting any bytes there — the overwrite is
+	// what lets a read-through repair restore a corrupted entry.
 	Put(ctx context.Context, key string, data []byte) error
 	// Has reports whether key is present.
 	Has(ctx context.Context, key string) (bool, error)
-	// Capabilities reports what this backend can do (see ranke.Capabilities) —
-	// its nature (durable medium? can it delete / enumerate?), not merely the
-	// three primitives it exposes here. NewBlobUniverse surfaces it as the
-	// Universe's capabilities.
+	// Capabilities reports the backend's nature — durable medium, delete,
+	// enumerate (see ranke.Capabilities) — which becomes the Universe's.
 	Capabilities() ranke.Capabilities
 	// Close releases any resources the store holds.
 	Close() error
 }
 
-// Streamer is an optional BlobStore extension for backends that can hand
-// back a raw byte stream without buffering the whole blob (a file handle,
-// an HTTP response body, …). When a store implements it, NewBlobUniverse
-// uses Open for StreamContent — wrapping the raw stream in a verifying
-// reader — instead of loading the entire blob via Get. Stores that don't
-// implement it fall back to Get + buffer, which is fine for small blobs.
+// Streamer is the optional BlobStore extension for backends that hand back a raw
+// byte stream, letting StreamContent verify on the fly instead of buffering.
 type Streamer interface {
-	// Open returns a raw, unverified byte stream for key, or
-	// ranke.ErrNotFound if absent. The caller wraps it for integrity.
+	// Open returns a raw, unverified byte stream for key; the caller verifies it.
 	Open(ctx context.Context, key string) (io.ReadCloser, error)
 }
 
-// NewBlobUniverse adapts a BlobStore into a full ranke.Universe, supplying
-// the claim codec, content integrity checks, bulk loops, and the default
-// copy walkers — everything that is identical across byte-oriented
-// backends. A complete adapter is then just a BlobStore implementation.
+// NewBlobUniverse adapts a BlobStore into a full ranke.Universe: claim codec,
+// content integrity, bulk loops, and the default copy walkers.
 //
 //deadcode:keep
 func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
@@ -85,12 +67,8 @@ func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe
 // BlobUniverseOption configures the Universe wrapper.
 type BlobUniverseOption func(*blobUniverse)
 
-// WithConcurrency caps how many per-key store operations run at once — a
-// TOTAL over the whole Universe, shared across all concurrent calls, so N
-// simultaneous bulk calls never exceed n in-flight requests. n<=1 keeps ops
-// sequential (the default). Network backends (s3, rest) set it to fan out
-// over request latency without overwhelming the endpoint; local backends
-// leave it sequential.
+// WithConcurrency caps in-flight per-key store operations as a TOTAL over the
+// whole Universe; n<=1 keeps ops sequential. Network backends fan out with it.
 func WithConcurrency(n int) BlobUniverseOption {
 	return func(u *blobUniverse) {
 		if n > 0 {
@@ -99,11 +77,8 @@ func WithConcurrency(n int) BlobUniverseOption {
 	}
 }
 
-// WithTier sets the write-durability role this byte store serves in a stack
-// (Capabilities.Tier). A blob store keeps claims verbatim and holds content of
-// any size, so it may serve in ANY tier — authoritative source of truth by
-// default (NewBlobUniverse), or a lower tier (e.g. redis as a lazy cache) when
-// the deployment stacks it under a source of truth.
+// WithTier sets the write-durability role in a stack (Capabilities.Tier);
+// verbatim claims and unbounded content make any tier valid. Default authoritative.
 func WithTier(t ranke.StorageTier) BlobUniverseOption {
 	return func(u *blobUniverse) { u.tier = t }
 }
@@ -111,25 +86,16 @@ func WithTier(t ranke.StorageTier) BlobUniverseOption {
 type blobUniverse struct {
 	store       BlobStore
 	concurrency int
-	// tier is the write role this store is configured in, reported as
-	// Capabilities.Tier for a stack to route by. Defaults to authoritative.
+	// tier is the write role reported as Capabilities.Tier for a stack to route by.
 	tier ranke.StorageTier
-	// sem bounds concurrent store operations across the whole Universe (nil
-	// when concurrency<=1 → sequential). Shared by every forEach call, so the
-	// cap is a total, not per-call.
+	// sem bounds store operations across the whole Universe, shared by every forEach.
 	sem chan struct{}
-	// heights memoises id→height so GetClaimHeights rarely re-decodes a claim.
-	// Warmed opportunistically by GetClaims/PutClaims (every claim handled is
-	// Noted), so it fills with normal traffic. Heights are immutable, so the
-	// memo never goes stale.
+	// heights memoises id→height, warmed by GetClaims/PutClaims traffic.
 	heights *ranke.HeightCache
 }
 
-// forEach runs fn for each index in [0,n). When the Universe has a shared
-// concurrency semaphore, up to that many run at once — the cap is a TOTAL
-// across all concurrent forEach calls on this Universe, not per call — else
-// it runs sequentially. fn must write its result to a distinct per-index slot
-// (no shared state); the first error is returned and cancels the rest.
+// forEach runs fn for each index in [0,n), up to u.sem at a time. fn writes to
+// its own slot i; the first error is returned and cancels the rest.
 func (u *blobUniverse) forEach(ctx context.Context, n int, fn func(context.Context, int) error) error {
 	if u.sem == nil {
 		for i := 0; i < n; i++ {
@@ -199,12 +165,9 @@ func (u *blobUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ra
 	if err != nil {
 		return nil, err
 	}
-	// Warm the height cache from what we just decoded (heights are on the raw
-	// claims, before materialisation), so later GetClaimHeights avoids a reload.
+	// Warm the height cache from the raw claims, before materialisation.
 	u.heights.NoteClaims(out...)
-	// A byte store returns raw claims; the read path materialises diff overlays
-	// via the ADT default, honouring WithNotDiffMaterialized (passed through).
-	// Materialisation runs after the parallel fetch, so it sees complete claims.
+	// Materialise diff overlays after the parallel fetch, on complete claims.
 	return ranke.DefaultMaterialize(ctx, u, out, opts...)
 }
 
@@ -262,8 +225,7 @@ func (u *blobUniverse) StreamContent(ctx context.Context, hash ranke.Id, size ui
 	if hash == nil {
 		return nil, errNilHash
 	}
-	// True streaming when the store can hand back a raw stream; otherwise
-	// load the whole blob and stream from memory.
+	// True streaming when the store offers a raw stream, else buffer in memory.
 	if s, ok := u.store.(Streamer); ok {
 		raw, err := s.Open(ctx, hash.String())
 		if err != nil {
@@ -301,8 +263,7 @@ func (u *blobUniverse) HasContents(ctx context.Context, hashes []ranke.Id) ([]bo
 	return u.hasAll(ctx, hashes)
 }
 
-// hasAll is the shared body of HasClaims/HasContents — both ask the flat
-// key namespace whether each id is present, tolerating nil entries.
+// hasAll asks the flat key namespace for each id, tolerating nil entries.
 func (u *blobUniverse) hasAll(ctx context.Context, ids []ranke.Id) ([]bool, error) {
 	out := make([]bool, len(ids))
 	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
@@ -333,8 +294,7 @@ func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, ref
 	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
-// Capabilities surfaces the backing store's declared capabilities as the
-// Universe's.
+// Capabilities surfaces the backing store's declared capabilities.
 //
 //deadcode:keep
 func (u *blobUniverse) Capabilities() ranke.Capabilities {
@@ -350,9 +310,8 @@ func (u *blobUniverse) Sync(ctx context.Context, src ranke.Universe, id ranke.Id
 	return ranke.DefaultSync(ctx, u, src, id)
 }
 
-// GetClaimHeights answers from the id→height cache, decoding only the ids it
-// has not seen (and caching those). With normal get/put traffic warming the
-// cache, a repeat lookup almost never touches the store.
+// GetClaimHeights answers from the id→height cache, decoding and caching
+// whatever ids are new to it.
 func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
 	return u.heights.GetClaimHeights(ctx, u, ids)
 }
@@ -363,12 +322,8 @@ func (u *blobUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sco
 	return ranke.DefaultQuery(ctx, u, q, scope)
 }
 
-// GetClaimsRaw returns each claim's stored bytes verbatim — a byte store holds
-// exactly the CBOR the id was signed over, so no decode (and no re-encode) is
-// involved.
-//
-// GetClaimTags is unsupported: an opaque byte store holds no mutable side-data
-// (Capabilities.Tags is false).
+// GetClaimTags reports ErrUnsupported: an opaque byte store holds only the
+// signed bytes, no mutable side-data (Capabilities.Tags is false).
 //
 //deadcode:keep
 func (u *blobUniverse) GetClaimTags(_ context.Context, _ []ranke.Id) ([]map[string]string, error) {
@@ -382,10 +337,11 @@ func (u *blobUniverse) SetClaimsTags(_ context.Context, _ []string, _ map[string
 	return ranke.ErrUnsupported
 }
 
-// Tag is a no-op: an opaque byte store holds no tags to bring up to date, and a
-// read against it never consults them.
+// Tag is a no-op: reads against a byte store consult no tags.
 func (u *blobUniverse) Tag(_ context.Context, _ ranke.Id) error { return nil }
 
+// GetClaimsRaw returns each claim's stored bytes: the CBOR its id was signed over.
+//
 //deadcode:keep
 func (u *blobUniverse) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {
 	out := make([][]byte, len(ids))

@@ -17,20 +17,13 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// The generator is deterministic within the Go reference implementation: a
-// given (seed, size) yields the same graph — same claims, same ids — on every
-// run and across storage backends, so perf hashes and conformance vectors are
-// stable. It avoids time.Now (see Clock); keys and content are spec'd SHA-256
-// recipes of the seed and names come from a gofakeit seeded the same way. Go is
-// the reference implementation; Python only needs the ADT and a verifier, so it
-// does not regenerate this output and the recipes need not be language-neutral.
+// Deterministic within the Go reference implementation: a given (seed, size)
+// yields the same graph on every run and backend, so perf hashes stay stable.
 
 // --- deterministic keys -------------------------------------------------
 
-// keySeed derives the 32-byte Ed25519 seed for contributor #index from the
-// master seed: SHA-256( little-endian uint64(master) ‖ uvarint(index) ). It
-// is deliberately a plain, spec'd byte recipe so a Python generator derives
-// byte-identical seeds — hence identical keys, signatures, and ids.
+// keySeed derives contributor #index's 32-byte Ed25519 seed from the master
+// seed: SHA-256( little-endian uint64(master) ‖ uvarint(index) ).
 func keySeed(master int64, index int) [sha256.Size]byte {
 	var buf [8 + binary.MaxVarintLen64]byte
 	binary.LittleEndian.PutUint64(buf[:8], uint64(master))
@@ -46,11 +39,8 @@ func keyForIndex(master int64, index int) ed25519.PrivateKey {
 
 // --- deterministic content ---------------------------------------------
 
-// fill returns n bytes deterministically derived from (master, tag, index):
-// SHA-256 in counter mode over master ‖ tag ‖ index ‖ counter. Like the key
-// recipe it is a plain byte construction, so a Python generator produces
-// byte-identical content — hence identical ids (and, for external content,
-// identical content hashes).
+// fill returns n bytes derived from (master, tag, index): SHA-256 in counter
+// mode over master ‖ tag ‖ index ‖ counter.
 func fill(master int64, tag string, index, n int) []byte {
 	if n <= 0 {
 		return nil
@@ -71,11 +61,9 @@ func fill(master int64, tag string, index, n int) []byte {
 
 // --- deterministic clock ------------------------------------------------
 
-// Clock hands out monotonically increasing timestamps from a fixed base —
-// never time.Now — so created_at (which feeds the id) is reproducible while
-// still satisfying the §Claims monotonicity rule. One Clock is the single
-// time source shared by the generator, the testkit History, and the testkit
-// Sequencer, so the whole run advances on one deterministic timeline.
+// Clock hands out increasing timestamps from a fixed base, so created_at (which
+// feeds the id) is reproducible and satisfies the §Claims monotonicity rule.
+// One Clock is the time source for the generator, History, and Sequencer alike.
 type Clock struct {
 	t    time.Time
 	step time.Duration
@@ -96,12 +84,8 @@ func (c *Clock) Tick() time.Time {
 
 // --- deterministic contributors ----------------------------------------
 
-// contributor builds a deterministic signed root contributor for index: its
-// multikey-encoded pubkey is its content (§5.7), signed by the derived key,
-// stamped at `at`, and named with a gofakeit name seeded from the same
-// (master, index) recipe so the name — hence the id — is stable across runs.
-// The returned Contributor carries the key, so claims attributed to it sign
-// automatically.
+// contributor builds a signed root contributor for index: its multikey pubkey is
+// its content (§5.7). The returned Contributor carries the key, so claims sign.
 func contributor(ctx context.Context, master int64, index int, at time.Time) (ranke.Contributor, error) {
 	priv := keyForIndex(master, index)
 	pubkey, err := ranke.EncodePublicKey(priv.Public())
@@ -121,18 +105,15 @@ func contributor(ctx context.Context, master int64, index int, at time.Time) (ra
 	return c.AsContributor(ctx, nil, priv)
 }
 
-// contributorName picks a stable random name for contributor #index. gofakeit
-// is seeded from the same SHA-256 (master, index) recipe as the key, so the
-// name is reproducible run to run (within the Go reference generator).
+// contributorName picks contributor #index's name, gofakeit seeded from keySeed.
 func contributorName(master int64, index int) string {
 	s := keySeed(master, index)
 	f := gofakeit.New(binary.LittleEndian.Uint64(s[:8]))
 	return f.Name()
 }
 
-// contentSeed derives a gofakeit seed for a claim's content from (master, tag,
-// index) — the same construction as fill/keySeed, so content is reproducible
-// run to run (Go reference only; see the package note).
+// contentSeed derives a gofakeit content seed from (master, tag, index), by the
+// same construction as fill and keySeed.
 func contentSeed(master int64, tag string, index int) uint64 {
 	var hdr [8 + binary.MaxVarintLen64]byte
 	binary.LittleEndian.PutUint64(hdr[:8], uint64(master))
@@ -142,9 +123,8 @@ func contentSeed(master int64, tag string, index int) uint64 {
 	return binary.LittleEndian.Uint64(s[:8])
 }
 
-// textFor returns deterministic legible text for a claim's content. Content is
-// knowledge (§Everything Is Knowledge), so a source note or a derivation
-// summary is human-readable text (text/plain) — not binary fill.
+// textFor returns legible text/plain for a claim's content: content is knowledge
+// (§Everything Is Knowledge), so it reads as a source note or derivation summary.
 func textFor(master int64, tag string, index int) string {
 	return gofakeit.New(contentSeed(master, tag, index)).Sentence(12)
 }
@@ -162,10 +142,7 @@ func nameFor(master int64, index int) string {
 // --- deterministic branches --------------------------------------------
 
 // branchCount is how many branches a graph of claimCount claims carries: at
-// least 2 (a single-branch archive is a degenerate shape), growing ~
-// logarithmically with size (≈2 at 100 claims, ≈10 at 100k). Cross-branch
-// propagation is out of scope (paper 2); branches exist so branch tagging and
-// branch-scoped reads have something to exercise.
+// least 2 (one branch is degenerate), growing ≈2 at 100 claims to ≈10 at 100k.
 func branchCount(claimCount int) int {
 	if claimCount < 1 {
 		claimCount = 1
@@ -177,8 +154,7 @@ func branchCount(claimCount int) int {
 	return c
 }
 
-// branchNames returns the branch names for a graph of claimCount claims: "main"
-// plus deterministic gofakeit words, seeded so they are stable run to run.
+// branchNames returns stable names for claimCount claims: "main" plus gofakeit words.
 func branchNames(claimCount int, seed int64, want int) []string {
 	if want < 1 {
 		want = branchCount(claimCount)

@@ -12,17 +12,8 @@ import (
 	"sync"
 )
 
-// Archive is an immutable read snapshot of a Ranke-Archive: the tuple
-// RA_k = (𝒰, k), held as the Universe plus the head claim 𝒰(k). Reads
-// resolve against the head's closure — membership and lookup are
-// delegated to the Universe (engine-dependent). It advances nothing; a
-// contribution is the Sequencer's job.
-//
-// The head claim 𝒰(k) plays the paper's *branch table* role (spec
-// §Branches): its named contribution/branch edges are the archive's
-// branches, and it may be a contribution/diff over previous tables. The
-// Archive implements that branch-table concept — materialising the diff
-// chain and exposing each named edge as a Branch. No other type needs it.
+// Archive is an immutable read snapshot RA_k = (𝒰, k): the Universe plus the
+// head claim 𝒰(k), which plays the paper's branch-table role (spec §Branches).
 type Archive interface {
 	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
@@ -42,17 +33,13 @@ type archive struct {
 	u   Universe
 	bth Claim // the head claim 𝒰(k) — a contribution/branches claim
 
-	// The archive is an immutable snapshot, so the branch set is stable —
-	// read it off the (already-materialised) head claim once and memoise it
-	// (safe for concurrent readers). Each entry is the naming
-	// contribution/branch edge, keyed by branch name.
+	// An immutable snapshot has a stable branch set, so memoise it: the naming
+	// contribution/branch edge per branch name, safe for concurrent readers.
 	branchOnce sync.Once
 	branches   map[string]Edge
 }
 
-// loadBranches reads the branch set off the head claim once and caches it.
-// The head is materialised at open (NewArchive), so its contribution/branch
-// edges are already the merged set — no diff walk here.
+// loadBranches caches the branch set off the head claim, materialised at open.
 func (a *archive) loadBranches() map[string]Edge {
 	a.branchOnce.Do(func() {
 		entries := map[string]Edge{}
@@ -65,8 +52,7 @@ func (a *archive) loadBranches() map[string]Edge {
 	return a.branches
 }
 
-// NewArchive opens the immutable snapshot RA_k = (𝒰, k) by loading the
-// head claim at k from u.
+// NewArchive opens the snapshot RA_k = (𝒰, k) by loading the head claim at k.
 func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	if u == nil {
 		return nil, errNilUniverse
@@ -74,8 +60,7 @@ func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	if k == nil {
 		return nil, errNilHeadID
 	}
-	// GetClaim materialises the head's diff chain, so a.bth's
-	// contribution/branch edges are already the merged branch set.
+	// GetClaim materialises the diff chain, so a.bth's branch edges are merged.
 	c, err := GetClaim(ctx, u, k)
 	if err != nil {
 		return nil, WrapDetail(errArchiveLoadHead, k.String(), err)
@@ -94,8 +79,7 @@ func (a *archive) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
-	// The Universe returns materialised claims (see GetClaims); the archive
-	// does not materialise itself.
+	// The Universe returns materialised claims (see GetClaims).
 	return GetFromClosure(ctx, a.u, BranchArchive, []Id{a.bth.ID()}, id)
 }
 
@@ -119,11 +103,8 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	return a.u.Query(ctx, q, scope)
 }
 
-// resolveScope maps Branch to its Scope: a name via its head, $archive via the
-// table head, $universe unconfined (Head nil — the caller pins Select.Head).
-// Height is always the branch-table height (the tag scale): a member's
-// _b_<branch> is the table height it joined at, so tag <= Height filters both
-// membership and point-in-time in one comparison.
+// resolveScope maps Branch to its Scope. Height is always the branch-table
+// height, so tag <= Height filters membership and point-in-time in one compare.
 func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 	if q.Select.Branch == "" {
 		return Scope{}, ErrQueryNoScope
@@ -144,8 +125,7 @@ func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 	return scope, nil
 }
 
-// validateSelect checks a read's shape on the way in, so the engines below trust
-// the query they are handed.
+// validateSelect checks a read's shape on the way in, so the engines below trust it.
 func validateSelect(q Query) error {
 	sel := q.Select
 	if sel.Branch == "" {
@@ -180,14 +160,8 @@ func revisionOf(c Claim) int {
 
 // --- Branches ---
 //
-// A branch table is a claim whose contribution/branch edges each carry a
-// branch name (the `name` field) and reference that branch's subgraph root.
-// A table may be a contribution/diff over previous tables, restating only
-// changed entries. The diff overlay is done by the generic claim
-// materialisation (name-keyed: inherit / overwrite-by-name / omit via
-// edges_diff_omit) at load time, so the head claim's contribution/branch
-// edges are already the full merged set — the Archive just reads them and
-// wraps each as a Branch.
+// A branch table's contribution/branch edges each carry a branch name and that
+// branch's subgraph root; materialisation merges any diff overlay at load time.
 
 func (a *archive) HasBranch(_ context.Context, name string) (bool, error) {
 	_, ok := a.loadBranches()[name]

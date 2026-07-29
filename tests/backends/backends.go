@@ -25,32 +25,26 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
 )
 
-// ErrUnavailable is returned by a Backend.Open when the backend cannot run in
-// this environment (e.g. s3 with no podman). A caller reports it as skipped
-// rather than a failure.
+// ErrUnavailable reports that a backend cannot run in this environment (e.g. s3
+// with no podman); a caller reports the row as skipped.
 var ErrUnavailable = errors.New("backend unavailable")
 
-// forceNativeServices routes the pod-based services (neo4j, redis) to a
-// host-native instance on localhost instead of an ephemeral podman pod. Set via
-// UseNativeServices; a run under go test leaves it false.
+// forceNativeServices routes the pod-based services (neo4j, redis) to localhost.
 var forceNativeServices bool
 
-// UseNativeServices routes neo4j and redis to host-native instances on
-// localhost rather than spawning podman pods — the --native mode of the CLI
-// harness. Call before opening any backend.
+// UseNativeServices routes neo4j and redis to host-native instances on localhost
+// rather than podman pods — the harness's --native mode. Call before opening a backend.
 func UseNativeServices(on bool) { forceNativeServices = on }
 
-// Backend is one matrix row: a named factory that spins up a FRESH, EMPTY
-// local instance and returns it plus a cleanup func. Open returns
-// ErrUnavailable when the backend can't run here.
+// Backend is one matrix row: a named factory yielding a FRESH, EMPTY local instance
+// plus a cleanup func. Open returns ErrUnavailable when the backend can't run here.
 type Backend struct {
 	Name string
 	Open func() (ranke.Universe, func(), error)
 }
 
-// Reference is the row every other backend is compared against: the in-memory
-// store, which answers reads through the library's reference executor
-// (ranke.DefaultQuery). Always available, so a matrix always has a baseline.
+// Reference is the row every other backend is compared against: the in-memory store,
+// answering reads through ranke.DefaultQuery. Always available, so a matrix has a baseline.
 func Reference() Backend { return Backend{Name: "mem", Open: openMem} }
 
 // All is the matrix, each row starting empty. Durable byte-stores run standalone;
@@ -67,8 +61,7 @@ func All() []Backend {
 	}
 }
 
-// Select filters All by name (empty = all), preserving matrix order. Unknown
-// names are reported via the returned error.
+// Select filters All by name (empty = all) in matrix order; unknown names error.
 func Select(names []string) ([]Backend, error) {
 	all := All()
 	if len(names) == 0 {
@@ -100,8 +93,7 @@ func Select(names []string) ([]Backend, error) {
 }
 
 // --- component openers: each yields a fresh, empty instance + cleanup, or
-// ErrUnavailable when it can't run here. Composed into standalone rows and,
-// via Stacked(), into cache stacks. ---
+// ErrUnavailable when it can't run here. Composed into rows and, via Stacked(), stacks. ---
 
 func openMem() (ranke.Universe, func(), error) { return mem.New(), func() {}, nil }
 
@@ -150,9 +142,7 @@ func openRedis() (ranke.Universe, func(), error) {
 		return nil, nil, err
 	}
 	client := goredis.NewClient(&goredis.Options{Addr: addr, Password: pass})
-	// A key prefix isolates a run's keys from any other tenant of the same
-	// redis; a generous TTL lets a run's keys expire on their own; the bulk ops
-	// fan out at moderate concurrency.
+	// The key prefix isolates a run from other tenants of the same redis; the TTL expires its keys.
 	u, err := redisstore.New(client,
 		redisstore.WithKeyPrefix("rankeperf"),
 		redisstore.WithTTL(time.Hour),
@@ -176,9 +166,8 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		connCleanup()
 		return nil, nil, err
 	}
-	// Flush at the START, not teardown: each run wants a clean slate, but the
-	// graph is left in place afterwards so it stays browsable (Neo4j Browser,
-	// http://127.0.0.1:7474). This also clears any data a prior kept run left.
+	// Flush at the START: each run wants a clean slate, and the graph is left in place
+	// afterwards so it stays browsable (Neo4j Browser, http://127.0.0.1:7474).
 	if _, err := neo4jdriver.ExecuteQuery(context.Background(), driver,
 		"MATCH (n) DETACH DELETE n", nil,
 		neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase("neo4j")); err != nil {
@@ -186,9 +175,8 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		connCleanup()
 		return nil, nil, fmt.Errorf("flush neo4j: %w", err)
 	}
-	// Target the default database explicitly, and declare neo4j's inline
-	// content cap (~4 KiB) so a stack over it can descend to a durable tier
-	// for anything larger — the cap-aware read path the stack relies on.
+	// Target the default database explicitly, and declare neo4j's inline content cap
+	// (~4 KiB) so a stack over it descends to a durable tier for anything larger.
 	u := neo4jstore.New(driver,
 		neo4jstore.WithDatabase("neo4j"),
 		neo4jstore.WithContentCap(4096))

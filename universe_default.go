@@ -17,11 +17,8 @@ type getConfig struct {
 	rawDelta bool // return stored delta claims, skipping diff materialisation
 }
 
-// WithNotDiffMaterialized returns claims in their stored delta form — the
-// contribution/diff overlay is NOT applied. The default is materialised
-// (the overlay is resolved so GetField/Edges/content reflect the chain).
-// Use it for the codec round-trip, tooling that inspects a diff, and the
-// materialiser's own predecessor reads.
+// WithNotDiffMaterialized returns claims in stored delta form, the
+// contribution/diff overlay left unresolved.
 func WithNotDiffMaterialized() GetOption { return func(c *getConfig) { c.rawDelta = true } }
 
 func newGetConfig(opts ...GetOption) getConfig {
@@ -32,20 +29,12 @@ func newGetConfig(opts ...GetOption) getConfig {
 	return c
 }
 
-// WantsDelta reports whether opts ask for stored delta form. A backend checks it
-// to fail a read its Capabilities cannot honour — a layer keeping no delta must
-// miss rather than answer with materialised data.
+// WantsDelta reports whether opts ask for stored delta form, which a layer keeping
+// none must fail rather than answer materialised.
 func WantsDelta(opts ...GetOption) bool { return newGetConfig(opts...).rawDelta }
 
-// DefaultMaterialize is the fallback a Universe applies to its freshly
-// loaded (raw) claims: it resolves each claim's contribution/diff overlay
-// in place and returns the same slice. A byte-store backend calls it from
-// GetClaims/GetFromClosure, passing the read opts straight through — this
-// honours WithNotDiffMaterialized (returns the delta untouched). A
-// graph-native backend may materialise itself instead. Idempotent: a
-// non-diff or already-materialised claim is untouched. Predecessors are
-// loaded through GetClaim (so they are materialised recursively by the
-// same Universe).
+// DefaultMaterialize resolves each claim's contribution/diff overlay in place per
+// the read opts. Idempotent; predecessors load through GetClaim, so recursively.
 func DefaultMaterialize(ctx context.Context, u Universe, claims []Claim, opts ...GetOption) ([]Claim, error) {
 	if newGetConfig(opts...).rawDelta {
 		return claims, nil // opt-out: return stored delta, no overlay
@@ -58,9 +47,8 @@ func DefaultMaterialize(ctx context.Context, u Universe, claims []Claim, opts ..
 	return claims, nil
 }
 
-// materializeOne resolves one claim's contribution/diff predecessor (if
-// any) and computes its merged field/edge views. The delta (node.fields,
-// c.edges) is untouched, so ID()/Encode() stay the claim's own bytes.
+// materializeOne resolves one claim's contribution/diff predecessor into merged
+// field/edge views, leaving the delta itself intact so ID()/Encode() hold.
 func materializeOne(ctx context.Context, u Universe, c *claim) error {
 	if c == nil || c.diffClaim != nil {
 		return nil // nothing to do / already materialised
@@ -87,12 +75,8 @@ func materializeOne(ctx context.Context, u Universe, c *claim) error {
 	return nil
 }
 
-// DefaultGetClaimHeights is the fallback GetClaimHeights for a Universe with no
-// height index: it loads the claims (in delta form — height is the claim's own
-// field, never inherited, so materialising the diff chain is unnecessary) and
-// reads each committed height, positionally. A backend that keeps an id→height
-// cache answers from it instead, deserialising only the misses — the whole
-// point of putting height on the Universe port (§4.1). See HeightCache.
+// DefaultGetClaimHeights reads each committed height positionally, from claims
+// loaded in delta form — height is a claim's own field (§4.1).
 func DefaultGetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64, error) {
 	cs, err := u.GetClaims(ctx, ids, WithNotDiffMaterialized())
 	if err != nil {
@@ -105,16 +89,8 @@ func DefaultGetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64
 	return out, nil
 }
 
-// HeightCache memoises claim heights for a Universe. A height is immutable —
-// fixed at creation and bound into the content-addressed id (§4.1) — so a
-// cached entry is valid forever and needs no invalidation; the same id yields
-// the same height in any Universe. A byte-store backend embeds one to answer
-// GetClaimHeights without re-reading and re-decoding the claim, and populates
-// it opportunistically from any get/put that already holds a claim (NoteClaims),
-// so it fills naturally and the fallback load is rarely taken. The zero value
-// is not usable — construct with NewHeightCache. All methods are safe for
-// concurrent use, and a nil *HeightCache is a no-op reader (Get misses), so it
-// degrades gracefully.
+// HeightCache memoises claim heights. A height is bound into the id (§4.1), so an
+// entry holds forever. Construct with NewHeightCache; a nil cache simply misses.
 type HeightCache struct {
 	mu sync.RWMutex
 	m  map[string]uint64
@@ -123,10 +99,8 @@ type HeightCache struct {
 // NewHeightCache returns an empty, ready-to-use cache.
 func NewHeightCache() *HeightCache { return &HeightCache{m: make(map[string]uint64)} }
 
-// Note records id→height if the id is not already cached. It checks under the
-// read lock first and takes the write lock only on a miss — heights never
-// change, so a present entry is authoritative and the hot path never
-// serialises writers. Cheap enough to call on every claim a get/put handles.
+// Note records id→height when absent, checking under the read lock first so the
+// hot path never serialises writers.
 func (c *HeightCache) Note(id Id, height uint64) {
 	if c == nil || id == nil {
 		return
@@ -143,9 +117,8 @@ func (c *HeightCache) Note(id Id, height uint64) {
 	c.mu.Unlock()
 }
 
-// NoteClaims records the height of every non-nil claim — the convenience a
-// get/put path calls after handling a batch, so reads and writes both warm the
-// cache.
+// NoteClaims records the height of every non-nil claim, so a get/put path warms
+// the cache with a batch it already holds.
 func (c *HeightCache) NoteClaims(cs ...Claim) {
 	for _, cl := range cs {
 		if cl != nil {
@@ -165,9 +138,8 @@ func (c *HeightCache) Get(id Id) (uint64, bool) {
 	return h, ok
 }
 
-// GetClaimHeights answers ids from the cache, loading only the misses from u in
-// one bulk DefaultGetClaimHeights and caching them. This is the cached
-// GetClaimHeights a backend delegates to instead of the naive default.
+// GetClaimHeights answers ids from the cache, loading the misses from u in one
+// bulk DefaultGetClaimHeights and caching them.
 func (c *HeightCache) GetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64, error) {
 	out := make([]uint64, len(ids))
 	var missIDs []Id
@@ -193,12 +165,8 @@ func (c *HeightCache) GetClaimHeights(ctx context.Context, u Universe, ids []Id)
 	return out, nil
 }
 
-// DefaultCopyClaims is the reference CopyClaims for a Universe without a
-// native fast path. It walks claim-by-claim via the public single-item
-// helpers; a cloud backend should provide its own batched implementation.
-// See Universe.CopyClaims for the option semantics. Progress is best-effort:
-// a naive walker cannot know a closure's size in advance, so
-// DiscoveryComplete stays false until the walk drains, then flips true.
+// DefaultCopyClaims is the reference CopyClaims, walking claim-by-claim through
+// the single-item helpers. DiscoveryComplete flips true once the walk drains.
 func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ...CopyOption) error {
 	if dst == nil || src == nil {
 		return WithDetail(errCopyClaims, "nil Universe")
@@ -233,10 +201,8 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 		}
 		seen[k] = struct{}{}
 
-		// A present claim is treated as fully copied — under the merge
-		// invariant a claim never exists without its closure (and, for
-		// copies made WithContent, its content). This makes the walk
-		// idempotent and lets re-runs short-circuit.
+		// A present claim counts as fully copied: the merge invariant gives it
+		// its whole closure, which makes the walk idempotent.
 		has, err := HasClaim(ctx, dst, cur)
 		if err != nil {
 			return WrapDetail(errCopyClaims, "dst.HasClaim "+k, err)
@@ -287,10 +253,8 @@ func DefaultCopyClaims(ctx context.Context, dst, src Universe, ids []Id, opts ..
 	return nil
 }
 
-// DefaultCopyContents is the reference CopyContents for a Universe without a
-// native fast path. It copies blob-by-blob via the public single-item
-// helpers, skipping any the receiver already has. WithClosure/WithContent
-// are ignored; WithProgress is honoured.
+// DefaultCopyContents is the reference CopyContents, copying blob-by-blob and
+// skipping what the receiver holds. Honours WithProgress alone.
 func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentRef, opts ...CopyOption) error {
 	if dst == nil || src == nil {
 		return WithDetail(errCopyContents, "nil Universe")
@@ -333,10 +297,8 @@ func DefaultCopyContents(ctx context.Context, dst, src Universe, refs []ContentR
 	return nil
 }
 
-// DefaultSync is the reference Sync: it fills dst for id's closure by copying
-// from src (claims + content), which walks the closure and skips what dst
-// already has, so only the gap is fetched. A nil src means there is nothing to
-// copy from, so dst is taken as already synced.
+// DefaultSync fills dst for id's closure from src, claims and content, fetching
+// only the gap. A nil src leaves dst as it stands.
 func DefaultSync(ctx context.Context, dst, src Universe, id Id) <-chan SyncResult {
 	out := make(chan SyncResult, 1)
 	go func() {

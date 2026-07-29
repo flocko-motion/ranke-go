@@ -168,15 +168,28 @@ nat_purge()  { nat_down || true; rm -rf "$NAT_DIR"; echo "purged ${NAT_DIR}"; }
 # row, keyed by return column. Mode-independent: both pod and native publish
 # HTTP on 127.0.0.1:${HTTP_PORT}. Cypher comes from the argument, or from stdin
 # when the argument is "-", so a heredoc can carry a multi-line statement.
+# --params takes a JSON object bound as the statement's $-parameters, which is
+# how the adapter runs its own queries.
 query() {
-  local cypher="${1:-}"
+  local cypher="" params="{}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --params) params="${2:-}"; shift 2 ;;
+      *) cypher="$1"; shift ;;
+    esac
+  done
   [ "$cypher" = "-" ] && cypher="$(cat)"
   if [ -z "$cypher" ]; then
     echo "error: no cypher given (pass a statement, or '-' to read stdin)" >&2
     return 2
   fi
+  if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$params"; then
+    echo "error: --params must be a JSON object, got: ${params}" >&2
+    return 2
+  fi
   local body out
-  body="$(jq -nc --arg s "$cypher" '{statements:[{statement:$s}]}')"
+  body="$(jq -nc --arg s "$cypher" --argjson p "$params" \
+    '{statements:[{statement:$s, parameters:$p}]}')"
   out="$(curl -fsS -u "neo4j:${PASS}" -H 'Content-Type: application/json' \
     -X POST "http://127.0.0.1:${HTTP_PORT}/db/${RANKE_NEO4J_DB:-neo4j}/tx/commit" \
     -d "$body")" || { echo "error: could not reach Neo4j on 127.0.0.1:${HTTP_PORT} (is it up?)" >&2; return 1; }
@@ -196,7 +209,7 @@ query() {
 usage() {
   cat <<EOF
 usage: $0 <pod|native> <command> [opts]
-       $0 query <cypher>
+       $0 query <cypher> [--params '<json>']
 
   pod     run Neo4j in a podman pod on a shared network (needs podman)
             up [agent-pod] | down | status | env
@@ -204,8 +217,10 @@ usage: $0 <pod|native> <command> [opts]
             up | down | status | env | purge
   query   run any Cypher against the running instance (either mode) and
           print one JSON object per row, keyed by return column. Pass '-'
-          to read the statement from stdin.
+          to read the statement from stdin, and --params a JSON object to
+          bind the statement's \$-parameters.
             $0 query 'MATCH (n) RETURN labels(n)[0] AS label, n.content_size AS size'
+            $0 query 'MATCH (n {id: \$id}) RETURN n.height' --params '{"id":"b5ua..."}'
 
   Overrides: RANKE_NEO4J_DB selects the database (default neo4j).
 EOF
@@ -215,7 +230,7 @@ mode="${1:-}"
 cmd="${2:-up}"
 case "$mode" in
   query)
-    query "${2:-}" ;;
+    shift; query "$@" ;;
   pod)
     case "$cmd" in
       up) pod_up "${3:-}" ;;

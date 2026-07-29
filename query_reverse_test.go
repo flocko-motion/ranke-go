@@ -71,8 +71,8 @@ func TestQueryReverseUsesFindsReferrers(t *testing.T) {
 	q := Query{Select: Select{
 		Branch: BranchUniverse, Head: a["head"].ID(), Claim: a["head"].ID(),
 		Path: []PathStep{
-			{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}},                     // forward → {a, b}
-			{Dir: DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}},    // reverse → their users
+			{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}},                   // forward → {a, b}
+			{Dir: DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}}, // reverse → their users
 		},
 	}}
 	require.Equal(t, idsOf(a["x"], a["y"], a["head"]), queryIDs(t, u, q))

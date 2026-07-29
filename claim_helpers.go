@@ -27,9 +27,7 @@ func splitType(s string) (class, sub string, err error) {
 	return s[:slash], s[slash+1:], nil
 }
 
-// matchAll reports whether e satisfies every edge filter (AND). Node-only
-// filters are skipped — checking IsEdgeFilter once avoids a MatchEdge call
-// per edge for filters that don't apply to edges at all.
+// matchAll reports whether e satisfies every edge filter (AND).
 func matchAll(e Edge, filters []Filter) bool {
 	for _, f := range filters {
 		if f.IsEdgeFilter() && !f.MatchEdge(e) {
@@ -39,16 +37,9 @@ func matchAll(e Edge, filters []Filter) bool {
 	return true
 }
 
-// checkSigningConsistency verifies the SigningKey matches the pubkey this
-// claim declares (§5.7) and classifies the identity-Sign case (no key, no
-// pubkey). It never needs a Universe:
-//
-//   - Non-root: the contributor's pubkey was resolved to bytes — inline or
-//     external — when it was obtained via AsContributor; match on bytes.
-//   - Root: this claim declares its own pubkey as its content. Inline bytes
-//     are matched directly; an external declaration (ContentHash only) is
-//     matched by hashing the key's own pubkey — H(key.Public()) ==
-//     ContentHash — so external storage works here too, no fetch required.
+// checkSigningConsistency verifies the SigningKey matches the pubkey this claim
+// declares (§5.7) and classifies the identity-Sign case. Resolved pubkeys match
+// on bytes, an external root declaration on H(key.Public()) — so no Universe.
 func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 	hasSigner := cfg.SigningKey != nil && !isTypedNil(cfg.SigningKey)
 	if !isRoot {
@@ -75,8 +66,7 @@ func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 		}
 		return nil
 	default:
-		// No declared pubkey: identity-Sign (no key), or a key with nothing
-		// to attest to (error).
+		// No declared pubkey: identity-Sign, or a key with nothing to attest to.
 		if hasSigner {
 			return errResolvedNoPubkey
 		}
@@ -84,10 +74,8 @@ func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 	}
 }
 
-// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes
-// and classifies the missing-half cases: neither → identity Sign; key without
-// pubkey or pubkey without key → error; both → the key's public part must
-// equal pubkey.
+// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes.
+// Neither half present is identity-Sign; one half alone is an error.
 func checkKeyAgainstPubkey(hasSigner bool, key crypto.Signer, pubkey []byte) error {
 	hasPubkey := len(pubkey) > 0
 	switch {
@@ -125,12 +113,8 @@ func isTypedNil(i any) bool {
 }
 
 // HeightOf returns the generation number a new claim referencing refs must
-// carry: 1 + max(refs' heights), or 0 when refs is empty (an initial node).
-// It is the trivial reference computation for ClaimBuilder.Height /
-// WithHeight — callers must pass every claim the new one references,
-// including its contributor and (for a diff) its predecessor, since those
-// edges count toward height too. Tooling at scale caches id→height instead of
-// re-walking; this is the uncached, in-memory equivalent.
+// carry: 1 + max(refs' heights), or 0 for an initial node. Pass every claim the
+// new one references — contributor and predecessor edges count too.
 func HeightOf(refs ...Claim) uint64 {
 	var max uint64
 	for _, r := range refs {
@@ -167,8 +151,7 @@ func hasDerivationEdge(edges []*edge) bool {
 	return false
 }
 
-// asConcreteEdge unwraps an Edge into the concrete *edge. Edge is sealed, so
-// this cannot fail on a foreign type — only nil is rejected.
+// asConcreteEdge unwraps an Edge into the concrete *edge, rejecting nil.
 func asConcreteEdge(e Edge) (*edge, error) {
 	if e == nil {
 		return nil, errNilEdge

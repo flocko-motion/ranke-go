@@ -9,30 +9,19 @@ import (
 	"strings"
 )
 
-// Field-size limits: reference-implementation caps (the paper leaves them
-// open). Fields are metadata — large data belongs in content (inline or
-// external, which carries content_size and dedups). Enforced at construction
-// (NewClaim/NewEdge); the codec and verifier never reject an already-stored
-// record over them.
+// Field-size caps for the reference implementation; fields are metadata, so
+// large data belongs in content. Enforced by NewClaim/NewEdge.
 const (
 	maxFieldNameLen    = 128       // bytes, one field name
 	maxFieldValueLen   = 64 * 1024 // bytes, one field value
 	maxFieldsPerRecord = 256       // fields on one node or edge
 )
 
-// Field is a node/edge field name. Field names are open user vocabulary,
-// constrained to a safe charset (enforced by NewClaim/NewEdge): lowercase
-// letters, digits, and "_", never starting with "_". Everything outside
-// that charset is a reserved namespace the system owns — the "." prefix
-// (used for the wire aliases below) today, with room for more prefixes
-// later. Names like "name" are ordinary fields; the structural properties
-// (content, edges, …) live in their own slots, not the field map, so they
-// never collide with a user field of the same name.
+// Field is a node/edge field name: open user vocabulary over [a-z0-9_] with no
+// leading "_". Charsets outside that are reserved system namespaces, e.g. ".".
 type Field string
 
-// Aliases are bare (no dot) — the codec adds the reserved "." prefix on the
-// wire to signify "this is an alias" (a literal field name can never start
-// with ".", so the two never collide).
+// Aliases are bare; the codec adds the reserved "." prefix on the wire.
 const (
 	FieldName             = "name"
 	FieldNameAlias        = "n"
@@ -46,18 +35,14 @@ const (
 	FieldContentHashAlias = "h"
 	FieldHeight           = "height"
 	FieldHeightAlias      = "H"
-	// FieldEdgesDiffOmit, on a diff claim, lists the ids of inherited edges
-	// to drop when materialising the diff, one id per line (newline-
-	// separated — ids never contain a newline). This is the "omit" half of
-	// the edge overlay; overwrite/add is done by re-stating edges.
+	// FieldEdgesDiffOmit lists, on a diff claim, ids of inherited edges to drop
+	// when materialising, one per line. Overwrite/add is re-stating the edge.
 	FieldEdgesDiffOmit = "edges_diff_omit"
-	// FieldFieldsDiffOmit is the node-field analogue: newline-separated
-	// field names to drop from the inherited set when materialising.
+	// FieldFieldsDiffOmit is the node-field analogue: newline-separated names.
 	FieldFieldsDiffOmit = "fields_diff_omit"
 )
 
-// splitLines parses a newline-separated list into a set; blank lines and
-// surrounding whitespace are ignored. Used for the *_diff_omit fields.
+// splitLines parses a newline-separated list (a *_diff_omit field) into a set.
 func splitLines(s string) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, line := range strings.Split(s, "\n") {
@@ -69,8 +54,7 @@ func splitLines(s string) map[string]struct{} {
 }
 
 // checkUserFieldName validates a user-supplied field name: non-empty, at most
-// maxFieldNameLen bytes, only lowercase letters, digits, and "_", never
-// starting with "_" (that prefix — like "." — is a reserved system namespace).
+// maxFieldNameLen bytes, [a-z0-9_], no leading "_" (a reserved namespace).
 func checkUserFieldName(name string) error {
 	if len(name) > maxFieldNameLen {
 		return errFieldNameTooLong // don't echo a possibly-huge name
@@ -82,10 +66,7 @@ func checkUserFieldName(name string) error {
 }
 
 // checkFields validates a whole node/edge field set at construction: at most
-// maxFieldsPerRecord entries, each name valid and bounded, each value at most
-// maxFieldValueLen bytes. It covers every field — user fields and system ones
-// (e.g. edges_diff_omit) alike — so nothing slips through unbounded. Large
-// data belongs in content (inline or external), not a field.
+// maxFieldsPerRecord entries, each name valid, each value within the cap.
 func checkFields(fields map[string]string) error {
 	if len(fields) > maxFieldsPerRecord {
 		return WithDetail(errTooManyFields, strconv.Itoa(len(fields)))
@@ -101,9 +82,8 @@ func checkFields(fields map[string]string) error {
 	return nil
 }
 
-// validFieldChars reports whether name is non-empty, contains only
-// [a-z0-9_], and does not start with "_". Node/edge subtypes use the same
-// charset (see checkSubtype).
+// validFieldChars reports whether name is non-empty, is [a-z0-9_], and has no
+// leading "_". Node/edge subtypes share the charset (see checkSubtype).
 func validFieldChars(name string) bool {
 	if name == "" {
 		return false
@@ -124,8 +104,7 @@ func validFieldChars(name string) bool {
 	return true
 }
 
-// checkSubtype validates a node/edge subtype — the open half of a type.
-// Same charset as field names: [a-z0-9] then [a-z0-9_].
+// checkSubtype validates a node/edge subtype: [a-z0-9] then [a-z0-9_].
 func checkSubtype(sub string) error {
 	if !validFieldChars(sub) {
 		return WithDetail(errInvalidSubtype, sub)
@@ -133,9 +112,8 @@ func checkSubtype(sub string) error {
 	return nil
 }
 
-// checkEncodingSubtype validates an encoding (MIME) subtype — more liberal
-// than a plain subtype: a leading [A-Za-z0-9], then letters (either case),
-// digits, and the real-MIME specials "_", ".", "+", "-".
+// checkEncodingSubtype validates an encoding (MIME) subtype: a leading
+// [A-Za-z0-9], then alphanumerics and the MIME specials "_", ".", "+", "-".
 func checkEncodingSubtype(sub string) error {
 	if !validEncodingSubtypeChars(sub) {
 		return WithDetail(errInvalidEncodingSubtype, sub)
@@ -163,8 +141,7 @@ func validEncodingSubtypeChars(sub string) bool {
 	return true
 }
 
-// fieldNameToAlias maps a well-known field name to its bare alias; open
-// user field names pass through unchanged. The codec adds the "." prefix.
+// fieldNameToAlias maps a well-known field name to its bare alias; user names pass through.
 func fieldNameToAlias(n Field) Field {
 	switch n {
 	case FieldName:
@@ -184,8 +161,7 @@ func fieldNameToAlias(n Field) Field {
 	}
 }
 
-// fieldNameFromAlias maps a bare alias back to its canonical field name;
-// unknown values pass through unchanged.
+// fieldNameFromAlias maps a bare alias back to its canonical field name.
 func fieldNameFromAlias(c Field) Field {
 	switch c {
 	case FieldNameAlias:

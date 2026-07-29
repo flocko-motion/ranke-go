@@ -34,14 +34,11 @@ import (
 
 var errNilClient = errors.New("adapter/redis.New: nil client")
 
-// defaultConcurrency is how many keys the bulk Universe ops transfer in
-// parallel by default — redis is a network hop, so throughput comes from
-// pipelining requests over the per-request latency.
+// defaultConcurrency pipelines bulk key transfers to hide the network hop.
 const defaultConcurrency = 16
 
-// New returns a Universe backed by the given redis client. The client's
-// connection, auth, and database are the caller's concern; the adapter does
-// not own it (Close is a no-op).
+// New returns a Universe backed by client, whose connection, auth, and
+// database stay the caller's concern.
 func New(client *goredis.Client, opts ...Option) (ranke.Universe, error) {
 	if client == nil {
 		return nil, errNilClient
@@ -67,26 +64,20 @@ type config struct {
 // Option configures a redis store.
 type Option func(*config)
 
-// WithTTL sets a per-key expiry on writes, bounding how long a cached value
-// lives. Default 0 = no expiry (values persist until evicted by redis's
-// maxmemory policy). Content addressing makes any TTL safe: an expired key is
-// simply refetched from the layer below and re-cached.
+// WithTTL sets a per-key expiry on writes; default 0 leaves eviction to redis's
+// maxmemory policy. Content addressing makes any TTL safe — expiry means refetch.
 func WithTTL(d time.Duration) Option { return func(c *config) { c.ttl = d } }
 
 // WithKeyPrefix namespaces every key (e.g. "ranke:"), so one redis instance
 // can host several archives or coexist with other data. Default "".
 func WithKeyPrefix(p string) Option { return func(c *config) { c.prefix = p } }
 
-// WithTier sets the write role redis serves in a stack (Capabilities.Tier).
-// Default is lazy — a read-through cache, populated on a read miss served from
-// below and never written on the write path. A deployment that wants redis
-// written through (e.g. eager) can say so; redis holds verbatim claims, so any
-// tier is allowed.
+// WithTier sets the write role redis serves in a stack (Capabilities.Tier);
+// default lazy fills on read misses. Verbatim claims make any tier valid.
 func WithTier(t ranke.StorageTier) Option { return func(c *config) { c.tier = t } }
 
-// WithConcurrency sets how many keys the bulk operations
-// (GetClaims/PutClaims/HasClaims/GetContents) transfer in parallel. n<=1
-// forces sequential. Defaults to defaultConcurrency.
+// WithConcurrency sets how many keys the bulk operations transfer in parallel;
+// n<=1 forces sequential.
 func WithConcurrency(n int) Option {
 	return func(c *config) {
 		if n > 0 {
@@ -118,8 +109,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return b, nil
 }
 
-// Put stores data under key with the configured TTL, overwriting any existing
-// value (a re-put of content-addressed bytes writes identical bytes).
+// Put stores data under key with the configured TTL, overwriting any value there.
 func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	return s.client.Set(ctx, s.key(key), data, s.ttl).Err()
 }
@@ -133,9 +123,8 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-// Capabilities: redis can overwrite (SET), delete (DEL), and enumerate (SCAN).
-// Persistent is false — this is a cache tier, not authoritative storage, even
-// if the server happens to run with AOF/RDB.
+// Capabilities: redis overwrites (SET), deletes (DEL), and enumerates (SCAN),
+// and serves as a cache tier whatever AOF/RDB the server runs.
 func (s *store) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
 		Overwrite:  true,

@@ -12,28 +12,23 @@ import (
 	"time"
 )
 
-// Node is the structural component of a claim. A node's id is the
-// claim id. Two nodes with identical content but different
-// provenance produce different ids (spec §4.1).
+// Node is the structural component of a claim; its id is the claim id.
+// Identical content under different provenance yields different ids (spec §4.1).
 type Node interface {
 	Type() string
 	TypeClass() NodeClass
 	TypeSub() string
 	// GetContentHash is the address of EXTERNAL content, H(content); nil for
-	// inline content (whose bytes are in the node, §Content) and for no content.
+	// inline content (bytes in the node, §Content) and for no content.
 	GetContentHash() Id
-	// GetContentSize is the content's byte length (0 when no content).
-	// Paired with the hash to defend against truncation/extension and to
-	// let storage layers know the size without loading the bytes.
+	// GetContentSize is the content's byte length (0 when no content), paired with
+	// the hash to defend against truncation and to size a read without loading it.
 	GetContentSize() uint64
-	// ContentKind reports whether and where the node's content lives — Inline,
-	// External, or None. A node always knows its own kind (never Unknown);
-	// GetClaimContent uses it to route. Reads through a diff overlay via the
-	// effective content source.
+	// ContentKind reports where the node's content lives — Inline, External, or
+	// None — reading through a diff overlay via the effective content source.
 	ContentKind() ContentKind
-	// GetInlineContent returns the inline content bytes (nil when the node
-	// carries no content); it errors when the content is external — check
-	// ContentKind first, or use GetContent with a Universe.
+	// GetInlineContent returns the inline content bytes; it errors when the content
+	// is external — check ContentKind first, or use GetContent with a Universe.
 	GetInlineContent() ([]byte, error)
 	// GetContent returns a reader over the content, transparently
 	// streaming external content from u; u may be nil for inline content.
@@ -42,14 +37,10 @@ type Node interface {
 	EncodingClass() EncodingClass
 	EncodingSub() string
 	CreatedAt() time.Time
-	// Height is the claim's generation number in the provenance DAG: 0 for
-	// an initial node (no edges), else 1 + max over the heights of the
-	// claims this one references (§4.1). Fixed at creation and covered by
-	// the node hash, so the id commits to it; the verifier re-derives and
-	// enforces it against the closure.
+	// Height is the claim's generation number: 0 for an initial node, else 1 + max
+	// over referenced heights (§4.1). In the node hash, so the id commits to it.
 	Height() uint64
-	// Edges returns the ids of edges created with this claim, in
-	// canonical (sort) order.
+	// Edges returns the ids of edges created with this claim, in canonical order.
 	Edges() []Id
 	HasField(name string) bool
 	GetField(name string) (string, error)
@@ -57,9 +48,7 @@ type Node interface {
 	ID() Id
 }
 
-// node is the concrete implementation of Node. The edges field carries
-// the ids of edges created with the owning claim, in canonical sort
-// order; this set participates in the node hash.
+// node is the concrete implementation of Node; edges participates in the node hash.
 type node struct {
 	typeClass     NodeClass
 	typeSub       string
@@ -74,18 +63,13 @@ type node struct {
 	fields        map[string]string
 	id            Id // = Sign(H(S(node))); also the claim id
 
-	// Diff materialisation (set by the loader when the owning claim is a
-	// contribution/diff overlay): diffNode is the materialised predecessor
-	// node; diffFields is the merged field map (diffNode's fields, minus
-	// fields_diff_omit, overlaid with self's), computed once at load. The
-	// delta (fields, contentHash, edges) is left untouched so id/Encode
-	// stay the claim's own bytes.
+	// Diff overlay, set by the loader once at load: the materialised predecessor
+	// and the merged field map. The delta stays as the claim's own bytes for id/Encode.
 	diffNode   *node
 	diffFields map[string]string
 }
 
-// fieldMap is the effective field set: the delta for a plain node, the
-// merged map for a diff node.
+// fieldMap is the effective field set: the delta, or the merged map for a diff node.
 func (n *node) fieldMap() map[string]string {
 	if n.diffNode == nil {
 		return n.fields
@@ -93,8 +77,7 @@ func (n *node) fieldMap() map[string]string {
 	return n.diffFields
 }
 
-// computeDiffFields builds diffFields (inherit diffNode → drop
-// fields_diff_omit → overlay self). Called once at materialisation.
+// computeDiffFields builds diffFields: inherit diffNode → drop fields_diff_omit → overlay self.
 func (n *node) computeDiffFields() {
 	m := make(map[string]string, len(n.diffNode.fieldMap())+len(n.fields))
 	for k, v := range n.diffNode.fieldMap() {
@@ -109,9 +92,8 @@ func (n *node) computeDiffFields() {
 	n.diffFields = m
 }
 
-// contentSource is the node that supplies this node's content: self if it
-// sets its own content — inline (content) or external (content_hash) — else the
-// diff predecessor's source (content is inherited unless a diff restates it).
+// contentSource is the node supplying this node's content: self when it sets its own
+// (inline or content_hash), else the diff predecessor's source — content is inherited.
 func (n *node) contentSource() *node {
 	if n.content != nil || n.contentHash != nil || n.diffNode == nil {
 		return n
@@ -119,9 +101,7 @@ func (n *node) contentSource() *node {
 	return n.diffNode.contentSource()
 }
 
-// node accessor methods. Construction lives in claim.go (the node is
-// built as part of NewClaim) since a node's id is the claim id and
-// its edge list is finalized at claim construction.
+// Node accessors; construction lives in claim.go, since a node's id is the claim id.
 
 func (n *node) Type() string {
 	return string(n.typeClass) + "/" + n.typeSub
@@ -143,28 +123,21 @@ func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
 func (n *node) CreatedAt() time.Time   { return n.createdAt }
 
-// ContentKind derives from the effective source's fields. content_hash marks
-// External (§Content: content and content_hash are mutually exclusive, and the
-// hash is retained even by a structure-only cache). Otherwise inline bytes — or
-// a non-zero content_size — mark Inline: the size lets a structure-only cache
-// that dropped the inline bytes still report Inline, so GetClaimContent falls
-// through to the byte layer for them. Neither ⇒ None. Never Unknown — a node
-// always knows its own kind.
+// ContentKind derives from the effective source: content_hash ⇒ External (§Content:
+// exclusive with inline), bytes or a non-zero content_size ⇒ Inline, else None.
 func (n *node) ContentKind() ContentKind {
 	cs := n.contentSource()
 	switch {
 	case cs.contentHash != nil:
 		return ContentExternal
 	case cs.content != nil || cs.contentSize > 0:
-		return ContentInline
+		return ContentInline // size alone: a structure-only cache dropped the bytes
 	default:
 		return ContentNone
 	}
 }
 
-// Height returns the node's own generation number. Unlike content and the
-// field map, height is never inherited through a diff overlay — each claim
-// (delta or not) carries its own height, so this reads the node directly.
+// Height returns the claim's own generation number, read straight off the node.
 func (n *node) Height() uint64 { return n.height }
 func (n *node) ID() Id         { return n.id }
 

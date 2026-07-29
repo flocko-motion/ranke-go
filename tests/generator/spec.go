@@ -6,28 +6,17 @@ package generator
 
 import "time"
 
-// Spec is the complete, fine-tunable description of a graph to generate. The
-// intended use is SpecForSize(seed, size) for a one-knob call, then override
-// individual fields when a test wants to stress one corner. Every field is a
-// deterministic input: the same Spec yields the same archive, ids included.
-//
-// The builder bakes in the "kitchen-sink" corners so a single generated
-// archive exercises them all at once: multiple contributors, sources with
-// tiny AND large inline blobs, external (hash-addressed) content, derivation
-// chains, entities and the relations between them (both relation_direction
-// polarities), long contribution/diff chains, high- and low-degree nodes,
-// oversized field values, and multi-head consolidation.
+// Spec is the complete, fine-tunable description of a graph to generate; the
+// same Spec yields the same archive, ids included. Start from SpecForSize and
+// override single fields to stress one corner — every other corner stays in.
 type Spec struct {
-	// Seed is the master seed. It fixes every derived key (via keyForIndex),
-	// every content blob, and thus every id. Change it for an independent but
-	// equally-deterministic archive.
+	// Seed fixes every derived key (via keyForIndex), every blob, and every id.
 	Seed int64
-	// Size is the headline knob SpecForSize scales the rest from. It is
-	// retained for reference/manifest; the builder reads the derived fields.
+	// Size is the headline knob SpecForSize scales the rest from, kept for the
+	// manifest; the builder reads the derived fields.
 	Size int
 
-	// Base is the clock's starting instant; the builder stamps created_at from
-	// a clock advancing off it. Fixed (never time.Now) for reproducibility.
+	// Base is the clock's starting instant, fixed for reproducibility.
 	Base time.Time
 	// Step is how far the clock advances per claim.
 	Step time.Duration
@@ -61,23 +50,16 @@ type Spec struct {
 	TinyBlobBytes  int
 	LargeBlobBytes int
 	// OversizedFieldBytes is the length of a large field value placed on one
-	// claim (0 disables the corner). Kept under the ADT's field-value cap
-	// (64 KiB) — a big-but-valid field, not an over-limit one.
+	// claim (0 disables the corner), within the ADT's 64 KiB field-value cap.
 	OversizedFieldBytes int
-	// MaxEdgeDegree is the fan-out of the highest-degree derivation: it cites
-	// up to this many sources at once (the high-degree corner); most nodes
-	// stay low-degree.
+	// MaxEdgeDegree is the fan-out of the highest-degree derivation.
 	MaxEdgeDegree int
 
-	// KeyExpiries is how many contribution/expiry claims to mint — each a
-	// claim carrying a contribution/expiry edge to a contributor and a
-	// pubkey_expires_after field (paper §Types). Just a claim, like everything
-	// else in the graph.
+	// KeyExpiries is how many contribution/expiry claims to mint, each with an
+	// edge to a contributor and a pubkey_expires_after field (paper §Types).
 	KeyExpiries int
-	// Deletes is how many contribution/delete tombstones to mint — each a
-	// claim whose contribution/delete edge names a claim by id, documenting a
-	// removed-bytes gap (paper §Types). The bytes are not actually purged
-	// here; the tombstone claim is the structural corner.
+	// Deletes is how many contribution/delete tombstones to mint, each naming a
+	// claim by id as a removed-bytes gap (paper §Types).
 	Deletes int
 
 	// Branches is how many named branches the contributions spread across;
@@ -85,11 +67,9 @@ type Spec struct {
 	Branches int
 }
 
-// SpecForSize derives a full Spec from one size knob. The scaling is linear
-// and deliberately simple; the point is that size=10 gives a small archive and
-// size=2000 gives a 10k+-claim one, with every corner present at either scale.
-// The shape knobs (blob sizes, diff-chain length, max degree) grow sublinearly
-// so a large archive is mostly breadth, not a few monstrous claims.
+// SpecForSize derives a full Spec from one size knob, linearly, with every
+// corner present at either scale. Shape knobs grow sublinearly, so a large
+// archive is mostly breadth.
 func SpecForSize(seed int64, size int) Spec {
 	if size < 1 {
 		size = 1
@@ -114,23 +94,16 @@ func SpecForSize(seed int64, size int) Spec {
 		MaxEdgeDegree:       clampMin(ilog2(size)+2, 3),
 
 		KeyExpiries: clampMin(size/20, 1),
-		// Deletes default off: a contribution/delete tombstone documents purged
-		// bytes, but the library is append-only and purges nothing, so at the
-		// ADT level it would point at a still-present claim. Deletion is a
-		// RankeDB (DB-level) concern; the knob stays for that testing later.
+		// Deletes off by default: purging bytes is a RankeDB-level concern.
 		Deletes: 0,
 	}
 }
 
-// spineClaims is the near-constant branch-table/head overhead SpecForNodes
-// subtracts before dividing, so a node target lands near the real claim count.
+// spineClaims is the near-constant branch-table/head overhead of an archive.
 const spineClaims = 350
 
-// SpecForNodes scales an archive to roughly nodes total claims — a dimension,
-// not an exact count. SpecForSize's content claims run ~5× its unit; the
-// sequencer then adds spineClaims of branch-table spine, so we subtract that
-// before dividing to land near nodes across the useful range (1k → ~1k,
-// 1m → ~1m). This is what the CLI's --size (1k, 1m, …) feeds.
+// SpecForNodes scales an archive to roughly nodes total claims, as the CLI's
+// --size (1k, 1m, …) does: content claims run ~5× the size unit, plus spine.
 func SpecForNodes(seed int64, nodes int) Spec {
 	s := SpecForSize(seed, clampMin((nodes-spineClaims)/5, 1))
 	s.Size = nodes // the headline reflects the requested node count, not the unit

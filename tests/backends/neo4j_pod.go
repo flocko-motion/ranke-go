@@ -126,7 +126,7 @@ func neo4jPod() (*Neo4jConn, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("podman run neo4j: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	cleanup := func() { _ = exec.Command("podman", "rm", "-f", name).Run() }
+	cleanup := func() { removePod(name) }
 
 	conn := &Neo4jConn{
 		BoltURI:  fmt.Sprintf("bolt://127.0.0.1:%d", boltPort),

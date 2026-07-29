@@ -11,7 +11,8 @@ Agents tend to forget details from the papers. The papers specify all details, s
 - use jq, not pyton, to work with json
 - use brokkr instead of grep (brokkr --help)
 - use gopls instead of hand rolled mechanic refactoring with sed/python 
-- use `services/neo4j.sh query {q}` for querying neo4j
+- use `services/neo4j.sh query {q}` for querying neo4j — `--params '{json}'` binds
+  `$`-parameters, so a lowering can be run exactly as the adapter emits it
 
 ## brokkr
 

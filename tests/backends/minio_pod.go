@@ -53,7 +53,7 @@ func minioPod() (*awss3.Client, string, func(), error) {
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("podman run minio: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	cleanup := func() { _ = exec.Command("podman", "rm", "-f", name).Run() }
+	cleanup := func() { removePod(name) }
 
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d", port)
 	if err := waitReady(endpoint); err != nil {

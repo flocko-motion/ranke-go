@@ -59,15 +59,12 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 	return s.at
 }
 
-// Tick advances the scenario clock by one second and returns the new time —
-// satisfying the dev Sequencer's Clock, so the claims a scenario stamps and
-// the branch tables the Sequencer mints all advance on one monotone timeline.
+// Tick advances the clock by one second, satisfying the dev Sequencer's Clock
+// so scenario claims and minted branch tables share one monotone timeline.
 func (s *Scenario) Tick() time.Time { return s.NextTimestamp(time.Second) }
 
-// ReloadAndVerify reopens the persisted bundle — the fs Universe plus the
-// head-id timeline in branches/B_h — at the latest head, validates every
-// branch's closure, asserts expectBranch resolves to expectHead, and writes
-// the sorted ids file. It log.Fatals on any mismatch.
+// ReloadAndVerify reopens the persisted bundle at its latest head, validates
+// every branch closure, asserts expectBranch → expectHead, and writes ids.txt.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead string) {
 	u := Must(fs.New(UniverseDir))
 	hist := Must(histfile.New(BranchTableHeadPath))
@@ -122,11 +119,8 @@ func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead
 	Must(os.WriteFile(IdsPath, []byte(strings.Join(sortedIds, "\n")+"\n"), 0o644))
 }
 
-// printClosure walks the closure from its open heads breadth-first, printing
-// each claim once (✓, or ✗ with its error when it is in failByID) indented by
-// BFS depth, and returns the total claim count. The per-claim visitor the old
-// Graph.Validate exposed is gone; a closure walk plus the failure set from
-// Verify reconstructs the same tree.
+// printClosure walks the closure breadth-first from the open heads, printing each
+// claim once (✓, or ✗ plus its failByID error) at its depth, and counts them.
 func printClosure(ctx context.Context, g ranke.Graph, failByID map[string]error) int {
 	type node struct {
 		id    ranke.Id
@@ -164,8 +158,7 @@ func printClosure(ctx context.Context, g ranke.Graph, failByID map[string]error)
 	return count
 }
 
-// shortIdStr is the same shortener used by the CLI — kept local
-// here so this helper has no scenario→cli back-dependency.
+// shortIdStr truncates an id to 20 characters, as the CLI does.
 func shortIdStr(s string) string {
 	if len(s) > 20 {
 		return s[:20] + "…"
@@ -181,9 +174,8 @@ func LoadSource(filename string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(SourcesDir, filename))
 }
 
-// Must panics if any returned value is a non-nil error, else returns
-// the first value typed. Works for (T, error), error-only, and
-// (T1, T2, ..., error) shapes.
+// Must panics on any non-nil error among the values, else returns the first
+// one typed — for (T, error), error-only, and (T1, ..., error) shapes.
 func Must[T any](v T, rest ...any) T {
 	if err, isErr := any(v).(error); isErr && err != nil {
 		panic(err)

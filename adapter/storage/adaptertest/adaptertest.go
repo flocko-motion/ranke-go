@@ -29,9 +29,8 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// Factory returns a fresh, empty Universe. Run calls it more than once
-// (e.g. a source and a destination for copy tests), so each call must
-// yield an independent, empty store.
+// Factory returns a fresh, empty Universe. Run calls it several times, so each
+// call must yield an independent store.
 type Factory func(t *testing.T) ranke.Universe
 
 // Run executes the full black-box conformance suite against universes
@@ -64,9 +63,8 @@ func testSync(t *testing.T, newU Factory) {
 	}
 }
 
-// testCapabilities verifies the adapter reports usable capabilities. Every
-// in-tree backend can overwrite (Put replaces existing bytes), which the
-// read-through repair in adapter/storage/stack relies on.
+// testCapabilities requires Overwrite, which the read-through repair in
+// adapter/storage/stack relies on.
 func testCapabilities(t *testing.T, newU Factory) {
 	u := newU(t)
 	defer u.Close()
@@ -75,10 +73,8 @@ func testCapabilities(t *testing.T, newU Factory) {
 	}
 }
 
-// sample builds a tiny signed graph via the public builder: a contributor op,
-// an inline source em attributed to it, and blob — a source whose content is
-// external (returned with its hash + bytes so a copy test can move the
-// content). It touches only ranke's public API, never a concrete adapter.
+// sample builds a tiny signed graph via the public builder: a contributor op, an
+// inline source em, and blob, an external source returned with its hash + bytes.
 func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash ranke.Id, blobBytes []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -91,8 +87,7 @@ func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash 
 	if err != nil {
 		t.Fatalf("encode pubkey: %v", err)
 	}
-	// A contributor's pubkey is its content (§5.7); it carries the key so
-	// claims attributed to it sign automatically.
+	// A contributor's pubkey is its content (§5.7).
 	opClaim, err := ranke.NewClaim(ranke.NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(ranke.EncodingOctetStream).Sign(priv)
 	if err != nil {
 		t.Fatalf("contributor: %v", err)
@@ -102,8 +97,7 @@ func sample(t *testing.T) (op ranke.Contributor, em, blob ranke.Claim, blobHash 
 		t.Fatalf("AsContributor: %v", err)
 	}
 
-	// A claim with references must declare its height (topological depth over
-	// its provenance); HeightOf derives it from the referenced claims.
+	// A referencing claim must declare its height; HeightOf derives it.
 	em, err = ranke.NewClaim(ranke.TypeSource("note"), op).
 		WithInlineContent([]byte("hi")).
 		WithEncoding(ranke.EncodingPlain).
@@ -233,11 +227,8 @@ func testAbsentLookups(t *testing.T, newU Factory) {
 	}
 }
 
-// testCopyClosure copies a claim's provenance closure (and its content) from
-// one Universe to another and checks the destination ends up with the whole
-// closure — the referenced contributor pulled in, and the external content
-// blob moved. No Sequencer/Archive needed: CopyClaims with WithClosure walks
-// the edges itself.
+// testCopyClosure copies a provenance closure between Universes and checks the
+// destination holds all of it: the referenced contributor and the content blob.
 func testCopyClosure(t *testing.T, newU Factory) {
 	ctx := context.Background()
 	src := newU(t)
@@ -254,8 +245,7 @@ func testCopyClosure(t *testing.T, newU Factory) {
 		t.Fatalf("src PutContents: %v", err)
 	}
 
-	// Copy the closure of em and blob — each references its contributor op via
-	// a contribution/contributor edge, so op must come along — plus content.
+	// Copy the closure of em and blob, so their contributor op comes along.
 	heads := []ranke.Id{em.ID(), blob.ID()}
 	if err := dst.CopyClaims(ctx, src, heads, ranke.WithClosure(), ranke.WithContent()); err != nil {
 		t.Fatalf("CopyClaims: %v", err)
@@ -295,8 +285,7 @@ func testCopyClosure(t *testing.T, newU Factory) {
 	}
 }
 
-// readFull reads len(buf) bytes, tolerating short reads, treating a clean
-// EOF after a full read as success.
+// readFull reads len(buf) bytes, tolerating short reads and a trailing EOF.
 func readFull(r interface{ Read([]byte) (int, error) }, buf []byte) (int, error) {
 	total := 0
 	for total < len(buf) {
