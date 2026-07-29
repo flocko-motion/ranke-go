@@ -12,25 +12,11 @@ import (
 )
 
 // ─── Records: the canonical encoding an id is computed over ───────────
-//
-// Canonical serialization: CBOR Deterministic Encoding (RFC 8949
-// §4.2). Field order is fixed by numeric keys (`cbor:"N,keyasint"`)
-// to avoid map-key sort issues; omitempty drops zero-valued optional
-// fields deterministically.
-//
-// Two encoded record shapes:
-//
-//	encNode — the structural component of a claim (§4.1), with its edges
-//	          inlined so S(v) includes them
-//	encEdge — a directed reference (§4.2)
-//
-// Identity (§Primitives): id(v) = Sign(H(S(v))) for a node, id(e) = H(S(e))
-// for an edge. Because a node's edges are inlined in S(v), the node's id
-// commits to the edges' contents directly; an edge id is just the hash of
-// its own inlined record.
 
-// encodingMode is the singleton encoder configured for CBOR
-// Deterministic. Encoders are safe for concurrent use.
+// CBOR Deterministic Encoding (RFC 8949 §4.2), field order fixed by numeric
+// keys. id(v) = Sign(H(S(v))), id(e) = H(S(e)) (§Primitives).
+
+// encodingMode is the shared CBOR Deterministic encoder, safe for concurrent use.
 var encodingMode cbor.EncMode
 
 func init() {
@@ -41,8 +27,7 @@ func init() {
 	encodingMode = mode
 }
 
-// encNode is the wire shape of a node (§4.1). Field tags are stable
-// numeric keys.
+// encNode is the wire shape of a node (§4.1); tags are stable numeric keys.
 type encNode struct {
 	TypeClass     string `cbor:"1,keyasint"`
 	TypeSub       string `cbor:"2,keyasint"`
@@ -50,18 +35,13 @@ type encNode struct {
 	EncodingSub   string `cbor:"4,keyasint,omitempty"`
 	ContentHash   []byte `cbor:"5,keyasint,omitempty"` // external content: its address H(c); mutually exclusive with Content
 	CreatedAt     string `cbor:"6,keyasint"`           // RFC3339 nano UTC
-	// Edge records inlined in canonical order — each element is one edge's
-	// S(e), so S(v) commits to the edges directly. Content bytes stay out (in
-	// EdgeContents), keeping edge ids inline/external-invariant.
+	// Edge records inlined in canonical order, each element one edge's S(e).
 	Edges []cbor.RawMessage `cbor:"7,keyasint,omitempty"`
-	// Fields appear under tag 8 as a map sorted by key (CBOR
-	// Deterministic ensures sort order).
+	// Fields is a map under tag 8, key-sorted by CBOR Deterministic.
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
-	// Content holds inline content bytes directly (§Content)
-	// Mutually exclusive with ContentHash
+	// Content holds inline content bytes; exclusive with ContentHash (§Content)
 	Content []byte `cbor:"9,keyasint,omitempty"`
-	// ContentSize is the byte-length of the content, mandatory whenever the
-	// node carries content (inline or external — §Content)
+	// ContentSize is mandatory whenever the node carries content (§Content)
 	ContentSize uint64 `cbor:"11,keyasint,omitempty"`
 	// Height is the longest possible path, defined in paper 1 (§4.1)
 	Height uint64 `cbor:"12,keyasint,omitempty"`
@@ -81,8 +61,7 @@ type encEdge struct {
 	Content           []byte            `cbor:"10,keyasint,omitempty"`
 }
 
-// encodeNode serializes a node together with its (inlined) edges and returns
-// the canonical S(v) bytes the node id is computed over.
+// encodeNode returns the canonical S(v) bytes a node id is computed over.
 func encodeNode(n *node, edges []*edge) ([]byte, error) {
 	en, err := buildEncNode(n, edges)
 	if err != nil {
@@ -100,15 +79,10 @@ func encodeEdge(e *edge) ([]byte, error) {
 	return encodingMode.Marshal(ee)
 }
 
-// --- alias pass (§180): the canonical encoding stores well-known types
-// and field names in their compact alias form, so the id is over the
-// aliased bytes. Aliases are bare in the taxonomy; on the wire they carry a
-// leading "." — the reserved prefix a literal can never have (charset), so
-// alias and literal never collide. The alias table is fixed, so ids are
-// stable under it.
+// --- alias pass (§180): the id is over the aliased bytes. On the wire an alias
+// carries a leading "." — a prefix no literal can have, so the two never collide.
 
-// aliasToWire returns v's wire form: the "."-prefixed bare alias when v has
-// one (toAlias changed it), else v literally.
+// aliasToWire returns v's wire form: "."+alias when toAlias changes v, else v.
 func aliasToWire[T ~string](v T, toAlias func(T) T) string {
 	if a := toAlias(v); a != v {
 		return "." + string(a)
@@ -116,8 +90,7 @@ func aliasToWire[T ~string](v T, toAlias func(T) T) string {
 	return string(v)
 }
 
-// aliasFromWire reverses aliasToWire: a "."-prefixed value is de-aliased,
-// anything else is a literal.
+// aliasFromWire reverses aliasToWire: a "."-prefixed value is de-aliased.
 func aliasFromWire[T ~string](w string, fromAlias func(T) T) T {
 	if len(w) > 0 && w[0] == '.' {
 		return fromAlias(T(w[1:]))
@@ -126,8 +99,7 @@ func aliasFromWire[T ~string](w string, fromAlias func(T) T) T {
 }
 
 // aliasFieldKeys / unaliasFieldKeys map a field map's keys through the
-// field-name alias (values are unchanged). nil in → nil out; the input map
-// is not mutated.
+// field-name alias into a fresh map; nil in → nil out.
 func aliasFieldKeys(fields map[string]string) map[string]string {
 	if fields == nil {
 		return nil
@@ -150,12 +122,9 @@ func unaliasFieldKeys(fields map[string]string) map[string]string {
 	return out
 }
 
-// buildEncNode constructs the encNode payload for a *node with its edges
-// inlined (in the given canonical order). Used both in id computation
-// (encodeNode wraps this) and in the claim codec (Claim.Encode). Each edge is
-// serialized to its S(e) and embedded as a raw item, so S(v) — and the node
-// id — commit to the edge records directly, including any inline content they
-// carry (§Content).
+// buildEncNode builds the encNode for n with each edge serialized to its S(e)
+// and embedded raw, so S(v) commits to the edge records and their content
+// (§Content).
 func buildEncNode(n *node, edges []*edge) (encNode, error) {
 	en := encNode{
 		TypeClass:     aliasToWire(n.typeClass, nodeClassToAlias),
@@ -215,7 +184,6 @@ func parseRFC3339Nano(s string) (time.Time, error) {
 }
 
 // idBytes extracts the raw self-describing payload bytes from an Id.
-// Used only by canonical encoding paths within this package.
 func idBytes(v Id) []byte {
 	if v == nil {
 		return nil
@@ -224,28 +192,22 @@ func idBytes(v Id) []byte {
 }
 
 // ─── Claim: the storage codec, built on the record shapes above ───────
-//
-// Claim.Encode and the package-level DecodeClaim are inverses; the same
-// bytes represent a claim whether it lives in memory, is written to a
-// file, sent over a wire, or stored in an object store. Persistence
-// adapters use them so they never need to know a claim's internal
-// representation; they move opaque bytes.
 
-// encClaimFile is the canonical serialized shape of a claim: just the node
-// record, which inlines the edge records
+// Claim.Encode and DecodeClaim are inverses, so persistence adapters move
+// opaque bytes and stay ignorant of a claim's internal representation.
+
+// encClaimFile is the canonical serialized shape of a claim: the node record.
 type encClaimFile struct {
 	Node encNode `cbor:"1,keyasint"`
 }
 
-// Encode serializes the claim to its canonical CBOR bytes — the same
-// bytes its id is derived from, and the inverse of DecodeClaim.
+// Encode serializes the claim to the canonical CBOR bytes its id derives from.
 func (c *claim) Encode() ([]byte, error) {
 	en, err := buildEncNode(c.node, c.edges)
 	if err != nil {
 		return nil, err
 	}
-	// Inline content (node and edges) is already inside the records (§Content),
-	// so the storage shape is just the node record.
+	// Inline content lives inside the records (§Content).
 	data, err := encodingMode.Marshal(encClaimFile{Node: en})
 	if err != nil {
 		return nil, WrapDetail(errEncodeClaim, c.node.id.String(), err)
@@ -253,11 +215,8 @@ func (c *claim) Encode() ([]byte, error) {
 	return data, nil
 }
 
-// DecodeClaim decodes the canonical CBOR serialization of a claim (the
-// inverse of Claim.Encode) into a Claim with its id set. Exposed for
-// tooling that inspects claims directly (e.g. the ranke CLI) and for
-// persistence adapters — it returns an error when the bytes aren't a
-// valid claim, which callers use to dispatch claim vs content.
+// DecodeClaim decodes a claim's canonical CBOR into a Claim with its id set.
+// An error tells callers the bytes are content rather than a claim.
 func DecodeClaim(id Id, b []byte) (Claim, error) {
 	var ec encClaimFile
 	if err := cbor.Unmarshal(b, &ec); err != nil {
@@ -268,11 +227,8 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 		return nil, WrapDetail(errDecodeClaim, "node", err)
 	}
 	n.id = id
-	// Node inline content (if any) is set by decodeNode from the node record.
-	// Edges are inlined in the node record. Each edge id is H(S(e)) over the
-	// stored edge bytes — computed here from the raw slice, never re-encoded,
-	// so it is stable as the alias taxonomy grows. Inline edge content, if
-	// any, is positional in EdgeContents.
+	// Each edge id is H(S(e)) over the stored raw bytes, never re-encoded, so it
+	// stays stable as the alias taxonomy grows.
 	edges := make([]*edge, len(ec.Node.Edges))
 	n.edges = make([]Id, len(ec.Node.Edges))
 	for i, raw := range ec.Node.Edges {
@@ -295,10 +251,8 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 	return &claim{node: n, edges: edges}, nil
 }
 
-// nodePreimage extracts S(node) — field 1, the node record with its inlined
-// edges — from a claim's stored CBOR as raw bytes, so verification hashes the
-// exact bytes the id was signed over. Re-deriving via buildEncNode would drift
-// as the alias taxonomy grows.
+// nodePreimage extracts S(node) — field 1 — from a claim's stored CBOR as raw
+// bytes, so verification hashes the exact bytes the id was signed over.
 func nodePreimage(raw []byte) ([]byte, error) {
 	var rf struct {
 		Node cbor.RawMessage `cbor:"1,keyasint"`
@@ -338,8 +292,7 @@ func decodeNode(en encNode) (*node, error) {
 		n.contentHash = ch
 		n.contentSize = en.ContentSize
 	}
-	// n.edges (the edge id list) is populated by DecodeClaim, which decodes
-	// the inlined edge records and computes each id.
+	// n.edges is populated by DecodeClaim from the inlined edge records.
 	return n, nil
 }
 

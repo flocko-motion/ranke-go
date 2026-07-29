@@ -21,8 +21,7 @@ import (
 var errGenerate = errors.New("generator")
 
 // Manifest is the map of a generated archive: the head to open it at, plus the
-// ids of the notable claims so a test can target a specific corner without
-// re-deriving anything.
+// ids of the notable claims, so a test can target one corner directly.
 type Manifest struct {
 	Spec Spec
 
@@ -35,6 +34,7 @@ type Manifest struct {
 
 	DiffChainHead ranke.Id   // head of the longest contribution/diff chain
 	ExternalBlobs []ranke.Id // source claims whose content is external (hash-addressed)
+	TinyBlob      ranke.Id   // the source whose content is TinyBlobBytes long
 	HighDegree    ranke.Id   // the derivation citing the most sources
 	Expiries      []ranke.Id // contribution/expiry claims (key expiry)
 	Deletes       []ranke.Id // contribution/delete tombstones
@@ -44,12 +44,9 @@ type Manifest struct {
 	Branches   []string // branch names the archive carries
 }
 
-// Generate builds the archive described by spec into u, returning its
-// Manifest. It stands up the dev testkit (a deterministic clock, an in-memory
-// history, the blocking dev Sequencer) over u, assembles one contribution
-// carrying every feasible corner, and merges it — so u ends holding a real
-// archive reachable from Manifest.Head. Deterministic: same (u-kind, spec) →
-// identical ids on every run.
+// Generate builds the archive described by spec into u over the dev testkit
+// (deterministic clock, in-memory history, blocking Sequencer), returning its
+// Manifest. Same (u-kind, spec) → identical ids on every run.
 func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, error) {
 	clock := NewClock(spec.Base, spec.Step)
 	hist := devhist.New(clock)
@@ -101,21 +98,16 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	return &m, nil
 }
 
-// contributionChunks splits an already-dependency-ordered batch into
-// contributions whose sizes follow a skewed distribution — small common, large
-// rare (exponential) — so the archive is built over many revisions like a real
-// one, not a single outlier contribution. The mean size grows with the batch so
-// the contribution COUNT stays bounded: the dev Sequencer re-verifies each
-// contribution's closure, so an unbounded count would be quadratic. Deterministic
-// per seed (chunking only shapes the Sequencer-minted revision chain; contributed
-// claim ids do not depend on it).
+// contributionChunks splits a dependency-ordered batch into contributions of
+// exponentially-distributed size — small common, large rare — deterministic per
+// seed. Mean size grows with the batch to bound the contribution count, since
+// the dev Sequencer re-verifies each contribution's closure.
 func contributionChunks(batch []ranke.Claim, seed int64, minChunks int) [][]ranke.Claim {
 	n := len(batch)
 	if n == 0 {
 		return nil
 	}
-	// Each branch takes a contribution in turn, so reaching them all needs at
-	// least that many. A small batch splits evenly to get there.
+	// Branches take contributions in turn, so a small batch splits evenly.
 	if minChunks > 1 && n >= minChunks {
 		size := (n + minChunks - 1) / minChunks
 		var chunks [][]ranke.Claim
@@ -143,8 +135,7 @@ func contributionChunks(batch []ranke.Claim, seed int64, minChunks int) [][]rank
 }
 
 // builder accumulates the contribution batch, threading the shared clock so
-// every claim's created_at is monotone (references are always built — and
-// stamped — before the claims that cite them). The first error stops the run.
+// created_at is monotone in reference order. The first error stops the run.
 type builder struct {
 	ctx   context.Context
 	u     ranke.Universe
@@ -157,6 +148,7 @@ type builder struct {
 	batch         []ranke.Claim
 	manifest      Manifest
 	oversizedDone bool // the oversized-field corner is applied once
+	tinyDone      bool // likewise the tiny-content corner
 	err           error
 }
 
@@ -167,8 +159,7 @@ func (b *builder) fail(err error) {
 	}
 }
 
-// who round-robins claims across the contributor set, so the archive is
-// multi-authored (a signing "chain" of independent keys).
+// who round-robins claims across the contributor set, so the archive is multi-authored.
 func (b *builder) who(i int) ranke.Contributor {
 	return b.contribs[i%len(b.contribs)]
 }
@@ -186,9 +177,8 @@ func (b *builder) add(c ranke.Claim, err error) ranke.Claim {
 	return c
 }
 
-// contributors builds the operator plus spec.Contributors-1 more signing
-// contributors (each an initial node carrying its key). The operator is
-// already stored by the Sequencer, so only the others join the batch.
+// contributors builds the operator plus spec.Contributors-1 more initial nodes
+// carrying keys. The Sequencer stores the operator, so only the others batch.
 func (b *builder) contributors(op ranke.Contributor) {
 	b.contribs = []ranke.Contributor{op}
 	b.manifest.Contributors = []ranke.Id{op.ID()}
@@ -204,9 +194,8 @@ func (b *builder) contributors(op ranke.Contributor) {
 	}
 }
 
-// sources builds spec.Sources source/* claims: the first ExternalBlobs carry
-// external (hash-addressed) content, then tiny and large inline blobs
-// alternate. One source carries an oversized field value.
+// sources builds spec.Sources source/* claims: the first ExternalBlobs are
+// hash-addressed, then inline notes and further external blobs alternate.
 func (b *builder) sources() {
 	for i := 0; i < b.spec.Sources && b.err == nil; i++ {
 		who := b.who(i)
@@ -217,10 +206,8 @@ func (b *builder) sources() {
 		case i%2 == 0:
 			c = b.inlineSource(who, i)
 		default:
-			// Large data goes in EXTERNAL content (content-addressed), never
-			// inline: inline bytes are bundled in the claim record and cannot be
-			// served from a lower tier, so a caching backend (neo4j) can't
-			// round-trip them. "Put large data in content" — the ADT convention.
+			// Large data goes in external content per the ADT convention:
+			// inline bytes ride in the claim record, past a caching backend.
 			c = b.externalSource(who, i)
 		}
 		if c != nil {
@@ -231,22 +218,29 @@ func (b *builder) sources() {
 }
 
 // inlineSource builds a source/note claim with legible inline text. The first
-// inline source also carries the oversized field value (that corner, applied
-// once) — a large-but-valid field, kept under the ADT's field cap.
+// one also carries the oversized field value, within the ADT's field cap.
 func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
+	text := textFor(b.spec.Seed, "src", i)
+	tiny := !b.tinyDone && b.spec.TinyBlobBytes > 0
+	if tiny {
+		text = tinyFor(b.spec.Seed, "src", i, b.spec.TinyBlobBytes)
+		b.tinyDone = true
+	}
 	cb := ranke.NewClaim(ranke.TypeSource("note"), who).
-		WithInlineContent([]byte(textFor(b.spec.Seed, "src", i))).
+		WithInlineContent([]byte(text)).
 		WithEncoding(ranke.EncodingPlain). // a note is legible text
 		WithCreatedAt(b.clock.Tick())
 	if !b.oversizedDone && b.spec.OversizedFieldBytes > 0 {
-		// A field value is text, not bytes — hex-encode so it is valid UTF-8
-		// (a caching backend stores field values as string properties; raw
-		// binary would not round-trip). Content, by contrast, may be binary.
+		// Field values are text, so hex-encode to valid UTF-8.
 		big := hex.EncodeToString(fill(b.spec.Seed, "field", i, b.spec.OversizedFieldBytes/2))
 		cb = cb.WithField("note", big)
 		b.oversizedDone = true
 	}
-	return b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
+	c := b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
+	if tiny && c != nil {
+		b.manifest.TinyBlob = c.ID()
+	}
+	return c
 }
 
 // externalSource builds a source/* claim whose content lives in the Universe
@@ -274,11 +268,8 @@ func (b *builder) externalSource(who ranke.Contributor, i int) ranke.Claim {
 	return c
 }
 
-// diffChain builds one base derivation plus DiffChainLen revisions, each a
-// contribution/diff overlay over the previous — the long-diff-chain corner.
-// Revision belongs on a derivation (a distillation refined over successive
-// contributions), never a source: sources are root artifacts that reference
-// nothing but their contributor, so they are never diffed over one another.
+// diffChain builds one base derivation plus DiffChainLen contribution/diff
+// overlays. Revision belongs on a derivation, refined over contributions.
 func (b *builder) diffChain() {
 	if b.err != nil || len(b.srcClaims) == 0 {
 		return
@@ -298,9 +289,8 @@ func (b *builder) diffChain() {
 		Sign())
 	prev := base
 	for r := 1; r <= b.spec.DiffChainLen && prev != nil && b.err == nil; r++ {
-		// Each revision re-affirms its provenance (the §3.5 derivation/source
-		// edge, checked per delta) as a NAMED edge — diff claims name their
-		// edges, and the same name keeps it one edge through the chain.
+		// Each revision re-affirms its §3.5 derivation/source edge, checked per
+		// delta, under a stable name so it stays one edge through the chain.
 		re, err := ranke.NewEdge(ranke.EdgeConfig{
 			Reference: src.ID(),
 			Type:      ranke.TypeDerivation("source"),
@@ -323,9 +313,8 @@ func (b *builder) diffChain() {
 	}
 }
 
-// derivations builds spec.Derivations derivation/* claims citing sources. The
-// first is high-degree — it cites up to MaxEdgeDegree sources at once; the
-// rest cite a single source (the low-degree norm).
+// derivations builds spec.Derivations derivation/* claims citing sources: the
+// first cites up to MaxEdgeDegree at once, the rest one each.
 func (b *builder) derivations() {
 	for i := 0; i < b.spec.Derivations && len(b.srcClaims) > 0 && b.err == nil; i++ {
 		degree := 1
@@ -384,9 +373,8 @@ func (b *builder) entities() {
 	}
 }
 
-// relations builds spec.Relations relation/* claims, each a reified assertion
-// between two entities: a from-edge to one and a to-edge to the other (both
-// relation_direction polarities), plus the derivation edge for provenance.
+// relations builds spec.Relations relation/* claims, each reifying an assertion
+// between two entities with a from-edge, a to-edge and a derivation edge.
 func (b *builder) relations() {
 	ents := b.manifest.Entities
 	if len(ents) < 2 || len(b.srcClaims) == 0 {
@@ -416,11 +404,8 @@ func (b *builder) relations() {
 	}
 }
 
-// expiries mints spec.KeyExpiries contribution/expiry claims. Each is a claim
-// (attributed to the operator) carrying a contribution/expiry edge to a
-// contributor and a pubkey_expires_after field naming the last time that key
-// is valid (paper §Types). Everything is just a claim — there is no special
-// API, the type is the open-vocabulary string "contribution/expiry".
+// expiries mints spec.KeyExpiries contribution/expiry claims, each attributed to
+// the operator, edged to a contributor, with a pubkey_expires_after (§Types).
 func (b *builder) expiries() {
 	if len(b.contribs) < 2 {
 		return // no non-operator contributor to expire
@@ -447,12 +432,9 @@ func (b *builder) expiries() {
 	}
 }
 
-// deletes mints spec.Deletes contribution/delete tombstones. Each is a claim
-// (attributed to the operator) whose contribution/delete edge names a claim
-// whose bytes were removed, documenting the gap (paper §Types). We emit the
-// tombstone structurally; the bytes are not actually purged (a purge is a
-// separate negative-test corner). The paper defines contribution/delete as an
-// edge subtype; the tombstone's node type is our open-vocabulary choice.
+// deletes mints spec.Deletes contribution/delete tombstones, each attributed to
+// the operator, edged to the claim whose bytes were removed (§Types). The paper
+// defines the edge subtype; the node type is an open-vocabulary choice here.
 func (b *builder) deletes() {
 	for i := 0; i < b.spec.Deletes && len(b.srcClaims) > 0 && b.err == nil; i++ {
 		target := b.srcClaims[i%len(b.srcClaims)]

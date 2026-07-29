@@ -6,15 +6,12 @@ package ranke
 
 import "time"
 
-// Query is a declarative read (RQL): generate a set of claims (Select), filter
-// it (Where), shape each result (Output), then order and bound the read. It is
-// the ADT's native read language; the Universe answers it via Universe.Query,
-// either through the reference DefaultQuery (a byte store) or a native lowering
-// (a graph-native backend). A query's meaning is fixed here and unchanged by
-// which layer answers it.
+// Query is a declarative read (RQL): generate a set of claims (Select), filter it
+// (Where), shape each result (Output), then order and bound the read. Its meaning
+// is fixed here, whichever layer answers it via Universe.Query.
 type Query struct {
 	Select    Select
-	Where     *Where     // nil = no filter
+	Where     *Where // nil = no filter
 	Output    Output
 	Order     []OrderKey // sort keys in priority order; empty = natural (created_at, id)
 	Limit     Limit
@@ -22,21 +19,18 @@ type Query struct {
 }
 
 // Reserved virtual branch scopes for Select.Branch (the $-target family, spec
-// §Access). A real branch name confines a query to that branch's closure;
-// these two name the archive-wide and unconfined scopes.
+// §Access); a real branch name confines to that branch's closure.
 const (
-	// BranchUniverse applies no confinement — privileged access rooted at
-	// Select.Claim, which is therefore required. The explicit form of "no
-	// branch"; an empty Branch is not allowed.
+	// BranchUniverse is unconfined, privileged access rooted at Select.Claim,
+	// which it therefore requires.
 	BranchUniverse = "$universe"
 	// BranchArchive confines to the whole Ranke-Archive: the closure of the
 	// branch-table header. Select.Claim defaults to the current archive head.
 	BranchArchive = "$archive"
 )
 
-// Select is a generator built from four orthogonal parts: Branch is the scope,
-// Head narrows it to one claim's closure, Path is the traversal, and Claim anchors
-// that traversal. A Select with no Path is a scan of the scope.
+// Select is a generator: Branch is the scope, Head narrows it to one claim's
+// closure, Path is the traversal and Claim anchors it; no Path scans the scope.
 type Select struct {
 	Branch string // scope: BranchUniverse, BranchArchive, or a branch name
 	Head   Id     // narrows the scope to this claim's closure
@@ -44,9 +38,8 @@ type Select struct {
 	Path   []PathStep
 }
 
-// PathStep follows typed edges over a hop range, optionally constraining the
-// endpoint node types. A leading "-" on an Edges or Nodes entry excludes that
-// type; entries are glob patterns over "class/sub".
+// PathStep follows typed edges over a hop range, optionally constraining endpoint
+// node types. Entries are globs over "class/sub"; a leading "-" excludes.
 type PathStep struct {
 	Edges []string
 	Dir   Direction // default DirProvenance
@@ -55,12 +48,10 @@ type PathStep struct {
 	Nodes []string
 }
 
-// Hops is a PathStep.Min value, so a step can ask for a minimum a plain int could
-// not express: Hops(0) admits the start itself.
+// Hops is a PathStep.Min value; Hops(0) admits the step's start itself.
 func Hops(n int) *int { return &n }
 
-// MinHops is Min with its default applied — one hop, so a step's start is not a
-// result of itself.
+// MinHops is Min with its default of one hop applied.
 func (s PathStep) MinHops() int {
 	if s.Min == nil {
 		return 1
@@ -71,10 +62,8 @@ func (s PathStep) MinHops() int {
 	return *s.Min
 }
 
-// Direction is which way a step follows an edge. Provenance (outgoing, toward
-// references) is the cheap default; Uses/Connections walk edges backward —
-// native on a Capabilities.ReverseWalk backend, and the reference executor
-// serves them by sweeping and inverting the closure (correct but O(closure)).
+// Direction is which way a step follows an edge. Provenance (outgoing) is the
+// cheap default; Uses/Connections walk backward, native on ReverseWalk backends.
 type Direction string
 
 const (
@@ -83,8 +72,7 @@ const (
 	DirConnections Direction = "connections" // either direction
 )
 
-// Where is a boolean tree of comparisons. Exactly one of And, Or, Not, or a
-// leaf (Field + Test) is set on any node.
+// Where is a boolean tree: exactly one of And, Or, Not or a leaf (Field + Test).
 type Where struct {
 	And   []Where
 	Or    []Where
@@ -105,9 +93,8 @@ type Comparison struct {
 	Glob string // shell-style wildcard (path.Match)
 }
 
-// Output shapes each result along orthogonal axes: Shape (single item or path),
-// Detail (how much each entity carries), Form (as written or resolved), Encoding
-// (json | cbor), and optional inline Content.
+// Output shapes each result along orthogonal axes: Shape, Detail, Form, Encoding
+// and optional inline Content.
 type Output struct {
 	Shape    Shape          // single | path
 	Detail   Detail         // id | graph | claims
@@ -116,16 +103,14 @@ type Output struct {
 	Encoding ResultEncoding // serialized form of each claim (json | cbor)
 }
 
-// Content bounds inline claim content: up to Max bytes, with Overflow handling
-// anything larger.
+// Content bounds inline claim content: up to Max bytes, Overflow beyond that.
 type Content struct {
 	Max      int64
 	Overflow Overflow
 }
 
-// Form is whether a claim is returned as written or resolved via its diff chain.
-// Materialized (the resolved graph) is a graph-native backend's cheapest output;
-// original is the id-defining form, served from the byte layer.
+// Form is whether a claim is returned as written (the id-defining bytes) or
+// resolved via its diff chain.
 type Form string
 
 const (
@@ -133,8 +118,7 @@ const (
 	FormOriginal     Form = "original"     // as written (the stored/canonical claim)
 )
 
-// ResultEncoding is the serialized form of each result's claim, orthogonal to
-// Output.Form (either form can be JSON or CBOR).
+// ResultEncoding is each claim's serialized form, orthogonal to Output.Form.
 type ResultEncoding string
 
 const (
@@ -150,9 +134,8 @@ const (
 	ShapePath   Shape = "path"   // the route to each claim
 )
 
-// Detail is how much each entity carries. A claim is a graph *part* (a node and
-// all its outgoing edges, which may point outside the result), so it carries more
-// than graph — which is closed (only edges among the returned nodes).
+// Detail is how much each entity carries: a claim part (node + all outgoing edges,
+// possibly leaving the result) carries more than the closed graph.
 type Detail string
 
 const (
@@ -170,8 +153,7 @@ const (
 	OverflowReference Overflow = "reference" // return a hash stub in its place
 )
 
-// OrderKey is one sort key. Keys apply in priority order; ties fall back to the
-// natural (created_at, id) order.
+// OrderKey is one sort key; keys apply in priority order, ties by (created_at, id).
 type OrderKey struct {
 	Field   string
 	Compare Collation // how values compare; empty = lexical
@@ -203,16 +185,13 @@ type Limit struct {
 // Execution selects where the query runs and how deeply it reports on itself.
 type Execution struct {
 	Layer string // pin to one named storage layer; empty = the backend chooses
-	// Report sets the execution-report verbosity threshold (see ReportLevel):
-	// empty = no report; ReportInfo for high-level stages; ReportDebug for
-	// routing/lowering; ReportTrace for per-claim detail. When set, the stream
-	// carries a QueryReport (ResultStream.Report).
+	// Report is the execution-report verbosity threshold (see ReportLevel); when
+	// set, the stream carries a QueryReport (ResultStream.Report).
 	Report ReportLevel
 }
 
 // Scope is the branch context a query runs in — the Archive's resolution of
-// q.Select.Branch. Head confines to closure(Head) (nil = unconfined); the rest
-// lets a native backend prune by tag/height (a byte store uses only Head).
+// q.Select.Branch, Head confining to its closure and the rest pruning natively.
 type Scope struct {
 	Head     Id     // closure anchor; nil = unconfined ($universe)
 	Branch   string // resolved branch name — a native prune key
@@ -220,16 +199,13 @@ type Scope struct {
 	Revision int    // archive spine revision (_br)
 }
 
-// ResultStream streams query results, one at a time, in the query's order.
-// After Next returns false, check Err; Report is non-nil only when
-// Execution.Report was set.
+// ResultStream streams query results one at a time, in the query's order.
 type ResultStream interface {
 	// Next advances to the next result, returning false at end of stream or error.
 	Next() bool
 	// Result returns the current result (valid after Next returned true).
 	Result() QueryResult
-	// Report returns the query's report, available after Next returns false when
-	// Execution.Report was set; nil otherwise.
+	// Report returns the query's report once Next returns false, if Execution.Report was set.
 	Report() *QueryReport
 	// Err returns the first error that stopped the stream, if any.
 	Err() error
@@ -242,11 +218,9 @@ type QueryResult struct {
 	// Id is always set. Claim is nil for DetailID (no reconstruction needed).
 	Id    Id
 	Claim Claim
-	// Path is the full route to the claim (root first), set only when
-	// Output.Shape is ShapePath.
+	// Path is the full route to the claim (root first), set for ShapePath.
 	Path []Claim
-	// Content is the claim's inlined content, present only when
-	// Output.Content > 0; truncated per Output.Overflow when it exceeds the cap.
+	// Content is the claim's inlined content, capped per Output.Content.
 	Content []byte
 }
 

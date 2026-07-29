@@ -65,6 +65,7 @@ func TestGenerateCornersPresent(t *testing.T) {
 	require.GreaterOrEqual(t, len(m.Contributors), 2, "multiple contributors")
 	require.NotEmpty(t, m.Sources, "sources")
 	require.NotEmpty(t, m.ExternalBlobs, "external (hash-addressed) content")
+	require.NotNil(t, m.TinyBlob, "a source with tiny content")
 	require.NotEmpty(t, m.Derivations, "derivations")
 	require.NotNil(t, m.HighDegree, "a high-degree derivation")
 	require.NotEmpty(t, m.Entities, "entities")
@@ -98,6 +99,21 @@ func TestGenerateExpiryShape(t *testing.T) {
 		}
 	}
 	require.True(t, hasExpiryEdge, "expiry edge points at the contributor")
+}
+
+// TestGenerateTinyBlobSize: the tiny blob's content_size is exactly
+// TinyBlobBytes, the boundary a small-content filter tests against.
+func TestGenerateTinyBlobSize(t *testing.T) {
+	ctx := context.Background()
+	spec := SpecForSize(1, 30)
+	u, m := generateInto(t, spec)
+	require.NotNil(t, m.TinyBlob)
+
+	arc, err := ranke.NewArchive(ctx, u, m.Head)
+	require.NoError(t, err)
+	c, err := arc.GetClaim(ctx, m.TinyBlob)
+	require.NoError(t, err)
+	require.Equal(t, uint64(spec.TinyBlobBytes), c.Node().GetContentSize())
 }
 
 // TestGenerateDeleteShape: deletes are off by default (a DB-level concern), but

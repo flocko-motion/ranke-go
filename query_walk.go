@@ -10,33 +10,27 @@ import (
 	"strings"
 )
 
-// queryTraverse walks the Select from its root claim, one PathStep at a time,
-// and returns the reached claim set (deduped) plus, when needPaths is set, the
-// root→claim route for each. An empty Path is one implicit unbounded
-// provenance step — the full closure.
-func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
-	rootStart := reportStart(rc)
-	root, err := GetClaim(ctx, u, sel.Claim)
-	if err != nil {
-		return nil, nil, WrapDetail(errQuery, "root "+sel.Claim.String(), err)
-	}
-	rc.timed("native", "load-root", ReportInfo, rootStart, sel.Claim.String(), nil)
-
+// queryTraverse walks the Select's Path one step at a time within closure(origin),
+// returning the reached claims and, when needPaths is set, each claim's route.
+func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
 	steps := sel.Path
 	if len(steps) == 0 {
 		steps = []PathStep{{}} // all edges, provenance, unbounded → full closure
 	}
 
-	// A reverse step needs incoming edges: invert the scope closure (from head,
-	// or the walk root when unconfined). Spanning only closure(head) confines it.
+	startAt := reportStart(rc)
+	frontier, err := walkStart(ctx, u, sel.Claim, origin, rc)
+	if err != nil {
+		return nil, nil, err
+	}
+	rc.timed("native", "load-start", ReportInfo, startAt, "", map[string]any{"claims": len(frontier)})
+
+	// A reverse step names referrers, which only an inverted closure yields.
 	var incoming map[string][]incomingEdge
 	if stepsNeedReverse(steps) {
-		anchor := root
-		if head != nil && !head.Equal(sel.Claim) {
-			anchor, err = GetClaim(ctx, u, head)
-			if err != nil {
-				return nil, nil, WrapDetail(errQuery, "scope head "+head.String(), err)
-			}
+		anchor, err := GetClaim(ctx, u, origin)
+		if err != nil {
+			return nil, nil, WrapDetail(errQuery, "closure origin "+origin.String(), err)
 		}
 		idxStart := reportStart(rc)
 		incoming, err = buildIncoming(ctx, u, anchor, rc)
@@ -46,8 +40,10 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPat
 		rc.timed("native", "reverse-index", ReportInfo, idxStart, "", map[string]any{"targets": len(incoming)})
 	}
 
-	frontier := []Claim{root}
-	routes := map[string][]Claim{root.ID().String(): {root}}
+	routes := map[string][]Claim{}
+	for _, c := range frontier {
+		routes[c.ID().String()] = []Claim{c}
+	}
 	var reached []Claim
 	for i, step := range steps {
 		stepStart := reportStart(rc)
@@ -59,6 +55,23 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, head Id, needPat
 		frontier = reached
 	}
 	return reached, routes, nil
+}
+
+// walkStart is the set the first step expands from: the claim Select.Claim names,
+// else every claim in closure(origin).
+func walkStart(ctx context.Context, u Universe, start, origin Id, rc *reportCollector) ([]Claim, error) {
+	if start != nil {
+		c, err := GetClaim(ctx, u, start)
+		if err != nil {
+			return nil, WrapDetail(errQuery, "walk start "+start.String(), err)
+		}
+		return []Claim{c}, nil
+	}
+	c, err := GetClaim(ctx, u, origin)
+	if err != nil {
+		return nil, WrapDetail(errQuery, "closure origin "+origin.String(), err)
+	}
+	return queryWalkStep(ctx, u, []Claim{c}, PathStep{Min: Hops(0)}, nil, map[string][]Claim{}, false, rc)
 }
 
 // stepsNeedReverse reports whether any step walks edges backward (uses or
@@ -79,10 +92,8 @@ type incomingEdge struct {
 	edgeType string
 }
 
-// buildIncoming materialises the forward closure from root and inverts its edges
-// into a target-id → referrers map — the reference's reverse index. Expensive (a
-// full closure sweep) but simple and correct; every referrer it records is
-// within the closure, so it doubles as the scope-membership set.
+// buildIncoming sweeps the forward closure from root and inverts its edges into
+// a target-id → referrers map, which doubles as the scope-membership set.
 func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollector) (map[string][]incomingEdge, error) {
 	incoming := map[string][]incomingEdge{}
 	seen := map[string]bool{root.ID().String(): true}
@@ -112,28 +123,20 @@ func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollec
 	return incoming, nil
 }
 
-// queryWalkStep expands the frontier along one PathStep: level-synchronized BFS,
-// up to step.Depth hops (0 = unbounded), collecting every visited claim whose
-// node type matches step.Nodes (the frontier counts as hop 0, per the paper's
-// *0..depth semantics). Direction selects which edges: DirProvenance (default)
-// follows outgoing edges forward; DirUses follows incoming edges (from the
-// reverse index); DirConnections does both. Reverse steps require incoming to be
-// built (queryTraverse). A node reached by several equal-length routes keeps the
-// canonical one — minimal under (length, then (created_at, id) per node), the
-// same total order as the default sort — so a path shape is deterministic and a
-// Cypher lowering can reproduce it byte-for-byte with a matching ORDER BY.
+// queryWalkStep expands the frontier along one PathStep: level-synchronized BFS
+// over *0..step.Max hops (0 = unbounded, frontier is hop 0) along Dir's edges,
+// collecting step.Nodes matches. Equal routes break on (created_at, id).
 func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
-	// Two sets, one meaning each. routed holds the nodes whose canonical route is
-	// fixed, so neither expansion nor routing revisits them. collected holds what
-	// the result already carries.
-	routed := map[string]bool{}
+	// Three sets, one meaning each. visited: walked through by this step. fixed:
+	// route settled by an earlier, hence shorter, level. collected: in the result.
+	visited := map[string]bool{}
+	fixed := map[string]bool{}
 	collected := map[string]bool{}
 	minHops := step.MinHops()
 
 	var out []Claim
-	// reach records that a path of hop edges arrives at c. Arriving is independent
-	// of routing: a node the frontier started from is still a result when a path
-	// comes back to it, as in Cypher.
+	// reach records that a path of hop edges arrives at c. Arrival is independent
+	// of routing: a path coming back to a frontier node still yields a result.
 	reach := func(c Claim, hop int) {
 		k := c.ID().String()
 		if hop < minHops || collected[k] || !matchTypeList(step.Nodes, c.Node().Type()) {
@@ -145,11 +148,14 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 
 	var level []Claim // the current BFS level; the frontier is hop 0
 	for _, f := range frontier {
-		if k := f.ID().String(); !routed[k] {
-			routed[k] = true
-			level = append(level, f)
-			reach(f, 0)
+		k := f.ID().String()
+		if visited[k] {
+			continue
 		}
+		visited[k] = true
+		level = append(level, f)
+		reach(f, 0)
+		fixed[k] = collected[k] // a hop-0 answer keeps its own route
 	}
 
 	forward := step.Dir == "" || step.Dir == DirProvenance || step.Dir == DirConnections
@@ -162,22 +168,19 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		if step.Max > 0 && hop >= step.Max {
 			break
 		}
-		// Discover the next level from every node in this one, keeping the
-		// canonical route per child before finalising it — so a second parent
-		// reaching the same child at this level can still win the tie. Forward
-		// follows outgoing edges; reverse follows the incoming index.
+		// Route per child is kept, not finalised, until the level ends — so a
+		// second parent reaching that child at this level can still win the tie.
 		type cand struct {
 			claim Claim
 			route []Claim // nil unless needPaths
 		}
 		best := map[string]cand{} // child id → best candidate so far
 		var order []string        // children first seen this level, for stable finalisation
-		// consider offers child as a route candidate for this level. Arrival is
-		// recorded first, since it holds whether or not the route is a candidate.
+		// consider offers child as a route candidate; arrival is recorded first.
 		consider := func(cur, child Claim) {
 			k := child.ID().String()
 			reach(child, hop+1)
-			if routed[k] {
+			if fixed[k] {
 				return // a shorter route already won
 			}
 			var route []Claim
@@ -224,11 +227,15 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 		}
 		var next []Claim
 		for _, k := range order {
-			routed[k] = true
 			c := best[k]
 			if needPaths {
 				routes[k] = c.route
 			}
+			fixed[k] = true
+			if visited[k] {
+				continue // no-repeat: this step has already walked through it
+			}
+			visited[k] = true
 			next = append(next, c.claim)
 		}
 		level = next
@@ -237,8 +244,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 }
 
 // lessRoute reports whether route a sorts before b under the query total order:
-// shorter first, then node-by-node on (created_at, id) — the same key the
-// default sort and the Cypher path ORDER BY use, so all three agree.
+// shorter first, then node-by-node on (created_at, id), as the Cypher ORDER BY.
 func lessRoute(a, b []Claim) bool {
 	if len(a) != len(b) {
 		return len(a) < len(b)
@@ -255,9 +261,9 @@ func lessRoute(a, b []Claim) bool {
 	return false
 }
 
-// matchTypeList reports whether typ satisfies a type-pattern list: a leading
-// "-" excludes, patterns are path.Match globs over "class/sub". No patterns, or
-// only negatives, means "match unless excluded".
+// matchTypeList reports whether typ satisfies a type-pattern list of path.Match
+// globs over "class/sub", where a leading "-" excludes. Only negatives, or none
+// at all, means "match unless excluded".
 func matchTypeList(patterns []string, typ string) bool {
 	if len(patterns) == 0 {
 		return true

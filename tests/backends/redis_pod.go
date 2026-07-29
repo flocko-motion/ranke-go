@@ -61,7 +61,7 @@ func redisPod() (addr, pass string, cleanup func(), err error) {
 	if e != nil {
 		return "", "", nil, fmt.Errorf("podman run redis: %v: %s", e, strings.TrimSpace(string(out)))
 	}
-	cleanup = func() { _ = exec.Command("podman", "rm", "-f", name).Run() }
+	cleanup = func() { removePod(name) }
 
 	addr = fmt.Sprintf("127.0.0.1:%d", port)
 	if e := waitTCP(addr); e != nil {

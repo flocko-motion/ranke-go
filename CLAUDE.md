@@ -11,7 +11,8 @@ Agents tend to forget details from the papers. The papers specify all details, s
 - use jq, not pyton, to work with json
 - use brokkr instead of grep (brokkr --help)
 - use gopls instead of hand rolled mechanic refactoring with sed/python 
-- use `services/neo4j.sh query {q}` for querying neo4j
+- use `services/neo4j.sh query {q}` for querying neo4j — `--params '{json}'` binds
+  `$`-parameters, so a lowering can be run exactly as the adapter emits it
 
 ## brokkr
 
@@ -64,6 +65,15 @@ Agents tend to forget details from the papers. The papers specify all details, s
 - Every neo4j-touching test flushes the whole database at open, and `go test ./...`
   runs packages in parallel — so they wipe each other. Run `go test -p 1` for
   anything involving neo4j until that is fixed.
+
+# Generator
+
+- `tests/generator` generates every variation the ADT allows, including the
+  awkward ones: cross-branch references, diff chains, external content,
+  oversized fields, multiple contributors. A corner it omits is a corner
+  nothing tests, so breadth is the point — not realism.
+- `Toy*` specs are the opposite: the smallest archive exhibiting ONE corner, so
+  a test asserting on it has nothing else in the graph to explain.
 
 # Architecture
 

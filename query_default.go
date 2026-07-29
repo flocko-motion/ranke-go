@@ -15,9 +15,8 @@ import (
 	"time"
 )
 
-// scopeOrigin is where this walker enumerates a scope from: Select.Head, else the
-// scope's own anchor. An index-free walker's own business, not a Select default.
-func scopeOrigin(sel Select, scope Scope) (Id, error) {
+// closureOrigin heads the closure a read sees: Select.Head, else the scope's own.
+func closureOrigin(sel Select, scope Scope) (Id, error) {
 	if sel.Head != nil {
 		return sel.Head, nil
 	}
@@ -27,13 +26,8 @@ func scopeOrigin(sel Select, scope Scope) (Id, error) {
 	return nil, ErrQueryNoHead
 }
 
-// DefaultQuery is the reference implementation of Universe.Query for a backend
-// with no native query engine. It reads only through the public Universe API
-// (GetClaim + edges), so it works over any byte store. It is deliberately
-// simple and not performance-tuned: it walks the closure, materialises every
-// candidate, then filters, orders, limits, and shapes — the meaning a capable
-// backend's native lowering must reproduce. A byte store delegates here; a
-// graph-native backend (neo4j) overrides Universe.Query.
+// DefaultQuery is the reference implementation of Universe.Query, reading only through
+// the public Universe API: walk the closure, materialise, filter, order, limit, shape.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
 	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
@@ -44,32 +38,28 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		defer cancel()
 	}
 
+	origin, err := closureOrigin(q.Select, scope)
+	if err != nil {
+		return nil, err
+	}
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
-	switch {
-	case len(sel.Path) == 0:
-		// A scan: the scope's claim set, reached by closing over an anchor. The
-		// anchor belongs to that set, so the sweep starts at zero hops.
-		origin, err := scopeOrigin(sel, scope)
-		if err != nil {
-			return nil, err
-		}
+	if len(sel.Path) == 0 {
+		// A scan: the scope's claim set, one unbounded step from the origin inward,
+		// the origin itself included.
 		sel.Claim = origin
 		sel.Path = []PathStep{{Min: Hops(0)}}
 		needPaths = false
-	case sel.Claim == nil:
-		return nil, ErrQueryUnanchored
 	}
-	reached, routes, err := queryTraverse(ctx, u, sel, scope.Head, needPaths, rc)
+	reached, routes, err := queryTraverse(ctx, u, sel, origin, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}
 	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
 }
 
-// finishReached is the reference post-traversal pipeline (Where, sort, limit,
-// shape) over an already-generated set. Finalises the report
-// if this call created it.
+// finishReached is the reference post-traversal pipeline (Where, sort, limit, shape)
+// over an already-generated set; it finalises the report this call created.
 func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, routes map[string][]Claim, rc *reportCollector, createdReport bool) (ResultStream, error) {
 	filterStart := reportStart(rc)
 	var filtered []Claim
@@ -95,14 +85,18 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	}
 
 	needPaths := q.Output.Shape == ShapePath
+	idsOnly := q.Output.Detail == DetailID
 	results := make([]QueryResult, 0, len(filtered))
 	for _, c := range filtered {
-		r := QueryResult{Id: c.ID(), Claim: c}
+		r := QueryResult{Id: c.ID()}
+		if !idsOnly { // DetailID asks for identity alone
+			r.Claim = c
+		}
 		if needPaths {
 			r.Path = routes[c.ID().String()]
 		}
 		if q.Output.Content != nil {
-			r.Content = queryContent(ctx, u, c, q.Output)
+			r.Content = ShapeContent(ctx, u, c, q.Output)
 		}
 		results = append(results, r)
 	}
@@ -117,8 +111,7 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 
 // --- Where evaluation ------------------------------------------------------
 
-// evalWhere evaluates the boolean tree against one claim. A nil / empty node
-// passes; a leaf tests the resolved field value.
+// evalWhere evaluates the boolean tree against one claim; an empty node passes.
 func evalWhere(w *Where, c Claim) bool {
 	if w == nil {
 		return true
@@ -151,9 +144,8 @@ func evalWhere(w *Where, c Claim) bool {
 	}
 }
 
-// queryFieldValue resolves a claim field by name — the seam between RQL and the
-// node model. Reserved fields have dedicated accessors (this is where height
-// becomes queryable); everything else is an open node field.
+// queryFieldValue resolves a claim field by name — the seam between RQL and the node
+// model. Reserved fields have dedicated accessors; the rest are open node fields.
 func queryFieldValue(c Claim, field string) (any, bool) {
 	n := c.Node()
 	switch field {
@@ -162,11 +154,12 @@ func queryFieldValue(c Claim, field string) (any, bool) {
 	case "type":
 		return n.Type(), true
 	case "encoding":
-		return n.Encoding(), true
+		return n.Encoding(), n.ContentKind() != ContentNone
 	case "created_at":
 		return n.CreatedAt(), true
 	case "content_size":
-		return n.GetContentSize(), true
+		// content_size and encoding are emitted only with content (§Content).
+		return n.GetContentSize(), n.ContentKind() != ContentNone
 	case "height":
 		return n.Height(), true
 	default:
@@ -317,8 +310,7 @@ func toStringValue(v any) string {
 
 // --- ordering, content, stream ---------------------------------------------
 
-// sortResults orders claims by the order keys (priority order), then the natural
-// (created_at, id) order for ties. A claim lacking a key's field sorts last.
+// sortResults orders claims by the order keys, then naturally by (created_at, id).
 func sortResults(claims []Claim, keys []OrderKey) {
 	sort.SliceStable(claims, func(i, j int) bool {
 		ci, cj := claims[i], claims[j]
@@ -349,9 +341,8 @@ func sortResults(claims []Claim, keys []OrderKey) {
 	})
 }
 
-// compareValues compares two field values under the collation: numeric coerces to
-// float (falling back to string when either isn't numeric); lexical and the empty
-// default compare as strings, the empty default first trying numeric-aware order.
+// compareValues compares two field values under the collation: numeric coerces to float
+// (string when either isn't), lexical by string, the default numeric-aware then string.
 func compareValues(a, b any, col Collation) int {
 	switch col {
 	case CompareNumeric:
@@ -378,10 +369,9 @@ func compareValues(a, b any, col Collation) int {
 	}
 }
 
-// queryContent loads up to Output.Content bytes of a claim's content, applying
-// the overflow policy when the content is larger. Reads through u so external
-// content is fetched transparently; a read error yields no content.
-func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
+// ShapeContent loads up to Output.Content bytes of a claim's content, applying the
+// overflow policy beyond that; it reads through u, and a read error yields no content.
+func ShapeContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	n := c.Node()
 	inline, _ := n.GetInlineContent() // nil for external or no content
 	if inline == nil && n.GetContentHash() == nil {
@@ -402,8 +392,7 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	case OverflowOmit:
 		return nil
 	case OverflowReference:
-		// External content carries its address; inline content has none in the
-		// id (§Content), so its reference is H(content), computed on demand.
+		// Inline content has no address in the id (§Content), so hash on demand.
 		hash := n.GetContentHash()
 		if hash == nil {
 			hash, err = HashContent(inline)
@@ -417,8 +406,7 @@ func queryContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
 	}
 }
 
-// sliceStream is the reference ResultStream: a fully materialised slice handed
-// out one item at a time. Performance-ignorant by design.
+// sliceStream is the reference ResultStream: a materialised slice, one item at a time.
 type sliceStream struct {
 	results []QueryResult
 	i       int
@@ -437,23 +425,14 @@ func (s *sliceStream) Report() *QueryReport { return s.report }
 func (s *sliceStream) Err() error           { return nil }
 func (s *sliceStream) Close() error         { return nil }
 
-// GetFromClosure returns the claim at id when it is reachable within scope
-// branch from any of heads, else ErrNotFound. It replaces the old
-// Universe.GetFromClosure method as a package helper: a reference-edge walk from
-// the heads that stops at id, so a head is reachable even if its own closure
-// dangles — a gap is a real error only when the walk must cross it to reach id.
-// The branch scope (BranchUniverse/BranchArchive/a name) is the hint a
-// Tags-capable backend would use to accelerate this; the reference walk honours
-// reachability directly and ignores it. heads are the scope roots (usually one;
-// a multi-headed graph passes several, unioned by the shared visited set).
+// GetFromClosure returns the claim at id when a reference-edge walk from heads reaches
+// it within scope branch, else ErrNotFound. heads are the scope roots, unioned.
 func GetFromClosure(ctx context.Context, u Universe, branch string, heads []Id, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
 	}
-	// Fast path: the tagger stamps every branch member with the _b_<branch> tag,
-	// so a present tag proves membership in O(1). A missing tag is inconclusive
-	// (the backend may be untagged), so it falls through to the reference walk,
-	// which honours reachability directly. Only for a real branch.
+	// Fast path, real branches only: the tagger stamps every member with _b_<branch>,
+	// so a present tag proves membership in O(1); a missing one falls through to the walk.
 	if branch != "" && branch != BranchUniverse && branch != BranchArchive {
 		if c, err := GetClaim(ctx, u, id); err == nil && c.Tag(BranchTagKey(branch)) != "" {
 			return c, nil

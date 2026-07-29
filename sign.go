@@ -18,27 +18,11 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
-// Sign and verify per paper §4.1. The "self-describing" requirement
-// is satisfied by multikey-style framing: pubkey and signature bytes
-// both carry a leading multicodec varint naming the scheme.
-//
-// Pubkey format:  <multicodec varint><raw public key bytes>
-// Signature/id:   <multicodec varint><raw signature bytes>
-//
-// The same multicodec code (e.g. ed25519-pub = 0xed) tags both the
-// pubkey and the signature produced by the matching private key —
-// the payload length tells them apart (32 bytes pubkey vs 64 bytes
-// Ed25519 signature). For the identity Sign case (empty pubkey), id
-// stays a plain multihash; the multicodec code at its head (e.g.
-// sha2-256 = 0x12) tags it as a hash, not a signature.
-//
-// The reference implementation supports Ed25519 (RFC 8032) today.
-// Other schemes can be added by allocating a new multicodec code and
-// wiring sign/verify here.
+// Multikey framing (§4.1): pubkey and signature bytes each lead with a
+// multicodec varint naming the scheme, payload length telling the two apart.
 
-// EncodePublicKey wraps a Go public key as a self-describing
-// multikey: <multicodec varint><raw key bytes>. Returns an error for
-// unsupported key types.
+// EncodePublicKey wraps a Go public key as a multikey:
+// <multicodec varint><raw key bytes>.
 func EncodePublicKey(pub crypto.PublicKey) ([]byte, error) {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
@@ -48,8 +32,7 @@ func EncodePublicKey(pub crypto.PublicKey) ([]byte, error) {
 	}
 }
 
-// DecodePublicKey parses a multikey-encoded public key. Returns the
-// scheme code and the typed Go public key.
+// DecodePublicKey parses a multikey into its scheme code and typed Go key.
 func DecodePublicKey(b []byte) (multicodec.Code, crypto.PublicKey, error) {
 	code, rest, err := readCode(b)
 	if err != nil {
@@ -66,18 +49,15 @@ func DecodePublicKey(b []byte) (multicodec.Code, crypto.PublicKey, error) {
 	}
 }
 
-// signHash applies the supplied signer to the hash, returning the
-// multikey-wrapped signature bytes (suitable for use as an id
-// payload). Returns the hash unchanged when signingKey is nil — the
-// identity Sign case from §4.1.
+// signHash returns the multikey-wrapped signature over hash, or hash itself
+// when signingKey is nil — the identity Sign case (§4.1).
 func signHash(signingKey crypto.Signer, hash []byte) ([]byte, error) {
 	if signingKey == nil {
 		return hash, nil
 	}
 	switch pub := signingKey.Public().(type) {
 	case ed25519.PublicKey:
-		// Ed25519: pass crypto.Hash(0) per stdlib contract; rand is
-		// ignored because Ed25519 is deterministic.
+		// crypto.Hash(0) per the stdlib Ed25519 signer contract.
 		sig, err := signingKey.Sign(rand.Reader, hash, crypto.Hash(0))
 		if err != nil {
 			return nil, WrapDetail(errSignHash, "ed25519 sign", err)
@@ -88,9 +68,8 @@ func signHash(signingKey crypto.Signer, hash []byte) ([]byte, error) {
 	}
 }
 
-// verifySignature checks that idPayload is a valid signature by the
-// owner of pubkey over hash. When pubkey is empty, idPayload is
-// expected to equal hash (identity Sign).
+// verifySignature checks idPayload as a signature by pubkey's owner over hash;
+// an empty pubkey means idPayload must equal hash (identity Sign).
 func verifySignature(pubkey, hash, idPayload []byte) error {
 	if len(pubkey) == 0 {
 		// Identity Sign: id is just the hash.
@@ -128,18 +107,15 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 	}
 }
 
-// Keypair pairs a private signing key with its multikey-encoded
-// public key — the two pieces of key material a contributor claim
-// needs. LoadPrivateKey returns one of these in a single call.
+// Keypair pairs a private signing key with its multikey-encoded public key,
+// the key material a contributor claim needs.
 type Keypair struct {
 	Private crypto.Signer
 	Pubkey  []byte // multikey-encoded (see EncodePublicKey)
 }
 
-// LoadPrivateKey loads an Ed25519 PKCS#8 PEM private key from path
-// and pre-computes its multikey-encoded public key. Returns the
-// pair in a single value so callers don't repeat the load + encode
-// dance.
+// LoadPrivateKey loads an Ed25519 PKCS#8 PEM private key from path and
+// pre-computes its multikey-encoded public key.
 func LoadPrivateKey(path string) (Keypair, error) {
 	priv, err := LoadEd25519PrivateKeyPEM(path)
 	if err != nil {
@@ -152,9 +128,8 @@ func LoadPrivateKey(path string) (Keypair, error) {
 	return Keypair{Private: priv, Pubkey: pubkey}, nil
 }
 
-// LoadEd25519PrivateKeyPEM loads an Ed25519 private key from a
-// PKCS#8 PEM file (as produced by `openssl genpkey -algorithm
-// ed25519`). The returned key satisfies crypto.Signer.
+// LoadEd25519PrivateKeyPEM loads an Ed25519 private key from a PKCS#8 PEM
+// file (`openssl genpkey -algorithm ed25519`).
 func LoadEd25519PrivateKeyPEM(path string) (ed25519.PrivateKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -176,8 +151,7 @@ func LoadEd25519PrivateKeyPEM(path string) (ed25519.PrivateKey, error) {
 }
 
 // LoadEd25519PublicKeyPEM loads an Ed25519 public key from a
-// SubjectPublicKeyInfo PEM file (as produced by `openssl pkey
-// -pubout`).
+// SubjectPublicKeyInfo PEM file (`openssl pkey -pubout`).
 func LoadEd25519PublicKeyPEM(path string) (ed25519.PublicKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -210,8 +184,7 @@ func prependCode(code multicodec.Code, payload []byte) []byte {
 	return out
 }
 
-// splitCode reads the leading varint code and returns it plus the
-// remaining payload bytes.
+// splitCode reads the leading varint code and returns it with the payload.
 func splitCode(b []byte) (multicodec.Code, []byte, error) {
 	v, n := binary.Uvarint(b)
 	if n <= 0 {
@@ -220,13 +193,12 @@ func splitCode(b []byte) (multicodec.Code, []byte, error) {
 	return multicodec.Code(v), b[n:], nil
 }
 
-// readCode is an alias for splitCode used at parse sites where the
-// semantics is clearer as "read the leading code, return the rest".
+// readCode reads the leading code and returns the rest.
 func readCode(b []byte) (multicodec.Code, []byte, error) {
 	return splitCode(b)
 }
 
-// bytesEqual is a small helper to avoid importing "bytes" here.
+// bytesEqual compares two byte slices, keeping "bytes" out of the imports.
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false

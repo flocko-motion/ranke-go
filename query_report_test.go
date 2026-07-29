@@ -25,7 +25,7 @@ func opsOf(rep *QueryReport) map[string]QueryEvent {
 func TestReportRecordsExecutionLog(t *testing.T) {
 	u, _, a, b := queryFixture(t) // root(0) ← a:source(1) ← b:entity(2)
 	rs, err := u.Query(context.Background(), Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID(),
+		Select: Select{Branch: BranchUniverse, Head: b.ID(), Claim: b.ID(),
 			Path: []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}}},
 		Execution: Execution{Report: ReportTrace},
 	}, Scope{Branch: BranchUniverse})
@@ -41,7 +41,7 @@ func TestReportRecordsExecutionLog(t *testing.T) {
 	require.NotEmpty(t, rep.Events)
 
 	by := opsOf(rep)
-	for _, op := range []string{"select", "load-root", "step", "filter", "sort", "results"} {
+	for _, op := range []string{"select", "load-start", "step", "filter", "sort", "results"} {
 		e, ok := by[op]
 		require.True(t, ok, "event %q present", op)
 		require.Equal(t, "native", e.Engine, "engine on %q", op)

@@ -219,7 +219,7 @@ func TestArchiveBranchReads(t *testing.T) {
 }
 
 // TestArchiveQueryResolvesBranch: Archive.Query resolves Select.Branch to its
-// head, defaults Claim, and confines to that closure.
+// head and confines the read to that closure.
 func TestArchiveQueryResolvesBranch(t *testing.T) {
 	ctx := context.Background()
 	u := NewMemoryUniverse()
@@ -231,7 +231,7 @@ func TestArchiveQueryResolvesBranch(t *testing.T) {
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
 
-	// "main" → head em (Claim defaulted); closure is {em, root}.
+	// "main" → head em; closure is {em, root}.
 	rs, err := arc.Query(ctx, Query{Select: Select{Branch: "main"}})
 	require.NoError(t, err)
 	require.Equal(t, idsOf(em, root), idSet(drain(t, rs)))
@@ -240,6 +240,31 @@ func TestArchiveQueryResolvesBranch(t *testing.T) {
 	rs, err = arc.Query(ctx, Query{Select: Select{Branch: BranchArchive}})
 	require.NoError(t, err)
 	require.Equal(t, idsOf(bth, em, root), idSet(drain(t, rs)))
+}
+
+// TestQueryClaimDoesNotScope: Select.Claim starts a traversal and scopes nothing,
+// so it cannot stand in for the Select.Head that $universe requires.
+func TestQueryClaimDoesNotScope(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	em := srcClaim(t, root, "seed")
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
+	putClaims(t, u, root, em, bth)
+
+	arc, err := NewArchive(ctx, u, bth.ID())
+	require.NoError(t, err)
+
+	step := []PathStep{{Min: Hops(0)}}
+	_, err = arc.Query(ctx, Query{Select: Select{Branch: BranchUniverse, Claim: em.ID(), Path: step}})
+	require.ErrorIs(t, err, ErrQueryNoHead, "$universe needs a Head; a Claim is not one")
+
+	// Head bounds the read, Claim starts it — orthogonal, so both are honoured.
+	rs, err := arc.Query(ctx, Query{Select: Select{
+		Branch: BranchUniverse, Head: bth.ID(), Claim: em.ID(), Path: step}})
+	require.NoError(t, err)
+	require.Equal(t, idsOf(em, root), idSet(drain(t, rs)),
+		"the walk starts at em, so bth is in scope but never reached")
 }
 
 // TestArchiveBranchDiffChain: a branch table that is a contribution/diff

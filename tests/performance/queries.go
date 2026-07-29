@@ -62,11 +62,11 @@ func queryRoot(ctx context.Context, u ranke.Universe, m *generator.Manifest) (ra
 // count and how long the query-plus-drain took.
 func runQuery(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (results int, dur time.Duration, err error) {
 	start := time.Now()
-	scope, err := rql.Scope(ctx, u, q, archiveHead)
+	arc, err := ranke.NewArchive(ctx, u, archiveHead)
 	if err != nil {
 		return 0, 0, err
 	}
-	rs, err := u.Query(ctx, q, scope)
+	rs, err := arc.Query(ctx, q)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -160,13 +160,13 @@ func runQuerySet(ctx context.Context, u ranke.Universe, m *generator.Manifest, r
 // printQueryReport runs nq once with full execution reporting on and prints the
 // per-station event log to w — the --report view, shown in the queries section.
 func printQueryReport(ctx context.Context, w io.Writer, u ranke.Universe, label string, nq rql.NamedQuery, archiveHead ranke.Id) error {
-	scope, err := rql.Scope(ctx, u, nq.Q, archiveHead)
+	arc, err := ranke.NewArchive(ctx, u, archiveHead)
 	if err != nil {
 		return err
 	}
 	q := nq.Q
 	q.Execution.Report = ranke.ReportDebug
-	rs, err := u.Query(ctx, q, scope)
+	rs, err := arc.Query(ctx, q)
 	if err != nil {
 		return err
 	}

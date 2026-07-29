@@ -63,6 +63,16 @@ func ToyExternalContent(seed int64) Spec {
 	return s
 }
 
+// ToyOverCapContent holds a source whose inline content is larger than a
+// projection layer's inline cap, so a read asking for more than that cap has
+// content only a durable tier holds in full.
+func ToyOverCapContent(seed int64) Spec {
+	s := toyBase(seed)
+	s.Sources = 2
+	s.LargeBlobBytes = 8 << 10 // over the neo4j cache's 4 KiB default
+	return s
+}
+
 // ToyBranches is the smallest archive spread over two branches, so a branch-scoped
 // read has another branch's claims to leave out.
 func ToyBranches(seed int64) Spec {

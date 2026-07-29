@@ -9,11 +9,8 @@ import (
 	"io"
 )
 
-// Branch is one entry of an archive's branch table: a named
-// contribution/branch edge pointing at the root of that branch's
-// subgraph. A Branch *is* an Edge — the named edge is the branch — with
-// navigation into the referenced subgraph on top. Obtain branches from an
-// Archive; nobody mints them directly.
+// Branch is one entry of an archive's branch table — the named
+// contribution/branch edge itself, plus navigation into its subgraph.
 type Branch interface {
 	Edge
 
@@ -22,9 +19,8 @@ type Branch interface {
 	// Head is the root of the branch's subgraph — the edge's Reference().
 	Head() Id
 
-	// Prev is the previous revision of this branch: the branch pointing at
-	// the current head's contribution/diff predecessor, or nil when the
-	// head has no predecessor (first revision).
+	// Prev is the previous revision of this branch: the branch pointing at the
+	// head's contribution/diff predecessor, nil at the first revision.
 	Prev(ctx context.Context) (Branch, error)
 
 	// Subgraph access — membership and lookup within the branch's closure,
@@ -39,8 +35,7 @@ type Branch interface {
 }
 
 // branch wraps the named contribution/branch edge with the Universe its
-// subgraph is read from. Embedding Edge promotes Reference/Type/GetField/
-// ID/… so the branch is an Edge with subgraph navigation added.
+// subgraph is read from; the embedded Edge promotes Reference/Type/GetField/….
 type branch struct {
 	Edge
 	u Universe
@@ -66,9 +61,7 @@ func (b *branch) HasClaim(ctx context.Context, id Id) (bool, error) {
 	return InClosure(ctx, b.u, b.Name(), []Id{b.Reference()}, id)
 }
 
-// GetClaim resolves id in this branch — the expensive route, verifying
-// branch-scope membership through the closure. Hold the claim already? Read its
-// content via Claim.GetContent instead of re-resolving here.
+// GetClaim resolves id in this branch, verifying scope through the closure.
 func (b *branch) GetClaim(ctx context.Context, id Id) (Claim, error) {
 	if id == nil {
 		return nil, errNilID
@@ -84,9 +77,8 @@ func (b *branch) GetClaimContent(ctx context.Context, id Id) (io.Reader, error) 
 	return c.GetContent(ctx, b.u)
 }
 
-// Prev returns the previous revision of this branch: a branch, same name,
-// pointing at the current head's contribution/diff predecessor. Returns
-// nil when the head has no predecessor (first revision).
+// Prev returns the branch of the same name at the head's contribution/diff
+// predecessor, nil at the first revision.
 func (b *branch) Prev(ctx context.Context) (Branch, error) {
 	head, err := GetClaim(ctx, b.u, b.Reference())
 	if err != nil {

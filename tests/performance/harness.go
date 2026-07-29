@@ -32,10 +32,8 @@ type Config struct {
 	Report    bool     // print each query's full execution report in the queries section
 }
 
-// stepSelected reports whether the measured step with this phase id runs under
-// cfg.Step. Empty Step runs all; otherwise Step must equal the id or its numeric
-// prefix (the part before "-"), so "3.1" matches "3.1-branch" and "2" matches
-// "2-verify". setup and tag are prerequisites gated separately.
+// stepSelected reports whether the step id runs under cfg.Step: empty runs all,
+// else Step is the id or its numeric prefix ("3.1" matches "3.1-branch").
 func (cfg Config) stepSelected(id string) bool {
 	if cfg.Step == "" || cfg.Step == id {
 		return true
@@ -46,11 +44,8 @@ func (cfg Config) stepSelected(id string) bool {
 	return false
 }
 
-// RunMatrix runs the chapters for each selected backend and writes the report
-// to w. It returns an error on a real failure (verify failure, bad config); a
-// backend that is unavailable (ErrUnavailable) is reported and skipped, not
-// failed. onResult, if set, is called once per completed backend (used by the
-// test to assert; the CLI leaves it nil).
+// RunMatrix runs the chapters for each selected backend and writes the report to
+// w. ErrUnavailable is reported and skipped; onResult fires per completed backend.
 func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified int) error) error {
 	backends.UseNativeServices(cfg.Native)
 	rows, err := backends.Select(cfg.Backends)
@@ -60,9 +55,8 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	spec := generator.SpecForNodes(cfg.Seed, cfg.Size)
 	ctx := context.Background()
 
-	// showProgress labels the otherwise-silent between-block phases (reference
-	// generate, reference queries, opening each backend) with an in-place line —
-	// interactive CLI only; a piped/NO_COLOR/go-test run stays clean.
+	// showProgress labels the silent between-block phases with an in-place line,
+	// on an interactive CLI only.
 	showProgress := cfg.Progress && useColor
 	progress := func(stage string) {
 		if showProgress {
@@ -75,10 +69,8 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 		}
 	}
 
-	// Generate the reference archive once into mem — a fast, always-available,
-	// deterministic standard — purely to describe the graph every backend is
-	// about to be timed on. Whether the backends AGREE on what they read from it
-	// is not asked here; that is the conformance matrix's question (tests/matrix).
+	// Generate the reference archive once into mem — fast, always available,
+	// deterministic — to describe the graph every backend is about to be timed on.
 	progress("generating reference archive")
 	refU := mem.New()
 	refM, err := generator.Generate(ctx, refU, spec)
@@ -119,27 +111,21 @@ func RunMatrix(cfg Config, w io.Writer, onResult func(backend string, verified i
 	return nil
 }
 
-// runBackend runs the three chapters against one open backend and writes its
-// report block. Returns the number of claims verified.
+// runBackend runs the chapters against one open backend, returning claims verified.
 func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.Universe, cfg Config, w io.Writer) (int, error) {
 	u := newMetered(u0)
 	defer func() { _ = u.Close() }()
 
-	// Tags (branch membership) are a mutable per-claim overlay only some backends
-	// hold. A bare byte store (fs, sqlite, s3, redis) holds none — normal — so it
-	// skips the tag chapter and the branch-scoped chapters (branch access, the
-	// branch queries), running the chapters it can: write, verify, universe access
-	// and the $universe query. In production such a store sits under a tag-capable
-	// layer (a stack), which is where the branch chapters are measured.
+	// Tags (branch membership) are a mutable per-claim overlay. A bare byte store
+	// holds none, so it runs only the chapters needing no branch scope; in
+	// production it sits under a tag-capable stack, where those are measured.
 	taggable := u0.Capabilities().Tags
 
-	// Banner up front, so a slow backend announces what it is working on before
-	// the work starts.
+	// Banner up front, so a slow backend announces its work before starting it.
 	rule := strings.Repeat("═", 88)
 	fmt.Fprintf(w, "\n%s\n  %-14s  size=%d\n%s\n", rule, name, cfg.Size, rule)
-	// progress overwrites a single line in place while a chapter runs
-	// (interactive only — piped/NO_COLOR output stays clean); it is cleared and
-	// replaced by the results when the backend is done.
+	// progress overwrites one line in place while a chapter runs, then the results
+	// replace it (interactive only).
 	showProgress := cfg.Progress && useColor
 	progress := func(stage string) {
 		if showProgress {
@@ -147,9 +133,8 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		}
 	}
 
-	// Setup — write: generate the archive into the backend (via the dev
-	// sequencer). Timed as ingest, but it is setup — the steps below measure
-	// operations ON the resulting archive. Always run; every step needs it.
+	// Setup — write: generate the archive into the backend via the dev sequencer.
+	// Timed as ingest; the steps below measure operations ON that archive.
 	progress("setup")
 	u.setPhase("setup")
 	c1 := time.Now()
@@ -171,9 +156,8 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	runUniverse := cfg.stepSelected("3.2-universe")
 	runQueries := cfg.Step == "" || strings.HasPrefix(cfg.Step, "4")
 
-	// No tag chapter: the Sequencer signals the storage as the head advances, so
-	// branch membership is already in place and its cost is inside setup. A pass
-	// here would find nothing to do and time it as if it were work.
+	// Tag cost lands inside setup: the Sequencer signals the storage as the head
+	// advances, so branch membership is already in place here.
 
 	// verify: walk the provenance DAG and check every claim.
 	var run ranke.VerificationRun
@@ -196,8 +180,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 		}
 	}
 
-	// access: branch (in-closure) vs universe (direct), over ids sampled from the
-	// branch closure (taggable) or the universe head's closure otherwise.
+	// access: branch (in-closure) vs universe (direct), over ids from that closure.
 	var ids []ranke.Id
 	var branchDur, universeDur time.Duration
 	if runBranch || runUniverse {
@@ -219,7 +202,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 			c3a := time.Now()
 			for _, id := range ids {
 				if _, err := branch.GetClaim(ctx, id); err != nil {
-					return 0, fmt.Errorf("%s: branch access: %w", name, err)
+					return 0, fmt.Errorf("%s: branch access %s: %w", name, id, err)
 				}
 			}
 			branchDur = time.Since(c3a)
@@ -238,8 +221,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	}
 
 	// queries: each timed a few times under its own "4.N" phase, so the latency
-	// distribution lands in the metered table. The returned stats are already
-	// reported through those phases, so nothing is kept here.
+	// distribution lands in the metered table.
 	if runQueries {
 		progress("queries")
 		if _, err = runQuerySet(ctx, u, m, cfg.QueryReps, taggable, cfg.Step, cfg.Report, w); err != nil {
@@ -255,8 +237,7 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	if run != nil {
 		verified = run.Verified()
 	}
-	// full shows the "n/a" rows only on a full run — under --step the untouched
-	// steps are simply omitted, not marked unavailable.
+	// full shows the "n/a" rows only on a full run.
 	full := cfg.Step == ""
 	fmt.Fprintf(w, "  claims=%d  verified=%d  accesses=%d\n", m.ClaimCount, verified, len(ids))
 	sr, sw := u.phaseIO("setup")
@@ -280,15 +261,13 @@ func runBackend(ctx context.Context, name string, spec generator.Spec, u0 ranke.
 	return verified, nil
 }
 
-// accessIDs samples n claim ids (with replacement) from the closure reachable
-// at root — a branch head — so every sampled id genuinely lives in that branch
-// and both the branch read and the direct read resolve it. A fixed seed keeps
-// the access pattern reproducible run to run.
+// accessIDs samples n claim ids (with replacement) from the closure at root, so
+// every id lives in that branch; a fixed seed keeps the pattern reproducible.
 func accessIDs(ctx context.Context, u ranke.Universe, root ranke.Id, n int) ([]ranke.Id, error) {
 	if n <= 0 || root == nil {
 		return nil, nil
 	}
-	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Claim: root}}, ranke.Scope{Branch: ranke.BranchUniverse})
+	rs, err := u.Query(ctx, ranke.Query{Select: ranke.Select{Branch: ranke.BranchUniverse, Head: root}}, ranke.Scope{Branch: ranke.BranchUniverse})
 	if err != nil {
 		return nil, err
 	}

@@ -37,16 +37,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Backend opens a fresh, isolated storage tier for one scenario — a Universe
-// for claims + content and a History for the head timeline — over the shared
-// deterministic clock. It is called once per scenario, so scenarios never
-// share state; a durable backend should hand back a handle to fresh storage
-// each call.
+// Backend opens a fresh, isolated storage tier for one scenario: a Universe for
+// claims + content and a History for the head timeline, over the shared clock.
 type Backend func(t *testing.T, clock *generator.Clock) (ranke.Universe, ranke.History, error)
 
-// IntegrationTest runs the full Ranke-Graph integration suite against the
-// storage backend. Each scenario gets its own fixture (a fresh backend + a
-// fresh reference Sequencer), so they are independent.
+// IntegrationTest runs the full Ranke-Graph integration suite against the storage
+// backend, giving each scenario its own fixture: a fresh backend and Sequencer.
 func IntegrationTest(t *testing.T, ctx context.Context, backend Backend) {
 	t.Helper()
 	t.Run("AliceEmail", func(t *testing.T) {
@@ -62,21 +58,17 @@ func IntegrationTest(t *testing.T, ctx context.Context, backend Backend) {
 
 // --- fixture ---
 
-// fixture is one scenario's write path: the reference dev Sequencer over the
-// backend's Universe + History, sharing the deterministic clock so every
-// minted claim's created_at is reproducible and monotone. self is the keyed
-// contributor the Sequencer signs branch tables with; scenarios also author
-// content with it (contributor 0, the operator — the generator does the same).
+// fixture is one scenario's write path: the reference dev Sequencer over the backend's
+// Universe + History, sharing the deterministic clock for reproducible created_at.
 type fixture struct {
 	ctx   context.Context
 	u     ranke.Universe
 	seq   *devseq.Sequencer
 	clock *generator.Clock
-	self  ranke.Contributor
+	self  ranke.Contributor // signs branch tables and authors content: contributor 0, the operator
 }
 
-// fixtureBase is the fixed instant the shared clock starts at — never
-// time.Now, so a run reproduces byte-identically.
+// fixtureBase is the fixed instant the shared clock starts at, so a run reproduces byte-identically.
 var fixtureBase = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
@@ -90,8 +82,7 @@ func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
 	return &fixture{ctx: ctx, u: u, seq: seq, clock: clock, self: self}
 }
 
-// write advances the "main" branch with claims (in topological order:
-// references precede the claims that cite them) and returns the new head k′.
+// write advances the "main" branch with claims in topological order, returning head k′.
 func (f *fixture) write(t *testing.T, claims ...ranke.Claim) ranke.Id {
 	t.Helper()
 	head, err := f.seq.AddClaims(f.ctx, claims)
@@ -99,9 +90,7 @@ func (f *fixture) write(t *testing.T, claims ...ranke.Claim) ranke.Id {
 	return head
 }
 
-// snapshot returns a fresh immutable read view at the current head — the
-// re-read every scenario leans on (previously-returned values must stay
-// valid, since a claim is self-contained by immutability).
+// snapshot returns a fresh immutable read view at the current head.
 func (f *fixture) snapshot(t *testing.T) ranke.Archive {
 	t.Helper()
 	arc, err := f.seq.GetArchive(f.ctx)
@@ -131,9 +120,8 @@ func (f *fixture) validate(t *testing.T, head ranke.Id) {
 
 // --- shared claim builders ---
 
-// keyedContributor builds a deterministic Ed25519-signed root contributor:
-// its multikey-encoded pubkey is its content (§5.7), and it carries the key
-// so claims attributed to it sign automatically. seedTag fixes the identity.
+// keyedContributor builds a deterministic Ed25519-signed root contributor whose
+// multikey-encoded pubkey is its content (§5.7); seedTag fixes the identity.
 func keyedContributor(t *testing.T, ctx context.Context, clock *generator.Clock, seedTag string) ranke.Contributor {
 	t.Helper()
 	seed := sha256.Sum256([]byte(seedTag))

@@ -55,7 +55,7 @@ func reverseFixture(t *testing.T) (Universe, map[string]Claim) {
 func TestQueryReverseConnectionsConfined(t *testing.T) {
 	u, a := reverseFixture(t)
 	q := Query{Select: Select{
-		Branch: BranchUniverse, Claim: a["head"].ID(),
+		Branch: BranchUniverse, Head: a["head"].ID(), Claim: a["head"].ID(),
 		Path: []PathStep{{Min: Hops(0), Dir: DirConnections}},
 	}}
 	got := queryIDs(t, u, q)
@@ -69,10 +69,10 @@ func TestQueryReverseConnectionsConfined(t *testing.T) {
 func TestQueryReverseUsesFindsReferrers(t *testing.T) {
 	u, a := reverseFixture(t)
 	q := Query{Select: Select{
-		Branch: BranchUniverse, Claim: a["head"].ID(),
+		Branch: BranchUniverse, Head: a["head"].ID(), Claim: a["head"].ID(),
 		Path: []PathStep{
-			{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}},                     // forward → {a, b}
-			{Dir: DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}},    // reverse → their users
+			{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}},                   // forward → {a, b}
+			{Dir: DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}}, // reverse → their users
 		},
 	}}
 	require.Equal(t, idsOf(a["x"], a["y"], a["head"]), queryIDs(t, u, q))
@@ -84,7 +84,7 @@ func TestQueryReverseUsesFindsReferrers(t *testing.T) {
 func TestQueryForwardFromSourcesEmpty(t *testing.T) {
 	u, a := reverseFixture(t)
 	q := Query{Select: Select{
-		Branch: BranchUniverse, Claim: a["head"].ID(),
+		Branch: BranchUniverse, Head: a["head"].ID(), Claim: a["head"].ID(),
 		Path: []PathStep{
 			{Edges: []string{"derivation/*"}, Nodes: []string{"source/*"}},
 			{Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}}, // forward (default)

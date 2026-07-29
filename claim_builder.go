@@ -12,17 +12,8 @@ import (
 	"time"
 )
 
-// ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign().
-//
-// Required: a Type (either Type or TypeClass+TypeSub). Content is
-// optional — a claim may carry none (structural claims: heads,
-// branches, contributors). InlineContent holds the bytes directly;
-// ContentHash+ContentSize instead reference external content stored
-// elsewhere. InlineContent and ContentHash are mutually exclusive —
-// set at most one. Encoding applies only when there is content.
-// CreatedAt defaults to time.Now().UTC() when zero. Contributor is
-// required for every claim except the root contribution/contributor
-// claim — see §4.3.
+// ClaimBuilder is the data-only input to ClaimBuilder{...}.Sign(): Type is
+// required, and a Contributor except on the root contributor claim (§4.3).
 type ClaimBuilder struct {
 	Type          string
 	TypeClass     NodeClass
@@ -35,49 +26,25 @@ type ClaimBuilder struct {
 	ContentSize   uint64
 	CreatedAt     time.Time
 	Contributor   Contributor
-	// DiffOf, when set, makes this claim a diff over the referenced
-	// predecessor: NewClaim adds a contribution/diff edge to it. The claim
-	// restates only what differs; the full claim is materialised by
-	// applying the diff chain (done transparently by the loader).
+	// DiffOf makes this claim a diff over the referenced predecessor; the loader
+	// materialises the chain.
 	DiffOf Id
 	Edges  []Edge
 	Fields map[string]string
-	// Height is the claim's generation number (§4.1). A claim with
-	// references (any edges — including the auto-added contributor edge)
-	// must declare it as 1 + max(reference heights); since that value is
-	// always ≥ 1, a zero Height on a referencing claim reads as "not set"
-	// and Sign fails (errHeightRequired). An initial node (no edges) must
-	// leave it 0. Set it directly, via WithHeight, or let WithAutoHeight
-	// resolve it from a Universe. The builder never trusts it blindly — the
-	// verifier re-derives and enforces height against the closure.
+	// Height is the claim's generation number (§4.1): 0 on an initial node, else
+	// 1 + max(reference heights), which a referencing claim must declare.
 	Height uint64
-	// autoHeight* back WithAutoHeight: when autoHeightU is non-nil, Sign
-	// resolves Height itself by reading each referenced claim's committed
-	// height from the Universe. Unexported, so it is a chained-setter-only
-	// mode (it needs a Universe + context, not a literal value).
+	// autoHeight* back WithAutoHeight — a Universe plus context, so the mode is
+	// reachable only through the chained setter.
 	autoHeightU   Universe
 	autoHeightCtx context.Context
-	// SigningKey is the private key used to sign this claim's id.
-	// Optional; nil + empty resolved pubkey = identity Sign per §5.7.
-	// A contributor claim carries its pubkey as its content (§5.7), so
-	// there is no separate pubkey input — set InlineContent to the
-	// multikey-encoded public key.
+	// SigningKey signs this claim's id; nil plus an empty pubkey is identity Sign
+	// (§5.7). A contributor claim's pubkey is its InlineContent, multikey-encoded.
 	SigningKey crypto.Signer
 }
 
-// NewClaim seeds a ClaimBuilder with the two required fields: the type
-// and the attributing contributor. Content is optional — add it (or
-// not) via WithInlineContent / WithExternalContent. Chain other With*
-// setters for optionals, then call .Sign() to finalize:
-//
-//	c, err := ranke.NewClaim("source/email", alice).
-//	    WithInlineContent(body).
-//	    WithEncoding(ranke.EncodingMessage("rfc822")).
-//	    WithCreatedAt(at).
-//	    Sign()
-//
-// For full struct-literal control, build a ClaimBuilder directly
-// and call .Sign() on it.
+// NewClaim seeds a ClaimBuilder with the required type and attributing
+// contributor. Chain With* setters for the optionals, then call .Sign().
 func NewClaim(typ string, contributor Contributor) ClaimBuilder {
 	return ClaimBuilder{
 		Type:        typ,
@@ -85,11 +52,8 @@ func NewClaim(typ string, contributor Contributor) ClaimBuilder {
 	}
 }
 
-// Sign finalizes a ClaimBuilder into an immutable Claim. An optional
-// variadic key overrides ClaimBuilder.SigningKey; both are alternatives
-// to letting Sign pull the key from the Contributor's wrapped signer
-// (see WithSigningKey). Empty resolved pubkey collapses to identity
-// Sign per §5.7.
+// Sign finalizes a ClaimBuilder into an immutable Claim. A variadic key
+// overrides SigningKey, which otherwise comes from the Contributor (§5.7).
 func (b ClaimBuilder) Sign(signingKey ...crypto.Signer) (Claim, error) {
 	if len(signingKey) > 0 && signingKey[0] != nil {
 		b.SigningKey = signingKey[0]
@@ -98,9 +62,6 @@ func (b ClaimBuilder) Sign(signingKey ...crypto.Signer) (Claim, error) {
 }
 
 // --- chained setters ---
-//
-// Each returns the builder by value so calls chain cleanly, an
-// alternative to the struct-literal form. All are public API.
 
 // WithType sets the claim type ("class/sub").
 func (b ClaimBuilder) WithType(t string) ClaimBuilder { b.Type = t; return b }
@@ -108,39 +69,30 @@ func (b ClaimBuilder) WithType(t string) ClaimBuilder { b.Type = t; return b }
 // WithEncoding sets the content media type ("class/sub").
 func (b ClaimBuilder) WithEncoding(e string) ClaimBuilder { b.Encoding = e; return b }
 
-// WithDiff makes this claim a diff over the predecessor at id (adds a
-// contribution/diff edge). The claim restates only what differs.
+// WithDiff makes this claim a diff over the predecessor at id, restating only
+// what differs, and adds the contribution/diff edge.
 func (b ClaimBuilder) WithDiff(id Id) ClaimBuilder { b.DiffOf = id; return b }
 
-// WithInlineContent sets the inline content bytes (the claim carries the
-// content itself). Mutually exclusive with WithExternalContent.
+// WithInlineContent sets the content bytes the claim itself carries.
 func (b ClaimBuilder) WithInlineContent(c []byte) ClaimBuilder { b.InlineContent = c; return b }
 
-// WithExternalContent references content stored elsewhere by its hash and
-// byte size (the claim carries only the reference). Mutually exclusive
-// with WithInlineContent.
+// WithExternalContent references content stored elsewhere by hash and byte
+// size, exclusive with WithInlineContent.
 func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 	b.ContentHash = hash
 	b.ContentSize = size
 	return b
 }
 
-// WithCreatedAt sets the creation timestamp.
+// WithCreatedAt sets the creation timestamp, which defaults to now in UTC.
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
 
-// WithHeight sets the claim's generation number (§4.1) — 1 + max over the
-// heights of the claims it references, or 0 for an initial node. The caller
-// (or its tooling) computes it from the referenced claims it already holds;
-// HeightOf is the trivial reference computation. Mutually exclusive with
-// WithAutoHeight. The verifier re-derives and enforces it, so a wrong value
-// cannot pass verification.
+// WithHeight sets the generation number (§4.1) — 1 + max over the referenced
+// heights, or 0 for an initial node. The verifier re-derives and enforces it.
 func (b ClaimBuilder) WithHeight(h uint64) ClaimBuilder { b.Height = h; return b }
 
-// WithAutoHeight makes Sign resolve the height itself: it reads each
-// referenced claim's committed height from u and sets 1 + max (0 when the
-// claim has no references). Convenience for callers that hold a Universe with
-// the references already stored; heavier callers precompute and cache heights
-// and use WithHeight instead. Mutually exclusive with WithHeight.
+// WithAutoHeight makes Sign read each referenced claim's committed height from
+// u and set 1 + max (0 with no references), exclusive with WithHeight.
 func (b ClaimBuilder) WithAutoHeight(ctx context.Context, u Universe) ClaimBuilder {
 	b.autoHeightCtx = ctx
 	b.autoHeightU = u
@@ -159,8 +111,7 @@ func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 	return b
 }
 
-// WithField sets one implementation-defined node field (§4.1),
-// copying the existing map so the receiver stays unchanged.
+// WithField sets one implementation-defined node field (§4.1) in a copied map.
 func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	f := make(map[string]string, len(b.Fields)+1)
 	for k, v := range b.Fields {
@@ -171,10 +122,8 @@ func (b ClaimBuilder) WithField(key, value string) ClaimBuilder {
 	return b
 }
 
-// buildClaim constructs a Claim atomically per §4.3. It reads as the
-// pipeline it is: resolve the type, content mode, and encoding; assemble and
-// validate the edge set (contributor, diff, invariants); build the node; then
-// sign it into an id. Each step is a helper below.
+// buildClaim constructs a Claim atomically per §4.3: resolve type, content mode
+// and encoding; assemble and validate the edge set; build the node; sign it.
 func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err := resolveType(&cfg); err != nil {
 		return nil, err
@@ -238,8 +187,8 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	return c, nil
 }
 
-// resolveType fills TypeClass/TypeSub from the combined Type (which takes
-// precedence) and validates the class (closed vocabulary) and subtype.
+// resolveType fills TypeClass/TypeSub from the combined Type, which wins, and
+// validates the class vocabulary and the subtype.
 func resolveType(cfg *ClaimBuilder) error {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
@@ -259,8 +208,7 @@ func resolveType(cfg *ClaimBuilder) error {
 }
 
 // resolveContentState reports the content mode — none / inline / external.
-// Content is manual and mutually exclusive; setting both is an error.
-// Structural claims (heads, branches, contributors) carry none.
+// Inline and external are mutually exclusive; setting both is an error.
 func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err error) {
 	hasInline = cfg.InlineContent != nil
 	hasExternal = cfg.ContentHash != nil
@@ -273,13 +221,11 @@ func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err er
 	return hasInline, hasExternal, nil
 }
 
-// maxInlineContent caps inline content at construction (NewClaim/NewEdge):
-// larger blobs belong in external content (dedup + streaming). Verification
-// and decode do not enforce it — an already-stored record is accepted as-is.
+// maxInlineContent caps inline content at construction only (NewClaim/NewEdge);
+// larger blobs belong in external content (dedup + streaming).
 const maxInlineContent = 1 << 20 // 1 MiB
 
-// resolveEncoding fills EncodingClass/Sub from the combined Encoding (or a
-// directly-set split form)
+// resolveEncoding fills EncodingClass/Sub from the combined or split Encoding
 func resolveEncoding(cfg *ClaimBuilder, hasContent bool) error {
 	enc := cfg.Encoding
 	if enc == "" && (cfg.EncodingClass != "" || cfg.EncodingSub != "") {
@@ -293,8 +239,8 @@ func resolveEncoding(cfg *ClaimBuilder, hasContent bool) error {
 	return nil
 }
 
-// resolveContentEncoding parses the combined "class/sub" encoding and enforces
-// the content⇔encoding coupling shared by nodes (NewClaim) and edges (NewEdge):
+// resolveContentEncoding parses "class/sub" and enforces the content⇔encoding
+// coupling shared by nodes (NewClaim) and edges (NewEdge)
 func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, string, error) {
 	var class EncodingClass
 	var sub string
@@ -323,10 +269,8 @@ func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, st
 	return class, sub, nil
 }
 
-// assembleEdges builds the claim's edge set: the caller's edges, the
-// auto-built contribution/contributor edge (unless root), and — for a diff
-// claim — the contribution/diff edge. It enforces the diff naming rule, the
-// per-claim edge cardinality, and the §3.5 provenance invariant, then returns
+// assembleEdges builds the edge set (caller edges, the auto contributor edge, a
+// diff edge), enforces diff naming, cardinality and §3.5 provenance, and returns
 // the edges in canonical (raw-multihash) order.
 func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	edges := make([]*edge, 0, len(cfg.Edges)+1)
@@ -344,8 +288,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 		}
 		edges = append(edges, ce)
 	}
-	// A diff claim overlays a predecessor: add the naming contribution/diff
-	// edge. Materialisation of the delta happens at load time.
+	// A diff claim overlays a predecessor: name it with a contribution/diff edge.
 	if cfg.DiffOf != nil {
 		de, err := newEdge(EdgeConfig{
 			Reference: cfg.DiffOf,
@@ -372,9 +315,8 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	return edges, nil
 }
 
-// checkDiffEdgeNames enforces the diff naming rule: on a diff claim every
-// edge except the two per-claim singletons (contributor, diff) must carry a
-// unique, non-empty name — diff overlay is name-keyed.
+// checkDiffEdgeNames requires a unique, non-empty name on every edge of a diff
+// claim beyond the singletons (contributor, diff) — overlay is name-keyed.
 func checkDiffEdgeNames(edges []*edge) error {
 	seen := make(map[string]struct{}, len(edges))
 	for _, e := range edges {
@@ -394,8 +336,7 @@ func checkDiffEdgeNames(edges []*edge) error {
 	return nil
 }
 
-// checkEdgeCardinality enforces the per-claim singletons: a claim has exactly
-// one contributor and overlays at most one predecessor, so at most one
+// checkEdgeCardinality enforces the per-claim singletons: at most one
 // contribution/contributor edge and one contribution/diff edge.
 func checkEdgeCardinality(edges []*edge) error {
 	var nContrib, nDiff int
@@ -419,10 +360,8 @@ func checkEdgeCardinality(edges []*edge) error {
 	return nil
 }
 
-// applyContent sets the node's content slots for the chosen mode: inline
-// carries the bytes (no content_hash — the id commits to the bytes directly,
-// §Content); external carries the caller's hash+size; none leaves the slots
-// zero. content and content_hash are mutually exclusive.
+// applyContent sets the node's content slots for the chosen mode: inline holds
+// the bytes the id commits to (§Content), external the caller's hash+size.
 func applyContent(n *node, cfg ClaimBuilder, hasInline, hasExternal bool) error {
 	switch {
 	case hasInline:
@@ -435,14 +374,9 @@ func applyContent(n *node, cfg ClaimBuilder, hasInline, hasExternal bool) error 
 	return nil
 }
 
-// resolveHeight determines the node's generation number (§4.1) from the
-// assembled edge set, enforcing the fail-early rules:
-//
-//   - WithAutoHeight: resolve 1 + max(reference heights) from the Universe
-//     (0 when there are no references). Rejects a conflicting explicit Height.
-//   - initial node (no edges): height must be 0.
-//   - referencing claim (≥1 edge): Height must be ≥ 1 (a valid 1+max is never
-//     0), so a zero here means "not set" and construction fails.
+// resolveHeight derives the generation number (§4.1) from the assembled edges:
+// 0 on an initial node, a declared non-zero Height on a referencing claim, or
+// the WithAutoHeight lookup, which rejects a conflicting explicit Height.
 func resolveHeight(cfg ClaimBuilder, edges []*edge) (uint64, error) {
 	if cfg.autoHeightU != nil {
 		if cfg.Height != 0 {
@@ -462,10 +396,8 @@ func resolveHeight(cfg ClaimBuilder, edges []*edge) (uint64, error) {
 	return cfg.Height, nil
 }
 
-// computeAutoHeight reads each referenced claim's committed height from u and
-// returns 1 + max (0 when there are no references). Each reference already
-// carries its own height, so this is a single-level lookup — the recursion is
-// amortised across the claims already in the Universe.
+// computeAutoHeight returns 1 + max of the referenced claims' committed heights
+// from u (0 with no references) — one level, since each carries its own height.
 func computeAutoHeight(ctx context.Context, u Universe, edges []*edge) (uint64, error) {
 	if len(edges) == 0 {
 		return 0, nil
@@ -498,11 +430,8 @@ func normalizeCreatedAt(t time.Time) time.Time {
 	return t.UTC()
 }
 
-// signNode computes id = Sign(H(S(node))) and stores it on n. It falls back
-// to the Contributor's session key when no explicit SigningKey was given (a
-// bare contributor returns nil → identity Sign), rejects a key/pubkey
-// mismatch before signing (§5.7), then signs. Identity-Sign (no key, no
-// pubkey) leaves the hash unchanged, so the id is just the multihash.
+// signNode computes id = Sign(H(S(node))) and stores it on n, falling back to
+// the Contributor's session key and rejecting a key/pubkey mismatch (§5.7).
 func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool) error {
 	if cfg.SigningKey == nil && cfg.Contributor != nil {
 		cfg.SigningKey = cfg.Contributor.SigningKey()

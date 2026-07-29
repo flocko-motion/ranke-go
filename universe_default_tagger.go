@@ -10,8 +10,7 @@ import (
 	"strconv"
 )
 
-// The tag keys this tagger owns (SpineRevKey, BranchTagKey) are defined in
-// universe_taxonomy.go, the central reserved-namespace registry.
+// SpineRevKey and BranchTagKey live in universe_taxonomy.go, the reserved-key registry.
 
 // TagArchiveOptions tunes TagArchive.
 type TagArchiveOptions struct {
@@ -20,13 +19,8 @@ type TagArchiveOptions struct {
 	RetagAll bool
 }
 
-// tagBranchClosure walks head's closure level by level, recording
-// BranchTagKey(branch)=height for every claim that lacks it and pruning where
-// it is present — so the oldest revision to reach a claim wins. It reads
-// membership off the claim it already fetches (GetClaims injects tags) or the
-// pending map, and accumulates new tags into tags (keyed by claim-id string) for
-// TagArchive to flush once per revision. The prune stops descending at an
-// already-tagged claim (whose closure is tagged too).
+// tagBranchClosure walks head's closure, accumulating BranchTagKey(branch)=height into
+// tags for claims lacking it and pruning at tagged ones — the oldest revision wins.
 func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, height int, tags map[string]map[string]string) error {
 	key := BranchTagKey(branch)
 	val := strconv.Itoa(height)
@@ -64,9 +58,8 @@ func tagBranchClosure(ctx context.Context, u Universe, branch string, head Id, h
 	return nil
 }
 
-// DefaultTag is the reference implementation of Tag: walk the branch-table spine
-// and stamp membership claim by claim. Simple and slow, like every Default* — it
-// needs a layer that can store tags, and a layer with a native path overrides.
+// DefaultTag is the reference implementation of Tag: walk the branch-table
+// spine and stamp membership claim by claim.
 func DefaultTag(ctx context.Context, u Universe, head Id) error {
 	if head == nil {
 		return nil
@@ -96,7 +89,6 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 	var spine []Claim // newest→oldest
 	base := uint64(0)
 	for id := arc.bth.ID(); id != nil; {
-		// NOTE: this can be done more efficiently once we have queries.
 		bt, err := GetClaim(ctx, u, id, WithNotDiffMaterialized())
 		if err != nil {
 			return nil, err
@@ -128,10 +120,8 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 		revisionStr := strconv.FormatUint(revision, 10)
 		history = append(history, NewHistoryItem(bt.ID(), int(revision), int(bt.Node().Height()), bt.Node().CreatedAt()))
 
-		// 2.1: accumulate every branch's membership for this revision into one
-		// shared map, so a claim reached by several branches gets each
-		// _b_<branch> before the single flush. The value is the branch table's
-		// height at this revision.
+		// 2.1: accumulate every branch's membership for this revision into one shared
+		// map, so a claim on several branches gets each _b_<branch> before the flush.
 		tags := map[string]map[string]string{}
 		for _, e := range bt.Edges(EdgeFilterType{Type: EdgeTypeBranch}) {
 			name, err := e.GetField(FieldName)
@@ -142,8 +132,7 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 				return nil, err
 			}
 		}
-		// 2.2: mark the spine revision, then flush the accumulated tags additively
-		// — never clearing, so a shared claim keeps other branches' _b_<branch>.
+		// 2.2: mark the spine revision, then flush additively, keeping other branches' tags.
 		s := bt.ID().String()
 		if tags[s] == nil {
 			tags[s] = map[string]string{}

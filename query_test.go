@@ -62,6 +62,7 @@ func TestQueryPathTypedDepth(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{Select: Select{
 		Branch: BranchUniverse,
+		Head:   b.ID(),
 		Claim:  b.ID(),
 		Path:   []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}},
 	}}
@@ -134,7 +135,8 @@ func TestQueryOutputContent(t *testing.T) {
 func TestQueryOutputPath(t *testing.T) {
 	u, _, a, b := queryFixture(t)
 	q := Query{
-		Select: Select{Branch: BranchUniverse, Claim: b.ID(), Path: []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}}},
+		Select: Select{Branch: BranchUniverse, Head: b.ID(), Claim: b.ID(),
+			Path: []PathStep{{Edges: []string{"derivation/*"}, Max: 1, Nodes: []string{"source/*"}}}},
 		Output: Output{Shape: ShapePath},
 	}
 	rs, err := u.Query(context.Background(), q, testScope(q))
@@ -151,7 +153,7 @@ func TestQueryOutputPath(t *testing.T) {
 // closure, both directions, confined to it.
 func TestQueryReverseSupported(t *testing.T) {
 	u, root, a, b := queryFixture(t)
-	q := Query{Select: Select{Branch: BranchUniverse, Claim: b.ID(),
+	q := Query{Select: Select{Branch: BranchUniverse, Head: b.ID(), Claim: b.ID(),
 		Path: []PathStep{{Min: Hops(0), Dir: DirConnections}}}}
 	rs, err := u.Query(context.Background(), q, testScope(q))
 	require.NoError(t, err, "reverse walk is served via closure inversion, not refused")

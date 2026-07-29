@@ -21,9 +21,8 @@ type Failure struct {
 	Err   error
 }
 
-// VerificationRun is a live handle on a running (or finished) verification.
-// It is safe to read while the walk runs — poll for progress, or Wait for
-// completion.
+// VerificationRun is a live handle on a verification, safe to read while the
+// walk runs — poll for progress, or Wait for completion.
 type VerificationRun interface {
 	// Verified is the number of claims that passed so far.
 	Verified() int
@@ -126,18 +125,15 @@ type VerifyOption func(*verifyConfig)
 // WithMaxDepth bounds the closure walk to depth n (0 = full closure).
 func WithMaxDepth(n int) VerifyOption { return func(c *verifyConfig) { c.maxDepth = n } }
 
-// WithMaxClaims stops the walk after n claims have been processed (0 =
-// unlimited) — a hard work cap independent of depth.
+// WithMaxClaims caps the walk at n claims processed (0 = unlimited).
 func WithMaxClaims(n int) VerifyOption { return func(c *verifyConfig) { c.maxClaims = n } }
 
-// WithCreatedAfter prunes any claim whose created_at is before t (skips it
-// and its older references). Since the closure walks toward older
-// references (monotonicity), this bounds verification to a recent window.
+// WithCreatedAfter prunes any claim created before t. The closure walks toward
+// older references, so this bounds verification to a recent window.
 func WithCreatedAfter(t time.Time) VerifyOption { return func(c *verifyConfig) { c.createdAfter = t } }
 
-// WithTrusted prunes the walk at any claim for which fn returns true —
-// already-verified / committed claims. Backed by whatever the caller has
-// (DB, bloom filter, the Sequencer's committed set); no id list to build.
+// WithTrusted prunes the walk at any claim for which fn returns true, backed by
+// whatever the caller has: a DB, a bloom filter, the Sequencer's committed set.
 func WithTrusted(fn func(Id) bool) VerifyOption { return func(c *verifyConfig) { c.trusted = fn } }
 
 // WithExternalContent also fetches and verifies externalized content
@@ -152,9 +148,8 @@ func WithStopAfter(n int) VerifyOption { return func(c *verifyConfig) { c.stopAf
 // on the run's goroutine, so it must be cheap and concurrency-safe.
 func WithOnError(fn func(Failure)) VerifyOption { return func(c *verifyConfig) { c.onError = fn } }
 
-// WithSkipRules omits the named verification rules from the run. Names match
-// VerifyRule.Name (see VerifyRuleSet) — a scan can drop expensive rules for
-// duration reasons while keeping the rest. Unknown names are ignored.
+// WithSkipRules omits the verification rules named by VerifyRule.Name (see
+// VerifyRuleSet), so a scan can drop expensive rules. Unknown names are ignored.
 func WithSkipRules(names ...string) VerifyOption {
 	return func(c *verifyConfig) {
 		if c.skipRule == nil {
@@ -166,9 +161,8 @@ func WithSkipRules(names ...string) VerifyOption {
 	}
 }
 
-// VerifyRule describes a registered verification rule for reports and for
-// selecting which to skip (WithSkipRules): Name is the stable identifier,
-// Rule the human-readable statement printed on violation.
+// VerifyRule describes a registered verification rule: Name is the stable
+// identifier (WithSkipRules), Rule the statement printed on violation.
 type VerifyRule struct{ Name, Rule string }
 
 // VerifyRuleSet lists the verification rules, in application order — the
@@ -191,11 +185,9 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 
 // --- the walk ---
 
-// runVerification walks the closure from roots in the background, verifying
-// each claim (§5.10), and returns a live handle. Everything comes from the
-// one Universe u: claims via GetClaim, content via the node (inline) or
-// GetContents/StreamContent (external). rootCheck, if set, validates each
-// depth-0 root (e.g. an Archive requires a branch-table head).
+// runVerification walks the closure from roots in the background, verifying each
+// claim (§5.10) against the one Universe u, and returns a live handle. rootCheck,
+// if set, validates each depth-0 root — an Archive requires a branch-table head.
 func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyConfig, rootCheck func(Claim) error) *verificationRun {
 	run := newRun()
 	go func() {
@@ -232,13 +224,8 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				continue // pruned: already trusted/committed
 			}
 
-			// Fetch the stored raw CBOR — the exact bytes the id was signed
-			// over — and decode it. Verification hashes this CBOR's node
-			// preimage (never a re-encode, which would drift as the alias
-			// taxonomy grows) and walks the stored (delta) edges, so we work
-			// from the raw claim, not a materialised one. In a stack the
-			// request routes to the byte layer that holds the CBOR; a
-			// structure-only cache (neo4j) misses and falls through.
+			// The raw CBOR is the exact bytes the id was signed over, so
+			// verification works from it: its node preimage and delta edges.
 			raws, err := u.GetClaimsRaw(ctx, []Id{cur.id})
 			if err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
@@ -284,9 +271,7 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				return // hit the work cap
 			}
 
-			// Descend into the claim's own (delta) edge references — this
-			// reaches the full closure, including a diff predecessor and,
-			// through it, inherited entries.
+			// The delta edges reach the full closure through a diff predecessor.
 			if cfg.maxDepth == 0 || cur.depth < cfg.maxDepth {
 				for _, e := range c.Edges() {
 					queue = append(queue, item{e.Reference(), cur.depth + 1})
@@ -297,11 +282,8 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 	return run
 }
 
-// verifyClaim runs every verification rule against one claim (§5.10). Each rule
-// is a small, self-contained function checking one invariant; verifyRules is
-// the registry the walk applies to every claim. Adding an invariant means
-// adding a rule below and one entry to verifyRules — the rule's statement and
-// its check live side by side, and the walk stays untouched.
+// verifyClaim runs every verifyRules entry against one claim (§5.10). A new
+// invariant is one rule function plus one registry entry.
 func verifyClaim(ctx context.Context, c Claim, raw []byte, cfg *verifyConfig, u Universe) error {
 	pubkey, err := resolveClaimPubkey(ctx, c, u)
 	if err != nil {
@@ -363,10 +345,8 @@ func verifyArchiveHead(ctx context.Context, head Claim, u Universe, cfg *verifyC
 	return nil
 }
 
-// claimUnderVerification bundles everything a rule may inspect about one claim:
-// the decoded claim, its stored raw CBOR (the bytes the id was signed over),
-// the resolved signing pubkey, the run config, and the Universe (to resolve
-// references). Rules read; they do not mutate.
+// claimUnderVerification is the read-only surface a rule inspects: the decoded
+// claim, its stored raw CBOR, the signing pubkey, the config, the Universe.
 type claimUnderVerification struct {
 	claim  Claim
 	raw    []byte
@@ -376,17 +356,12 @@ type claimUnderVerification struct {
 }
 
 // verifyRule is one verification invariant: a short name, the rule stated in
-// words (printed on violation, so a failure explains the invariant broken, not
-// just a label), and up to four scoped checks — each optional:
+// words so a violation explains itself, and up to four optional scoped checks:
 //
 //	claim   — once per claim
-//	content — per content carrier: the node, and each edge (they share the
-//	          same content_hash/content_size/bytes logic)
-//	edge    — per edge (edge-specific, e.g. what it references)
-//	archive — once against an archive's head
-//
-// The walk applies claim/content/edge checks to every claim; archive checks run
-// once against the head (archive.Verify).
+//	content — per content carrier: the node, and each edge
+//	edge    — per edge, e.g. what it references
+//	archive — once against an archive's head (archive.Verify)
 type verifyRule struct {
 	name    string
 	rule    string
@@ -407,8 +382,7 @@ var verifyRules = []verifyRule{
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
 }
 
-// ruleSignature: id(v) is a valid signature over H(preimage(raw)) by the
-// claim's signing pubkey (hashes the stored bytes, never re-encodes).
+// ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey.
 func ruleSignature(_ context.Context, t *claimUnderVerification) error {
 	return t.claim.verifyID(t.pubkey, t.raw)
 }
@@ -419,10 +393,7 @@ func ruleHeight(ctx context.Context, t *claimUnderVerification) error {
 }
 
 // ruleContent (per content carrier): content that carries a content_hash must
-// match it and content_size — external only when the run is configured for it.
-// Native inline content has no hash and is committed by the claim id, so it
-// needs no check here. The node and every edge share this logic, so one
-// function serves both.
+// match it and content_size, external only when the run is configured for it.
 func ruleContent(ctx context.Context, cc contentCarrier, t *claimUnderVerification) error {
 	return verifyContentRef(ctx, cc, t.cfg, t.u)
 }
@@ -439,11 +410,8 @@ func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVeri
 	return nil
 }
 
-// ruleBranchTableReference (per edge): a contribution/branches (branch-table)
-// claim may be referenced ONLY by another branch-table claim. Branch tables
-// form their own lineage (the diff chain of tables heading an archive); ordinary
-// claims must never point into that archive-management layer. So if the owning
-// claim is not a branch table, this edge may not reference one.
+// ruleBranchTableReference (per edge): only a branch-table claim may reference
+// a contribution/branches claim, keeping that lineage its own layer.
 func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
 	if t.claim.Node().Type() == NodeBranches {
 		return nil // a branch table may reference branch tables (its lineage)
@@ -461,8 +429,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 	return nil
 }
 
-// ruleArchiveHead (per archive): an archive's head claim is a branch table
-// (contribution/branches) — the root of the branch-table lineage.
+// ruleArchiveHead (per archive): an archive's head is a contribution/branches claim.
 func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 	if t.claim.Node().Type() != NodeBranches {
 		return WithDetail(errNotBranchTable, "got "+t.claim.Node().Type())
@@ -471,12 +438,9 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 }
 
 // verifyID checks that this claim's id is a valid signature by pubkey over
-// H(S(node)) — the node preimage extracted from the claim's stored raw CBOR,
-// NOT re-encoded. Hashing the stored bytes (rather than re-running the encoder)
-// keeps verification stable as the alias taxonomy grows: a newer encoder would
-// emit the same claim more compactly, so re-encoding would change the hash and
-// wrongly reject a valid claim. The claim does this itself (sealed) since it is
-// a core-type crypto step no caller should hand-roll.
+// H(S(node)), the preimage extracted from the stored raw CBOR. Hashing stored
+// bytes keeps verification stable as the alias taxonomy grows: a newer encoder
+// emits the same claim more compactly, so a re-encode would shift the hash.
 func (c *claim) verifyID(pubkey, raw []byte) error {
 	preimage, err := nodePreimage(raw)
 	if err != nil {
@@ -490,12 +454,8 @@ func (c *claim) verifyID(pubkey, raw []byte) error {
 }
 
 // verifyHeight re-derives the claim's generation number from its committed
-// references and enforces the §4.1 invariant: height == 1 + max(reference
-// heights), and == 0 for an initial node (no edges). Because the closure walk
-// verifies every claim, this single-level check at each node transitively
-// proves the recursive property over the whole graph — and rejects any height
-// a builder committed that does not match the structure. It re-derives, never
-// trusting the stored value it is checking.
+// references and enforces §4.1: height == 1 + max(reference heights), 0 for an
+// initial node. The closure walk makes this single-level check transitive.
 func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	edges := c.Edges()
 	var want uint64
@@ -522,13 +482,10 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	return nil
 }
 
-// resolveClaimPubkey returns the pubkey whose private key signed this claim's
-// id (§5.7): the claim's own content for an initial node (no edges), else the
-// content of the contributor named by its contribution/contributor edge.
-// Purely interface-driven.
+// resolveClaimPubkey returns the pubkey whose private key signed this claim's id
+// (§5.7): own content for an initial node, else the contributor's content.
 func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error) {
-	// Initial node → own content. Else the contributor claim its
-	// contribution/contributor edge names (fetched by id, then read).
+	// Initial node → own content, else the contribution/contributor edge's target.
 	src, viaEdge := c, false
 	if edges := c.Edges(); len(edges) > 0 {
 		var target Id
@@ -570,9 +527,8 @@ type contentCarrier interface {
 	Encoding() string
 }
 
-// verifyContentRef checks external content integrity for one node/edge. Inline
-// content is committed by the claim id (it has no content_hash), so only
-// external content is verified here — and only when the run opts into it.
+// verifyContentRef checks external content integrity for one node/edge, when the
+// run opts into it. The claim id already commits inline content.
 func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig, u Universe) error {
 	hash := cc.GetContentHash()
 	if hash == nil {

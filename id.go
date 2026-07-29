@@ -14,31 +14,25 @@ import (
 )
 
 // Id is a self-describing, content-addressed identifier: id(v) =
-// Sign(H(S(v))) for nodes, id(e) = H(S(e)) for edges (spec §4). Opaque
-// to callers.
+// Sign(H(S(v))) for nodes, id(e) = H(S(e)) for edges (spec §4).
 type Id interface {
 	String() string
 	Equal(other Id) bool
-	// Algorithm names the scheme that built this id, e.g. "sha2-256"
-	// or "ed25519-pub".
+	// Algorithm names the scheme that built this id, e.g. "sha2-256".
 	Algorithm() string
-	// rawBytes returns the self-describing payload. Being unexported, it
-	// seals Id: only this package's *id can satisfy the interface (no
-	// foreign Id), and the canonical encoder reads the bytes without a cast.
+	// rawBytes returns the self-describing payload; unexported, so only
+	// this package's *id satisfies Id.
 	rawBytes() []byte
 }
 
-// id is the concrete Id: a self-describing payload (multihash for
-// identity-Sign ids, multikey signature for signed ids) with its
-// multibase string form cached. A hash is one payload kind, not the
-// identity itself.
+// id is the concrete Id: a self-describing payload — multihash, or multikey
+// signature for signed ids — with its multibase string form cached.
 type id struct {
 	raw []byte
 	str string // multibase form, cached
 }
 
-// idFromBytes wraps a raw payload as an id. The leading varint makes it
-// self-describing; no validation here (deferred to verifySignature/Algorithm).
+// idFromBytes wraps a raw payload as an id, its leading varint self-describing.
 func idFromBytes(raw []byte) (*id, error) {
 	str, err := multibase.Encode(multibase.Base32, raw)
 	if err != nil {
@@ -65,14 +59,12 @@ func hashContent(content []byte) (*id, error) {
 	return hashFromMultihashBytes(mh)
 }
 
-// HashContent returns the content-address (SHA2-256 multihash) of bytes,
-// for adapters/tooling computing the id content is stored under.
+// HashContent returns the content-address (SHA2-256 multihash) of bytes.
 func HashContent(content []byte) (Id, error) {
 	return hashContent(content)
 }
 
-// ParseId parses a multibase-encoded id string. Accepts both multihash
-// and multikey-signature payloads without validating them.
+// ParseId parses a multibase-encoded id string, multihash or signature payload.
 func ParseId(s string) (Id, error) {
 	_, raw, err := multibase.Decode(s)
 	if err != nil {
@@ -98,8 +90,7 @@ func (h *id) Equal(other Id) bool {
 	return bytes.Equal(h.raw, other.rawBytes())
 }
 
-// Algorithm reads the leading multicodec varint to name the scheme
-// (hash code, or multikey signature code).
+// Algorithm reads the leading multicodec varint to name the scheme.
 func (h *id) Algorithm() string {
 	if dec, err := multihash.Decode(h.raw); err == nil {
 		return dec.Name

@@ -48,14 +48,10 @@ func queryOpsFixture(t *testing.T) (Universe, map[string]Claim) {
 	return u, all
 }
 
-// testScope resolves q's scope the way an Archive would (test helper): a branch
-// query confines to its root's closure, $universe is unconfined.
+// testScope is the Scope an Archive would resolve for q, which for the $universe
+// every caller queries is the branch name.
 func testScope(q Query) Scope {
-	s := Scope{Branch: q.Select.Branch}
-	if q.Select.Branch != BranchUniverse {
-		s.Head = q.Select.Claim
-	}
-	return s
+	return Scope{Branch: q.Select.Branch}
 }
 
 // queryIDs runs q and returns the reached id set.
@@ -144,6 +140,7 @@ func TestQueryPathNodeExclude(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{Select: Select{
 		Branch: BranchUniverse,
+		Head:   a["hub"].ID(),
 		Claim:  a["hub"].ID(),
 		Path:   []PathStep{{Nodes: []string{"entity/*", "-entity/object"}}},
 	}}
@@ -156,6 +153,7 @@ func TestQueryPathEdgeExclude(t *testing.T) {
 	u, a := queryOpsFixture(t)
 	q := Query{Select: Select{
 		Branch: BranchUniverse,
+		Head:   a["hub"].ID(),
 		Claim:  a["hub"].ID(),
 		Path:   []PathStep{{Min: Hops(0), Edges: []string{"-contribution/*"}}},
 	}}

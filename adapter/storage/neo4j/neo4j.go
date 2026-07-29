@@ -22,9 +22,8 @@ import (
 // defaultContentCap is the largest inline content the cache stores inline.
 const defaultContentCap = 4 << 10 // 4 KiB
 
-// New returns a graph-native cache Universe over an already-configured driver.
-// Connection, auth, and (unless WithDatabase is given) the target database
-// live on the driver.
+// New returns a graph-native cache Universe over an already-configured driver,
+// which carries connection, auth, and the target database (see WithDatabase).
 func New(driver neo4jdriver.DriverWithContext, opts ...Option) ranke.Universe {
 	u := &neo4jUniverse{driver: driver, contentCap: defaultContentCap, tier: ranke.StorageTierEager}
 	for _, o := range opts {
@@ -36,10 +35,8 @@ func New(driver neo4jdriver.DriverWithContext, opts ...Option) ranke.Universe {
 // Option configures the neo4j cache Universe.
 type Option func(*neo4jUniverse)
 
-// WithContentCap sets the largest inline content (bytes) the cache keeps
-// inline. Larger content — and all external content — is not held here; it is
-// served by the durable Universe this cache is stacked over. Default 4 KiB.
-// A cap of 0 stores no content at all (structure-only).
+// WithContentCap sets the largest inline content (bytes) the cache keeps, the
+// durable Universe below serving the rest. Default 4 KiB, 0 for structure-only.
 func WithContentCap(n int) Option {
 	return func(u *neo4jUniverse) {
 		if n >= 0 {
@@ -55,10 +52,8 @@ func WithDatabase(name string) Option {
 }
 
 // WithTier sets the write role the cache serves in a stack (Capabilities.Tier).
-// Default is eager — the write-through queryable layer, written synchronously
-// (best-effort) alongside the source of truth so reads and RQL hit an
-// up-to-date graph. neo4j holds a lossy projection (no verbatim CBOR), so it
-// can never be authoritative; a deployment may still choose background or lazy.
+// Default eager: written synchronously alongside the source of truth, so reads
+// and RQL hit an up-to-date graph. A deployment may pick background or lazy.
 func WithTier(t ranke.StorageTier) Option {
 	return func(u *neo4jUniverse) { u.tier = t }
 }
@@ -94,13 +89,10 @@ func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[str
 	return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params, neo4jdriver.EagerResultTransformer)
 }
 
-// cypherPutClaims projects claims into neo4j's native typed graph. Nodes are
-// MERGE'd by id with no label (so a reference target and its later full claim
-// are the same node) and given their type as a dynamic label; edges are
-// relationships typed dynamically by the edge type. Inline content rides along
-// as a legible `content` property; a claim's extension fields ride as their own
-// properties (SET += fields), so the browser shows and can query them. Requires
-// Neo4j ≥ 5.26 (dynamic labels/types via $()). A null property is simply unset.
+// cypherPutClaims projects claims into neo4j's native typed graph: MERGE by id so
+// a reference target and its later full claim are one node, the claim type as a
+// dynamic label, extension fields and inline content as properties. Dynamic
+// labels via $() require Neo4j ≥ 5.26; a null property is unset.
 const cypherPutNodes = `
 UNWIND $claims AS c
 MERGE (n {id: c.id})
@@ -110,9 +102,8 @@ SET n.encoding = c.encoding, n.created_at = c.created_at, n.height = c.height,
     n.content_hash = c.content_hash, n.content_size = c.content_size,
     n.content = c.content`
 
-// edgeCypher writes all edges of one relationship type. Neo4j evaluates a dynamic
-// relationship type ($(...)) once per query rather than per UNWIND row, so the
-// type is a literal here and edges are grouped by type (one query per type).
+// edgeCypher writes all edges of one relationship type. Neo4j evaluates $(...)
+// once per query, not per UNWIND row, so the type is a literal here.
 func edgeCypher(relType string) string {
 	lit := "`" + strings.ReplaceAll(relType, "`", "``") + "`"
 	return `
@@ -125,20 +116,16 @@ SET r.encoding = e.encoding, r.direction = e.direction, r.content_hash = e.conte
     r.content_size = e.content_size, r.content = e.content`
 }
 
-// PutClaims projects each claim into neo4j's native typed graph: a node
-// labelled with the claim's type, its edges as relationships typed by the edge
-// type, and any legible inline content as a `content` property on the node /
-// relationship — nothing is stored outside a claim's own node. The canonical
-// CBOR is not stored; external, binary, and over-cap content are left to the
-// durable layer. Nodes MERGE by id (a reference target is a labelless stub
-// until its own claim adds the type label), so re-puts are idempotent.
+// PutClaims projects each claim into neo4j's native typed graph: a node labelled
+// with the claim's type, its edges as typed relationships, legible inline content
+// as a `content` property. Nodes MERGE by id, so re-puts are idempotent and a
+// reference target stays a labelless stub until its own claim arrives.
 func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	if len(cs) == 0 {
 		return nil
 	}
-	// This cache stores materialised claims, so any diff overlay is resolved
-	// before projecting: a delta's effective content_size and encoding come from
-	// its base, and claimParam reads them off the materialised view.
+	// Diff overlays resolve before projecting: a delta's effective content_size
+	// and encoding come from its base, and claimParam reads the materialised view.
 	if err := u.materializeForWrite(ctx, cs); err != nil {
 		return err
 	}
@@ -170,11 +157,8 @@ func (u *neo4jUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 	return nil
 }
 
-// cypherGetClaims fetches nodes by id (label-agnostic — the adapter reads by
-// id; labels are the human/native-query projection) that are full claims
-// (size(labels) > 0, i.e. not a bare reference stub), with each node's labels
-// (its type) and its outgoing relationships (each carrying its own type via
-// type(r)).
+// cypherGetClaims fetches full claims by id — size(labels) > 0 tells a claim from
+// a reference stub — with each node's labels and outgoing relationships.
 const cypherGetClaims = `
 UNWIND $ids AS id
 MATCH (n {id: id})
@@ -182,16 +166,12 @@ WHERE size(labels(n)) > 0
 RETURN properties(n) AS node, labels(n) AS labels,
        [(n)-[r]->(t) | {props: properties(r), rtype: type(r), ref: t.id}] AS edges`
 
-// GetClaims reconstructs claims from their graph nodes (+ edge relationships),
-// re-inlining any legible content the cache holds (the `content` property) and
-// materialising diff overlays like any Universe. A requested id absent from the
-// cache is a miss (ranke.ErrNotFound) so the stack falls through to the durable
-// layer.
+// GetClaims reconstructs claims from their graph nodes and relationships,
+// re-inlining the `content` property. An id absent from the cache is a miss
+// (ranke.ErrNotFound), so the stack falls through to the durable layer.
 func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
-	// Materialised claims are what this cache stores, so it serves those natively
-	// and cannot serve delta form at all. Unsupported, not a miss: a stack routes
-	// delta reads by capability, so being asked is a caller's bug and a miss would
-	// bury it in a silent fall-through.
+	// Delta form is unsupported rather than a miss: a stack routes delta reads by
+	// capability, so being asked is a caller's bug a fall-through would bury.
 	if ranke.WantsDelta(opts...) {
 		return nil, errDeltaForm
 	}
@@ -240,8 +220,6 @@ func (u *neo4jUniverse) GetClaims(ctx context.Context, ids []ranke.Id, opts ...r
 		}
 		out[i] = c
 	}
-	// Stored claims are already materialised — no overlay pass. No delta form to
-	// serve either; a caller needing one reads a RawClaims layer.
 	return out, nil
 }
 
@@ -284,10 +262,8 @@ MATCH (n {id: id})
 WHERE size(labels(n)) > 0
 RETURN id AS id, n.height AS height`
 
-// GetClaimHeights returns each claim's committed height (§4.1) natively from
-// the stored node property — no reconstruction, the reason height is engrained
-// like content_hash. A requested id absent from the cache is a miss
-// (ranke.ErrNotFound) so a stack falls through to the durable layer.
+// GetClaimHeights returns each claim's committed height (§4.1) from the stored
+// node property; an absent id is a miss (ranke.ErrNotFound).
 func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, error) {
 	out := make([]uint64, len(ids))
 	if len(ids) == 0 {
@@ -320,8 +296,7 @@ func (u *neo4jUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]
 
 // Query is implemented natively in query.go (Cypher traversal lowering).
 
-// GetClaimsRaw always misses: a structure/query cache stores no CBOR. The
-// ErrNotFound lets a stack route the request to the authoritative byte layer.
+// GetClaimsRaw always misses, routing the read to the authoritative byte layer.
 func (u *neo4jUniverse) GetClaimsRaw(_ context.Context, ids []ranke.Id) ([][]byte, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -329,10 +304,8 @@ func (u *neo4jUniverse) GetClaimsRaw(_ context.Context, ids []ranke.Id) ([][]byt
 	return nil, fmt.Errorf("adapter/neo4j: stores no claim CBOR (structure-only cache): %w", ranke.ErrNotFound)
 }
 
-// GetContents always misses: this cache holds no external content — inline
-// content lives on the claim node and is served with the claim (GetClaims), so
-// the external-content API never has anything here. ErrNotFound routes the
-// request to the durable layer.
+// GetContents always misses, routing the request to the durable layer. Inline
+// content lives on the claim node and is served by GetClaims.
 func (u *neo4jUniverse) GetContents(_ context.Context, refs []ranke.ContentRef) ([][]byte, error) {
 	if len(refs) == 0 {
 		return nil, nil
@@ -340,9 +313,8 @@ func (u *neo4jUniverse) GetContents(_ context.Context, refs []ranke.ContentRef) 
 	return nil, fmt.Errorf("adapter/neo4j: holds no external content (inline only, on the claim node): %w", ranke.ErrNotFound)
 }
 
-// PutContents is a no-op: content lives on the claim node (set by PutClaims),
-// and external content belongs to the durable layer — neo4j stores nothing
-// outside a claim's own node.
+// PutContents is a no-op: PutClaims sets content on the claim node, and external
+// content belongs to the durable layer.
 func (u *neo4jUniverse) PutContents(_ context.Context, _ []ranke.ContentBlob) error {
 	return nil
 }
@@ -360,8 +332,7 @@ func (u *neo4jUniverse) StreamContent(_ context.Context, hash ranke.Id, _ uint64
 	return nil, fmt.Errorf("content %s: %w", hash, ranke.ErrNotFound)
 }
 
-// CopyClaims uses the ADT default walker; a native batched MERGE could
-// override later.
+// CopyClaims uses the ADT default walker.
 func (u *neo4jUniverse) CopyClaims(ctx context.Context, src ranke.Universe, ids []ranke.Id, opts ...ranke.CopyOption) error {
 	return ranke.DefaultCopyClaims(ctx, u, src, ids, opts...)
 }
@@ -373,11 +344,9 @@ func (u *neo4jUniverse) CopyContents(ctx context.Context, src ranke.Universe, re
 
 // --- Tags (Capabilities.Tags): mutable per-claim overlay ---
 //
-// Tags are node properties whose key carries ranke.ReservedPrefix ("_"). No
-// fixed claim property (id, type, height, …) starts with "_", so the prefix
-// cleanly separates tags; the tagger's keys (_br, _b_<branch>) already carry
-// it, so they are stored verbatim. GetClaims injects them back onto the claim
-// (partsFromNode); GetClaimTags is the tags-only shortcut.
+// Tags are node properties keyed with ranke.ReservedPrefix ("_"), which fixed
+// claim properties avoid, so the tagger's keys (_br, _b_<branch>) store verbatim.
+// GetClaims injects them back onto the claim; GetClaimTags is the shortcut.
 
 const cypherGetClaimTags = `
 UNWIND $ids AS id
@@ -419,10 +388,8 @@ UNWIND $rows AS row
 MATCH (c {id: row.id})
 SET c += row.props`
 
-// SetClaimsTags applies tags per claim (keyed by id string): for each claim it
-// clears every existing tag whose key matches a clearTags glob, then applies
-// the new key→value pairs. Both happen via SET c += props, where a null value
-// removes a property (the clear) and a string sets it.
+// SetClaimsTags clears every tag matching a clearTags glob, then applies the new
+// key→value pairs — one SET c += props, where a null value removes a property.
 func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, tags map[string]map[string]string) error {
 	if len(tags) == 0 {
 		return nil

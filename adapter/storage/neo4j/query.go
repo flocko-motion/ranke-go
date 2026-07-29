@@ -1,13 +1,12 @@
 // package: neo4j / query
 // type:    adapter
 // job:     native RQL execution — lower the whole query to one Cypher statement, run it, reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk anchored at the root claim; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk
+// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure when it names none; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk
 package neo4j
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +20,6 @@ import (
 func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	start := time.Now()
 	needPaths := q.Output.Shape == ranke.ShapePath
-	if len(q.Select.Path) > 0 && q.Select.Claim == nil {
-		return nil, ranke.ErrQueryUnanchored
-	}
 	rep := newReport(q.Execution.Report, start)
 
 	cypher, params := lowerCypher(q, scope, needPaths)
@@ -39,6 +35,17 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 	recStart := time.Now()
 	var results []ranke.QueryResult
 	switch {
+	case needPaths:
+		ps, rerr := u.reachedPaths(res.Records)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if q.Output.Detail == ranke.DetailID {
+			for i := range ps {
+				ps[i].Claim = nil // the route carries the identities
+			}
+		}
+		results = ps
 	case q.Output.Detail == ranke.DetailID:
 		// ids only — no reconstruction at all.
 		for _, r := range res.Records {
@@ -48,12 +55,6 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 			}
 			results = append(results, ranke.QueryResult{Id: id})
 		}
-	case needPaths:
-		ps, rerr := u.reachedPaths(res.Records)
-		if rerr != nil {
-			return nil, rerr
-		}
-		results = ps
 	default: // graph or claims: build from this query's own node records.
 		claims, rerr := u.claimsFromRecords(res.Records)
 		if rerr != nil {
@@ -62,7 +63,7 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		for _, c := range claims {
 			r := ranke.QueryResult{Id: c.ID(), Claim: c}
 			if q.Output.Content != nil {
-				r.Content = u.shapeContent(ctx, c, q.Output.Content)
+				r.Content = ranke.ShapeContent(ctx, u, c, q.Output)
 			}
 			results = append(results, r)
 		}
@@ -71,10 +72,7 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 	return &cypherStream{results: results, report: rep.finalize(len(results))}, nil
 }
 
-// reachedWithRoutes turns (route, id) records into endpoint claims plus each
-// one's route (first row per endpoint wins), materialised in one GetClaims batch.
-// reachedPaths builds one result per endpoint from its inline route node data:
-// each route element rebuilds a claim, the last is the endpoint.
+// reachedPaths assembles one result per record: a claim per route element, last is the endpoint.
 func (u *neo4jUniverse) reachedPaths(records []*neo4jdriver.Record) ([]ranke.QueryResult, error) {
 	out := make([]ranke.QueryResult, 0, len(records))
 	for _, r := range records {
@@ -122,17 +120,40 @@ func claimFromData(m map[string]any) (ranke.Claim, error) {
 	return ranke.AssembleClaim(parts)
 }
 
-// confined reports whether scope is a real branch (has a _b_ tag); $universe/
-// $archive are unrestricted (neo4j is already that snapshot).
-func confined(scope ranke.Scope) bool {
+// tagBounded reports whether the _b_<branch> tag bounds this scope, which holds
+// for a real branch name.
+func tagBounded(scope ranke.Scope) bool {
 	return scope.Branch != "" && scope.Branch != ranke.BranchUniverse && scope.Branch != ranke.BranchArchive
 }
 
-// lowerCypher routes a query to its Cypher. A no-path read confined to a branch
-// is the branch's members — a tag scan (the closure equals the _b_<branch> set).
-// Everything else walks from the root claim: an unconfined ($universe/$archive)
-// no-path read is the root's reachable closure (not the whole cache), and a path
-// read follows its steps.
+// closureAnchor is the claim whose reach bounds a read: Select.Head, else
+// $archive's branch-table head. A tag-bounded scope needs none.
+func closureAnchor(q ranke.Query, scope ranke.Scope) ranke.Id {
+	if q.Select.Head != nil {
+		return q.Select.Head
+	}
+	if !tagBounded(scope) {
+		return scope.Head
+	}
+	return nil
+}
+
+// startClause binds n0, where a traversal's first segment starts: the claim
+// Select.Claim names, else any claim the closure holds.
+func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string {
+	if q.Select.Claim != nil {
+		params["root"] = q.Select.Claim.String()
+		return "MATCH (n0 {id: $root})"
+	}
+	if anchor := closureAnchor(q, scope); anchor != nil {
+		params["head"] = anchor.String()
+		return "MATCH (h {id: $head})-[*0..]->(n0)"
+	}
+	return "MATCH (n0)"
+}
+
+// lowerCypher routes a query to its Cypher: a Path-less read is the scope's claim
+// set (a scan), anything else follows the Path's steps.
 func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
 	if len(q.Select.Path) == 0 {
 		return scanCypher(q, scope) // no traversal: the scope's claim set
@@ -143,10 +164,7 @@ func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[
 // scanCypher lowers a Path-less read: the scope's claim set. Branch membership is
 // the _b_<branch> tag (<= Height gives point-in-time); Head narrows to its reach.
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
-	anchor := q.Select.Head
-	if anchor == nil && !confined(scope) {
-		anchor = scope.Head // $archive: the branch-table header's closure
-	}
+	anchor := closureAnchor(q, scope)
 	params := map[string]any{}
 	match := "MATCH (n)"
 	if anchor != nil {
@@ -154,7 +172,7 @@ func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
 		match = "MATCH (h {id: $head})-[*0..]->(n)\nWITH DISTINCT n"
 	}
 	var conds []string
-	if confined(scope) {
+	if tagBounded(scope) {
 		params["bkey"] = ranke.BranchTagKey(scope.Branch)
 		params["height"] = scope.Height
 		conds = append(conds, "n[$bkey] <= $height")
@@ -179,8 +197,7 @@ func returnCols(detail ranke.Detail, v string) string {
 		"[(" + v + ")-[r]->(t) | {props: properties(r), rtype: type(r), ref: t.id}] AS edges"
 }
 
-// claimsFromRecords rebuilds claims in-process from a query's node records
-// (props, labels, edges).
+// claimsFromRecords rebuilds claims from a query's node records (props, labels, edges).
 func (u *neo4jUniverse) claimsFromRecords(records []*neo4jdriver.Record) ([]ranke.Claim, error) {
 	out := make([]ranke.Claim, 0, len(records))
 	for _, r := range records {
@@ -204,38 +221,32 @@ func (u *neo4jUniverse) claimsFromRecords(records []*neo4jdriver.Record) ([]rank
 	return out, nil
 }
 
-// traversalCypher lowers the Select's Path (direction, depth, edge/node filters
-// per step). A reachability read (no path shape) is a per-step frontier pipeline
-// (frontierCypher); a path shape reconstructs one continuous route per endpoint
-// (pathCypher). Both treat a 0-length segment as including its start, so the root
-// can pass through — matching DefaultQuery's walk.
+// traversalCypher lowers the Select's Path — frontierCypher for reachability,
+// pathCypher for a path shape. A 0-length segment includes its start (DefaultQuery).
 func traversalCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
 	steps := q.Select.Path
 	if len(steps) == 0 {
 		steps = []ranke.PathStep{{}} // implicit: all edges, provenance, unbounded → full closure
 	}
-	params := map[string]any{"root": q.Select.Claim.String()}
+	params := map[string]any{}
 	if needPaths {
 		return pathCypher(q, scope, steps, params)
 	}
 	return frontierCypher(q, scope, steps, params)
 }
 
-// frontierCypher lowers a reachability read as a per-step frontier pipeline: each
-// PathStep is its own MATCH … WITH DISTINCT stage, so relationship-uniqueness
-// resets at every step boundary (a step may re-walk an edge an earlier step
-// used). This mirrors the reference's independent per-step expansion — e.g. a
-// forward step reaching a source does not block a later reverse step from walking
-// that same edge back to the deriver.
+// frontierCypher lowers a reachability read as a per-step frontier pipeline, one
+// MATCH … WITH DISTINCT per step, so relationship-uniqueness resets at each
+// boundary: a step may re-walk an edge an earlier step used, as the reference does.
 func frontierCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params map[string]any) (string, map[string]any) {
-	conf := confined(scope)
+	conf := tagBounded(scope)
 	if conf {
 		params["bkey"] = ranke.BranchTagKey(scope.Branch)
 		params["height"] = scope.Height
 	}
 	final := "n" + strconv.Itoa(len(steps))
 	var b strings.Builder
-	b.WriteString("MATCH (n0 {id: $root})\nWITH n0")
+	b.WriteString(startClause(q, scope, params) + "\nWITH DISTINCT n0")
 	for i, step := range steps {
 		rv, nv := "r"+strconv.Itoa(i), "n"+strconv.Itoa(i+1)
 		seg := segmentPattern("n"+strconv.Itoa(i), rv, nv, step)
@@ -263,13 +274,11 @@ func frontierCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, pa
 		orderLimitClause(q.Order, q.Limit.Results, final), params
 }
 
-// pathCypher lowers a path-shape read as one continuous path, so a route can be
-// reconstructed per endpoint. Relationship-uniqueness spans the whole path here:
-// a route that re-crosses an edge is not a route. (Reachability uses the frontier
-// lowering instead — that is where a step may reuse an earlier step's edge.)
+// pathCypher lowers a path-shape read as one continuous path, so a route
+// reconstructs per endpoint. Relationship-uniqueness spans the whole route.
 func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params map[string]any) (string, map[string]any) {
 	var pat, where strings.Builder
-	pat.WriteString("(n0 {id: $root})")
+	pat.WriteString("(n0)")
 	addWhere := func(cond string) {
 		if where.Len() > 0 {
 			where.WriteString("\n  AND ")
@@ -290,18 +299,17 @@ func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params
 	if wc := whereClause(q.Where, final, params, &ctr); wc != "true" {
 		addWhere(wc)
 	}
-	if confined(scope) {
+	if tagBounded(scope) {
 		params["bkey"] = ranke.BranchTagKey(scope.Branch)
 		params["height"] = scope.Height
 		addWhere("all(x IN nodes(path) WHERE x[$bkey] <= $height)")
 	}
-	// A single-segment path uses allShortestPaths (O(nodes), not per-route). It
-	// refuses a pattern whose ends it cannot prove distinct, so a step that walks
-	// at least one edge says so: the structural graph is acyclic, making the
-	// inequality free.
-	match := "MATCH path=" + pat.String()
+	// allShortestPaths is O(nodes) for a single segment, but demands provably
+	// distinct ends; the acyclic structural graph makes that inequality free.
+	prelude := startClause(q, scope, params) + "\nWITH DISTINCT n0\n"
+	match := prelude + "MATCH path=" + pat.String()
 	if len(steps) == 1 {
-		match = "MATCH path = allShortestPaths(" + pat.String() + ")"
+		match = prelude + "MATCH path = allShortestPaths(" + pat.String() + ")"
 		if steps[0].MinHops() > 0 {
 			addWhere("n0 <> " + final)
 		}
@@ -314,8 +322,7 @@ func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params
 }
 
 // segmentPattern renders one PathStep as a variable-length Cypher segment in its
-// direction. prev is the anchor node name, or "" to omit it (chaining inside a
-// single continuous pattern, where the previous segment already wrote the node).
+// direction. prev is the anchor node name, "" when a chained segment already wrote it.
 func segmentPattern(prev, rv, nv string, step ranke.PathStep) string {
 	bound := ""
 	if step.Max > 0 {
@@ -336,49 +343,62 @@ func segmentPattern(prev, rv, nv string, step ranke.PathStep) string {
 	}
 }
 
-// segmentFilters returns the edge-type (over rv) and endpoint node-type (over nv)
-// conditions for one step; an empty list means "any". Regex params are recorded
-// under per-step keys in params.
+// segmentFilters returns one step's edge-type (over rv) and node-type (over nv)
+// conditions, binding their regexes under per-step keys in params. Empty means "any".
 func segmentFilters(step ranke.PathStep, rv, nv string, i int, params map[string]any) []string {
 	var conds []string
-	if pos, neg := splitPatterns(step.Edges); len(pos) > 0 || len(neg) > 0 {
-		if len(pos) > 0 {
+	if pos, neg := splitPatterns(step.Edges); pos != "" || neg != "" {
+		if pos != "" {
 			k := "ep" + strconv.Itoa(i)
 			params[k] = pos
-			conds = append(conds, "all(x IN "+rv+" WHERE any(re IN $"+k+" WHERE type(x) =~ re))")
+			conds = append(conds, "all(x IN "+rv+" WHERE type(x) =~ $"+k+")")
 		}
-		if len(neg) > 0 {
+		if neg != "" {
 			k := "en" + strconv.Itoa(i)
 			params[k] = neg
-			conds = append(conds, "all(x IN "+rv+" WHERE none(re IN $"+k+" WHERE type(x) =~ re))")
+			conds = append(conds, "all(x IN "+rv+" WHERE NOT type(x) =~ $"+k+")")
 		}
 	}
-	if pos, neg := splitPatterns(step.Nodes); len(pos) > 0 || len(neg) > 0 {
-		if len(pos) > 0 {
+	if pos, neg := splitPatterns(step.Nodes); pos != "" || neg != "" {
+		if pos != "" {
 			k := "np" + strconv.Itoa(i)
 			params[k] = pos
-			conds = append(conds, "any(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+			conds = append(conds, "any(l IN labels("+nv+") WHERE l =~ $"+k+")")
 		}
-		if len(neg) > 0 {
+		if neg != "" {
 			k := "nn" + strconv.Itoa(i)
 			params[k] = neg
-			conds = append(conds, "none(l IN labels("+nv+") WHERE any(re IN $"+k+" WHERE l =~ re))")
+			conds = append(conds, "none(l IN labels("+nv+") WHERE l =~ $"+k+")")
 		}
 	}
 	return conds
 }
 
-// splitPatterns turns a type-pattern list into positive and negative regex
-// lists (a leading "-" excludes); globs become regex for Cypher's =~ full match.
-func splitPatterns(patterns []string) (pos, neg []string) {
-	for _, p := range patterns {
-		if strings.HasPrefix(p, "-") {
-			neg = append(neg, globToRegex(strings.TrimPrefix(p, "-")))
+// splitPatterns turns a type-pattern list into one positive and one negative regex
+// (a leading "-" excludes); globs become regex for Cypher's =~ full match. Flat
+// alternation, since neo4j mis-rewrites a nested list predicate that it inlines
+// into a shortest-path expansion.
+func splitPatterns(patterns []string) (pos, neg string) {
+	var p, n []string
+	for _, pat := range patterns {
+		if after, found := strings.CutPrefix(pat, "-"); found {
+			n = append(n, globToRegex(after))
 		} else {
-			pos = append(pos, globToRegex(p))
+			p = append(p, globToRegex(pat))
 		}
 	}
-	return pos, neg
+	return alternation(p), alternation(n)
+}
+
+// alternation joins regexes into one, grouping each branch to contain its alternatives.
+func alternation(res []string) string {
+	if len(res) == 0 {
+		return ""
+	}
+	if len(res) == 1 {
+		return res[0]
+	}
+	return "(?:" + strings.Join(res, ")|(?:") + ")"
 }
 
 func globToRegex(glob string) string {
@@ -399,9 +419,8 @@ func globToRegex(glob string) string {
 	return b.String()
 }
 
-// intField is the set of fields neo4j stores as a native integer, so ordered
-// comparisons and ORDER BY use them without coercion. The rest are strings; type
-// is a label, handled specially.
+// intField are the fields neo4j stores as native integers, so comparisons and
+// ORDER BY use them without coercion. Other fields are strings; type is a label.
 var intField = map[string]bool{"height": true, "content_size": true}
 
 // whereClause lowers a Where tree to a Cypher boolean over node. A nil tree is
@@ -440,11 +459,9 @@ func bind(v any, p map[string]any, ctr *int) string {
 	return "$" + k
 }
 
-// cmpClause lowers one field comparison to Cypher, matching the reference's
-// evalComparison: a claim lacking the field never matches (Cypher null propagates
-// to false in WHERE), type is a label, int fields compare natively, other fields
-// coerce to float when the operand is numeric (else string), mirroring
-// compareOrdered's float-then-string fallback.
+// cmpClause lowers one field comparison to Cypher as evalComparison does: type is
+// a label, int fields compare natively, others coerce to float for numeric operands
+// and to string otherwise. A missing field yields null, so WHERE rejects the claim.
 func cmpClause(field string, cmp ranke.Comparison, node string, p map[string]any, ctr *int) string {
 	if field == "type" {
 		return typeClause(cmp, node, p, ctr)
@@ -479,8 +496,7 @@ func cmpClause(field string, cmp ranke.Comparison, node string, p map[string]any
 	}
 }
 
-// typeClause lowers a comparison on the type field, which neo4j stores as a node
-// label rather than a property.
+// typeClause lowers a comparison on type, which neo4j stores as a node label.
 func typeClause(cmp ranke.Comparison, node string, p map[string]any, ctr *int) string {
 	labels := "labels(" + node + ")"
 	switch {
@@ -505,9 +521,8 @@ func typeClause(cmp ranke.Comparison, node string, p map[string]any, ctr *int) s
 	}
 }
 
-// orderLimitClause renders ORDER BY + LIMIT over node, matching the reference:
-// (created_at, id) by default; otherwise the named field then id (a total order —
-// the reference tiebreaks by id too), with missing values last in both directions.
+// orderLimitClause renders ORDER BY + LIMIT over node as the reference does: the
+// named fields then (created_at, id) for a total order, missing values last.
 func orderLimitClause(keys []ranke.OrderKey, limit int, node string) string {
 	var b strings.Builder
 	b.WriteString("\nORDER BY ")
@@ -541,8 +556,8 @@ func orderTerm(k ranke.OrderKey, node string) string {
 	return acc + " IS NULL, " + key + dir
 }
 
-// isNumeric reports whether v is a Go numeric type (the operand kind that makes a
-// comparison numeric, mirroring compareOrdered's asFloat path).
+// isNumeric reports whether v is a Go numeric type, the operand kind that makes a
+// comparison numeric (compareOrdered's asFloat path).
 func isNumeric(v any) bool {
 	switch v.(type) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
@@ -572,9 +587,8 @@ func toFloatVal(v any) float64 {
 
 // --- result stream, report, content shaping (neo4j-native, no reference reuse) ---
 
-// cypherStream is neo4j's ResultStream over an already-resolved slice — the query
-// (filter/order/limit) ran in Cypher, so there is nothing left to do but hand
-// rows out in order.
+// cypherStream is neo4j's ResultStream over an already-resolved slice: Cypher ran
+// the filter/order/limit, so this hands rows out in order.
 type cypherStream struct {
 	results []ranke.QueryResult
 	report  *ranke.QueryReport
@@ -593,8 +607,8 @@ func (s *cypherStream) Report() *ranke.QueryReport { return s.report }
 func (s *cypherStream) Err() error                 { return nil }
 func (s *cypherStream) Close() error               { return nil }
 
-// reportBuilder collects execution events when a report is requested, gated by
-// the level threshold. A zero level (no report) makes log/finalize no-ops.
+// reportBuilder collects execution events above the requested level; a zero level
+// makes log/finalize no-ops.
 type reportBuilder struct {
 	level   ranke.ReportLevel
 	started time.Time
@@ -638,22 +652,4 @@ func reportRank(l ranke.ReportLevel) int {
 	default:
 		return 0
 	}
-}
-
-// shapeContent inlines up to Output.Content bytes of a claim's content (cutoff
-// overflow; other policies are a later concern). Content neo4j does not hold is
-// read through the claim, which reaches the byte layer.
-func (u *neo4jUniverse) shapeContent(ctx context.Context, c ranke.Claim, cnt *ranke.Content) []byte {
-	rdr, err := c.GetContent(ctx, u)
-	if err != nil {
-		return nil
-	}
-	data, err := io.ReadAll(io.LimitReader(rdr, cnt.Max+1))
-	if err != nil {
-		return nil
-	}
-	if int64(len(data)) <= cnt.Max {
-		return data
-	}
-	return data[:cnt.Max]
 }

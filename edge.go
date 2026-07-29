@@ -11,21 +11,16 @@ import (
 	"sort"
 )
 
-// Edge is a directed reference from the owning claim to a prior claim
-// (spec §4.2). Each edge is part of exactly one claim. Direction is
-// universal: every edge runs from an older claim (its Reference) to
-// the newer claim that owns it. Like a node, an edge may carry content —
-// inline or external (see the content methods).
+// Edge is a directed reference from the owning claim back to the older claim it
+// cites (spec §4.2). Part of exactly one claim; may carry inline or external content.
 type Edge interface {
 	Reference() Id
 	Type() string
 	TypeClass() EdgeClass
 	TypeSub() string
 
-	// Encoding is the content's MIME media type ("class/sub"), or "" when the
-	// edge carries no content. Like a node, a content-bearing edge declares one
-	// (§Nodes; the same content⇒encoding rule applies — edge content is fully
-	// expressive: an agent's reasoning, a proof, a relation's meaning).
+	// Encoding is the content's MIME media type ("class/sub"), "" without content;
+	// a content-bearing edge declares one (§Nodes) — reasoning, a proof, a meaning.
 	Encoding() string
 	EncodingClass() EncodingClass
 	EncodingSub() string
@@ -53,38 +48,27 @@ type Edge interface {
 	Fields() []string
 	ID() Id
 
-	// unwrap returns the concrete *edge. Being unexported, it seals Edge:
-	// only this package's *edge can satisfy the interface, so a "foreign
-	// edge" is unrepresentable and internal code reaches the concrete type
-	// without a type assertion.
+	// unwrap returns the concrete *edge. Being unexported, it seals Edge to this
+	// package's *edge, so internal code reaches the concrete type without asserting.
 	unwrap() *edge
 }
 
-// EdgeConfig is the data-only input to NewEdge.
-//
-// Required: Reference plus a type (either Type or TypeClass+TypeSub).
-// Content is optional; an edge may carry none. InlineContent holds the
-// bytes directly; ContentHash+ContentSize instead reference external
-// content (a blob stored elsewhere). InlineContent and ContentHash are
-// mutually exclusive — set at most one. RelationDirection must be set
-// (RelationFrom or RelationTo) for relation/* edges and left zero
-// otherwise; NewEdge enforces this.
+// EdgeConfig is the data-only input to NewEdge. Reference and a type (Type, or
+// TypeClass+TypeSub) are required; NewEdge enforces the per-field rules below.
 type EdgeConfig struct {
 	Reference         Id
 	Type              string
 	TypeClass         EdgeClass
 	TypeSub           string
 	Encoding          string // content media type ("class/sub"); required with content, forbidden without
-	InlineContent     []byte
-	ContentHash       Id
+	InlineContent     []byte // exclusive with ContentHash
+	ContentHash       Id     // external content, with ContentSize
 	ContentSize       uint64
-	RelationDirection RelationDirection
+	RelationDirection RelationDirection // RelationFrom or RelationTo on relation/* edges, zero elsewhere
 	Fields            map[string]string
 }
 
-// edge is the concrete implementation of Edge. Created via NewEdge and
-// immutable after. id is computed once at construction from the
-// canonical serialization of the other fields.
+// edge is the concrete implementation of Edge, immutable after NewEdge.
 type edge struct {
 	reference         Id
 	typeClass         EdgeClass
@@ -105,11 +89,8 @@ func NewEdge(cfg EdgeConfig) (Edge, error) {
 	return newEdge(cfg)
 }
 
-// newEdge is the concrete constructor. It validates type and
-// relation_direction consistency, resolves inline vs external content, and
-// computes the edge's id as H(canonical(edge)). NewEdge wraps it for callers
-// that want the Edge interface; in-package callers use it directly to get the
-// plain *edge without a cast.
+// newEdge validates the type and relation_direction, resolves inline vs external
+// content, and computes id = H(canonical(edge)), yielding the concrete *edge.
 func newEdge(cfg EdgeConfig) (*edge, error) {
 	if cfg.Reference == nil {
 		return nil, errEdgeRefRequired
@@ -138,16 +119,13 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	if len(cfg.InlineContent) > maxInlineContent {
 		return nil, errInlineContentTooLarge
 	}
-	// Encoding is the content media type — mandatory with content, forbidden
-	// without (same rule as a node; see resolveContentEncoding).
+	// Encoding is mandatory with content and forbidden without, as for a node.
 	encClass, encSub, err := resolveContentEncoding(cfg.Encoding, cfg.InlineContent != nil || cfg.ContentHash != nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// Relation direction rules (§4.7):
-	//   - relation/* edges must carry RelationFrom or RelationTo
-	//   - non-relation edges must leave it zero
+	// Relation direction (§4.7): RelationFrom or RelationTo on relation/*, zero elsewhere.
 	if cfg.TypeClass == EdgeClassRelation {
 		if cfg.RelationDirection != RelationFrom && cfg.RelationDirection != RelationTo {
 			return nil, errEdgeRelationDir
@@ -173,8 +151,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	}
 	switch {
 	case cfg.InlineContent != nil:
-		// Inline: hold the bytes; no content_hash — the edge id commits to the
-		// bytes directly (§Content). Mutually exclusive with ContentHash.
+		// Inline: the edge id commits to the bytes directly (§Content).
 		e.content = cfg.InlineContent
 		e.contentSize = uint64(len(cfg.InlineContent))
 	case cfg.ContentHash != nil:

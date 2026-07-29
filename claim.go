@@ -16,8 +16,8 @@ import (
 // Atomically created (spec §4.3); immutable after.
 type Claim interface {
 	Node() Node
-	// Edges returns the edges in canonical order. With filters,
-	// only edges matching every filter (AND) are returned.
+	// Edges returns the edges in canonical order, keeping those every filter
+	// matches (AND).
 	Edges(filters ...Filter) []Edge
 
 	Tags() map[string]string
@@ -26,47 +26,27 @@ type Claim interface {
 	HasTag(key string) bool
 	SetTag(ctx context.Context, u Universe) error
 
-	// Contributor returns the contributor for this claim — always
-	// a contribution/contributor claim. Self-attribution for the
-	// root (no-edge) contributor.
+	// Contributor returns this claim's contribution/contributor claim, which for
+	// the root (no-edge) contributor is itself.
 	Contributor() Contributor
 	IsContributor() bool
-	// AsContributor returns this claim as a Contributor. Errors if the
-	// claim isn't of type contribution/contributor. It resolves the
-	// contributor's pubkey once — transparently, inline or external via u
-	// (nil is fine for inline) — and caches it on the returned Contributor,
-	// so later signing can check keys without a Universe. If a signing key
-	// is supplied it must match that pubkey; the returned Contributor then
-	// signs subsequent claims attributed to it automatically.
+	// AsContributor returns a contribution/contributor claim as a Contributor,
+	// caching its pubkey so later signing needs no Universe.
 	AsContributor(ctx context.Context, u Universe, signingKey ...crypto.Signer) (Contributor, error)
 	ID() Id
 
-	// GetContent reads the claim's content (unscoped, no branch check): inline
-	// from the claim, external streamed from u; re-fetches from u only if a
-	// structure-only view dropped the inline bytes.
+	// GetContent reads the claim's content unscoped: inline from the claim,
+	// external streamed from u, as is a dropped inline body.
 	GetContent(ctx context.Context, u Universe) (io.Reader, error)
 
-	// Encode returns the claim's canonical CBOR serialization — the whole
-	// storage record (node + edge bodies + any inline content), storage-
-	// agnostic. Inverse of the package-level DecodeClaim; persistence
-	// adapters use it to store a claim as opaque bytes. Note this is a
-	// superset of the id preimage S(node) (which is node fields + edge ids
-	// only), so it is not itself what the id is signed over.
+	// Encode returns the canonical CBOR storage record — node, edge bodies,
+	// inline content — a superset of the id preimage S(node).
 	Encode() ([]byte, error)
-	// verifyID checks that the claim's id is a valid signature by pubkey over
-	// H(S(node)) — the node preimage taken from the claim's stored raw CBOR,
-	// NOT re-encoded (re-encoding drifts as the alias taxonomy grows, wrongly
-	// failing a valid claim). The caller supplies that CBOR (from the Universe
-	// via GetClaimsRaw); the claim extracts the preimage and checks the
-	// signature. Unexported: a core-type crypto step no caller should
-	// hand-roll, and its presence seals Claim, so only this package's claims
-	// can be Claims.
+	// verifyID checks the claim's id is a valid signature by pubkey over
+	// H(S(node)), preimaged from the caller's stored CBOR, never a re-encoding.
 	verifyID(pubkey, raw []byte) error
-	// unwrap returns the underlying concrete *claim, peeling any wrapper
-	// (e.g. *signedContributor). Unexported — it seals Claim alongside
-	// verifyID, and lets in-package machinery that builds or materialises
-	// claims reach the concrete type without a cast. The verifier does not
-	// use it; it works through the interface + verifyID.
+	// unwrap returns the underlying concrete *claim, peeling any wrapper, so
+	// in-package machinery reaches it without a cast.
 	unwrap() *claim
 }
 
@@ -75,17 +55,13 @@ type claim struct {
 	edges       []*edge // same order as node.edges
 	contributor Contributor
 
-	// Diff materialisation (set by the loader when this claim carries a
-	// contribution/diff edge): diffClaim is the materialised predecessor;
-	// diffEdges is the merged edge view (predecessor's named edges, minus
-	// edges_diff_omit by name, overlaid with self's named edges, plus
-	// self's own unnamed singletons). The delta (edges) is untouched so
-	// ID()/Encode() stay the claim's own bytes.
+	// Diff materialisation, set by the loader: the materialised predecessor and
+	// merged edge view. The delta stays intact, so ID()/Encode() hold.
 	diffClaim *claim
 	diffEdges []*edge
 
-	// tags is the mutable runtime tag overlay, injected by a tag-aware Universe
-	// on the way out of GetClaims. Not part of the id or encoded bytes.
+	// tags is the runtime tag overlay a tag-aware Universe injects on the way out
+	// of GetClaims, outside the id and the encoded bytes.
 	tags map[string]string
 }
 
@@ -142,14 +118,9 @@ func (c *claim) Edges(filters ...Filter) []Edge {
 	return out
 }
 
-// Diff materialisation (setting diffClaim / diffEdges / node.diffFields)
-// lives in materialize.go — DefaultMaterialize, applied by the read path.
-
-// computeDiffEdges builds diffEdges: inherit the predecessor's named
-// edges, drop those named in edges_diff_omit, overlay self's named edges
-// (by name), and append self's own unnamed edges (the per-claim singletons
-// — contributor and the diff marker — never inherited). Diff is keyed by
-// name; edge ids play no part.
+// computeDiffEdges builds diffEdges, keyed by name: inherit the predecessor's
+// named edges, drop those in edges_diff_omit, overlay self's named edges, then
+// append self's unnamed singletons.
 func (c *claim) computeDiffEdges() {
 	named := map[string]*edge{}
 	for _, e := range c.diffClaim.effectiveEdges() {
@@ -192,9 +163,8 @@ func (c *claim) AsContributor(ctx context.Context, u Universe, signingKey ...cry
 	if !c.IsContributor() {
 		return nil, WithDetail(errNotContributorClaim, c.node.Type())
 	}
-	// Resolve the pubkey once, transparently — inline is served from the
-	// node, external is streamed from u (§5.7). Cached on the wrapper so
-	// signing later needs no Universe.
+	// Resolved once — inline from the node, external streamed from u (§5.7) —
+	// and cached on the wrapper.
 	rdr, err := c.node.GetContent(ctx, u)
 	if err != nil {
 		return nil, Wrap(errResolveContributorPubkey, err)

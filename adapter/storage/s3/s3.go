@@ -32,19 +32,15 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage"
 )
 
-// New returns a Universe backed by the given bucket on client. The bucket is
-// assumed to already exist; the adapter does not create or own it (nor the
-// client — Close is a no-op). New learns the bucket's capabilities with a
-// sentinel probe (see probeCaps). Pass ReadOnly for a bucket you may only read
-// (or one under object-lock/WORM) so the probe never writes.
+// New assumes the bucket already exists and probes its capabilities (see
+// probeCaps); pass ReadOnly for a WORM bucket so the probe never writes.
 var (
 	errNilClient   = errors.New("adapter/s3.New: nil client")
 	errEmptyBucket = errors.New("adapter/s3.New: empty bucket")
 	errIO          = errors.New("adapter/s3: io")
 )
 
-// New returns an S3-backed Universe over the given client and bucket; options
-// configure read-only mode and capability probing (see the package doc).
+// New returns an S3-backed Universe over the given client and bucket.
 func New(client *s3.Client, bucket string, opts ...Option) (ranke.Universe, error) {
 	if client == nil {
 		return nil, errNilClient
@@ -56,8 +52,8 @@ func New(client *s3.Client, bucket string, opts ...Option) (ranke.Universe, erro
 	for _, o := range opts {
 		o(&cfg)
 	}
-	// Tier is not set here: NewBlobUniverse defaults a byte store to authoritative
-	// (S3 is a durable, verbatim source of truth), and no deployment overrides it.
+	// NewBlobUniverse defaults a byte store to the authoritative tier, which S3
+	// is: a durable, verbatim source of truth.
 	return storage.NewBlobUniverse(&store{
 		client: client,
 		bucket: bucket,
@@ -76,37 +72,26 @@ type config struct {
 	concurrency int
 }
 
-// defaultConcurrency is how many objects the bulk Universe ops fetch/store in
-// parallel by default — S3 has no synchronous multi-object API, so throughput
-// comes from concurrent single-object requests over the per-request latency.
+// defaultConcurrency is how many objects bulk ops transfer in parallel: S3 has
+// no multi-object API, so throughput comes from concurrent single-object calls.
 const defaultConcurrency = 16
 
 // Option configures an s3 store.
 type Option func(*config)
 
-// WithConcurrency sets how many objects the bulk operations
-// (GetClaims/PutClaims/HasClaims/GetContents) transfer in parallel. Higher
-// widths hide S3's per-request latency at the cost of more in-flight
-// requests; n<=1 forces sequential. Defaults to defaultConcurrency.
+// WithConcurrency sets how many objects the bulk operations transfer in
+// parallel, hiding S3's per-request latency; n<=1 forces sequential.
 func WithConcurrency(n int) Option { return func(c *config) { c.concurrency = n } }
 
-// ReadOnly declares the bucket read-only (or append-only / object-locked): the
-// probe never writes a sentinel — which on a WORM bucket could never be removed
-// — and the Universe reports no Overwrite or Delete. A write probe cannot tell
-// read-only from append-only (a first PUT of a new key succeeds on the latter),
-// so the operator states it.
+// ReadOnly declares the bucket read-only, append-only, or object-locked, so the
+// probe writes no sentinel: a write probe cannot tell those cases apart.
 func ReadOnly() Option { return func(c *config) { c.readOnly = true } }
 
-// sentinelKey is a fixed, harmless object key used once at New to learn what
-// the bucket allows.
+// sentinelKey is the harmless object key the New-time capability probe writes.
 const sentinelKey = "ranke-graph-sentinel"
 
-// probeCaps learns the bucket's capabilities. Listing (Enumerate) is a read and
-// is always probed. When readOnly is set, no write is attempted. Otherwise it
-// PUTs the sentinel twice — the second PUT is a real overwrite, which separates
-// a read-write bucket from append-only/object-lock — then DeleteObject probes
-// delete and cleans up. S3 storage is durable, so Persistent is intrinsic; a
-// failed probe just leaves that capability false and never fails New.
+// probeCaps learns the bucket's capabilities: a listing probes Enumerate, two
+// sentinel PUTs separate read-write from append-only, then a DELETE cleans up.
 func probeCaps(ctx context.Context, client *s3.Client, bucket string, readOnly bool) ranke.Capabilities {
 	caps := ranke.Capabilities{Persistent: true}
 	if _, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -137,8 +122,7 @@ func probeCaps(ctx context.Context, client *s3.Client, bucket string, readOnly b
 	return caps
 }
 
-// isNotFound reports whether err is S3's "object does not exist", across
-// the typed GetObject/HeadObject errors and the generic API error code.
+// isNotFound reports whether err is S3's "object does not exist", typed or by code.
 func isNotFound(err error) bool {
 	var nsk *types.NoSuchKey
 	var nf *types.NotFound
@@ -168,8 +152,7 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Open implements storage.Streamer: the raw GetObject body, so content
-// streams from S3 instead of being read whole into memory.
+// Open implements storage.Streamer: the raw GetObject body, so content streams.
 func (s *store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -184,13 +167,8 @@ func (s *store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	return out.Body, nil
 }
 
-// Put stores key only when it is absent, via a conditional write
-// (If-None-Match: "*"). Keys are content-addressed, so a present key already
-// holds identical bytes — the conditional write dedups it away in a single
-// request instead of re-uploading the object. A 412 Precondition Failed
-// means the key was already there, which is success (a skipped write), not an
-// error. (Overwriting a corrupted entry — read-through repair — is a separate
-// forced write, not this path.)
+// Put stores key when absent, via a conditional write (If-None-Match: "*"): keys
+// are content-addressed, so a 412 means identical bytes are there — a dedup hit.
 func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
@@ -207,8 +185,7 @@ func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	return nil
 }
 
-// isPreconditionFailed reports whether err is S3's 412 for a failed
-// If-None-Match — i.e. the object already exists.
+// isPreconditionFailed reports whether err is S3's 412: the object already exists.
 func isPreconditionFailed(err error) bool {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
