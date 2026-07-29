@@ -79,9 +79,6 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 // GetContributor returns the contributor the Sequencer signs branch advances with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
 
-// Head returns the current archive head k.
-func (s *Sequencer) Head() ranke.Id { return s.head }
-
 // GetArchive returns the immutable snapshot RA_k at the current head.
 func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
 	return ranke.NewArchive(ctx, s.u, s.head)

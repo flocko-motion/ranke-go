@@ -84,6 +84,14 @@ func (f *fixture) note(t *testing.T, body string) ranke.Claim {
 	return c
 }
 
+// head resolves the archive head k through a fresh snapshot.
+func (f *fixture) head(t *testing.T, ctx context.Context) ranke.Id {
+	t.Helper()
+	arc, err := f.seq.GetArchive(ctx)
+	require.NoError(t, err)
+	return arc.Head()
+}
+
 // branchHead resolves the current head of a branch through a fresh snapshot.
 func (f *fixture) branchHead(t *testing.T, ctx context.Context, name string) ranke.Id {
 	t.Helper()
@@ -210,7 +218,7 @@ func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
 	require.Len(t, m.Heads(), 2, "one open head per branch the contribution named")
 	r, err := f.seq.Merge(ctx, m)
 	require.NoError(t, err)
-	require.True(t, r.Head().Equal(f.seq.Head()))
+	require.True(t, r.Head().Equal(f.head(t, ctx)))
 
 	after, err := f.hist.Len(ctx)
 	require.NoError(t, err)
@@ -255,7 +263,7 @@ func TestUnnamedBranchRefused(t *testing.T) {
 func TestInvalidContributionDenied(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
-	before := f.seq.Head()
+	before := f.head(t, ctx)
 
 	bogus, err := ranke.HashContent([]byte("no-such-claim"))
 	require.NoError(t, err)
@@ -272,7 +280,7 @@ func TestInvalidContributionDenied(t *testing.T) {
 
 	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{bad})
 	require.Error(t, err, "a contribution referencing a non-existent claim must be denied")
-	require.True(t, before.Equal(f.seq.Head()), "a denied contribution must not advance the head")
+	require.True(t, before.Equal(f.head(t, ctx)), "a denied contribution must not advance the head")
 }
 
 // TestValidContributionAccepted is the positive control for the above: without
@@ -280,12 +288,12 @@ func TestInvalidContributionDenied(t *testing.T) {
 func TestValidContributionAccepted(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
-	before := f.seq.Head()
+	before := f.head(t, ctx)
 
 	head, err := helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{f.note(t, "a real source note")})
 	require.NoError(t, err)
 	require.False(t, before.Equal(head), "a merged contribution advances the head")
-	require.True(t, head.Equal(f.seq.Head()))
+	require.True(t, head.Equal(f.head(t, ctx)))
 }
 
 // TestReservedTypeRefused: branch tables are the Sequencer's alone (step 2). A
@@ -294,7 +302,7 @@ func TestValidContributionAccepted(t *testing.T) {
 func TestReservedTypeRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
-	before := f.seq.Head()
+	before := f.head(t, ctx)
 
 	forged, err := ranke.NewClaim(ranke.NodeBranches, f.op).
 		WithCreatedAt(f.clk.Tick()).
@@ -304,7 +312,7 @@ func TestReservedTypeRefused(t *testing.T) {
 
 	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{forged})
 	require.Error(t, err, "a client-authored branch table must be refused")
-	require.True(t, before.Equal(f.seq.Head()))
+	require.True(t, before.Equal(f.head(t, ctx)))
 }
 
 // TestFutureDatedClaimRefused: a contribution is stamped with the server's time t
@@ -348,7 +356,7 @@ func TestBaseIsTheSnapshotItOpenedAt(t *testing.T) {
 
 	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{f.note(t, "someone else got there first")})
 	require.NoError(t, err)
-	require.False(t, baseHead.Equal(f.seq.Head()), "the head moved while the contribution was open")
+	require.False(t, baseHead.Equal(f.head(t, ctx)), "the head moved while the contribution was open")
 
 	stillBase, _ := c.Base()
 	require.True(t, baseHead.Equal(stillBase), "the base is pinned to the snapshot it opened at")
@@ -401,10 +409,10 @@ func TestForeignContributionRefused(t *testing.T) {
 	m, err := v.Persist(ctx)
 	require.NoError(t, err)
 
-	before := b.seq.Head()
+	before := b.head(t, ctx)
 	_, err = b.seq.Merge(ctx, m)
 	require.Error(t, err, "a Sequencer must refuse a contribution it did not open")
-	require.True(t, before.Equal(b.seq.Head()))
+	require.True(t, before.Equal(b.head(t, ctx)))
 }
 
 // TestAddGraphAdoptsOpenHeads: a caller that already staged its claims in a Graph

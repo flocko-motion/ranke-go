@@ -51,6 +51,14 @@ func newSequencer(t *testing.T, ctx context.Context) (*devseq.Sequencer, ranke.C
 	return seq, op, clk
 }
 
+// head resolves the archive head k through a fresh snapshot.
+func head(t *testing.T, ctx context.Context, seq ranke.Sequencer) ranke.Id {
+	t.Helper()
+	arc, err := seq.GetArchive(ctx)
+	require.NoError(t, err)
+	return arc.Head()
+}
+
 // TestInvalidContributionDenied is the guarantee the Sequencer must uphold:
 // valid(A) → valid(A'). A contribution referencing a claim that does not exist
 // is structurally invalid; the Sequencer must verify (paper 2 §Sequencer step 4)
@@ -59,7 +67,7 @@ func newSequencer(t *testing.T, ctx context.Context) (*devseq.Sequencer, ranke.C
 func TestInvalidContributionDenied(t *testing.T) {
 	ctx := context.Background()
 	seq, op, clk := newSequencer(t, ctx)
-	headBefore := seq.Head()
+	headBefore := head(t, ctx, seq)
 
 	// A well-formed, signed claim whose one derivation edge references an id
 	// that was never contributed — so its closure cannot be verified.
@@ -79,7 +87,7 @@ func TestInvalidContributionDenied(t *testing.T) {
 	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{bad})
 	require.Error(t, err, "the Sequencer must deny a contribution that references a non-existent claim")
 
-	require.True(t, headBefore.Equal(seq.Head()),
+	require.True(t, headBefore.Equal(head(t, ctx, seq)),
 		"a denied contribution must not advance the archive head")
 }
 
@@ -90,7 +98,7 @@ func TestInvalidContributionDenied(t *testing.T) {
 func TestValidContributionAccepted(t *testing.T) {
 	ctx := context.Background()
 	seq, op, clk := newSequencer(t, ctx)
-	headBefore := seq.Head()
+	headBefore := head(t, ctx, seq)
 
 	// A source note attributed to the operator: its only reference is the
 	// auto-added contribution/contributor edge to the operator (height 0, already
@@ -103,8 +111,8 @@ func TestValidContributionAccepted(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	head, err := helpers.Contribute(ctx, seq, "main", []ranke.Claim{good})
+	merged, err := helpers.Contribute(ctx, seq, "main", []ranke.Claim{good})
 	require.NoError(t, err, "a valid contribution must be accepted")
-	require.False(t, headBefore.Equal(head), "a merged contribution must advance the archive head")
-	require.True(t, head.Equal(seq.Head()))
+	require.False(t, headBefore.Equal(merged), "a merged contribution must advance the archive head")
+	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
 }

@@ -112,8 +112,8 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 // GetContributor returns the contributor branch advances are signed with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
 
-// Head returns the current archive head k.
-func (s *Sequencer) Head() ranke.Id {
+// currentHead reads the archive head k under the sequencing thread.
+func (s *Sequencer) currentHead() ranke.Id {
 	s.seq.Lock()
 	defer s.seq.Unlock()
 	return s.head
@@ -122,7 +122,7 @@ func (s *Sequencer) Head() ranke.Id {
 // GetArchive returns the immutable snapshot RA_k at the current head, pinned to
 // the head as read — so it is safe while contributions are in flight.
 func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
-	return ranke.NewArchive(ctx, s.u, s.Head())
+	return ranke.NewArchive(ctx, s.u, s.currentHead())
 }
 
 // NewContribution is step 1 and the only work the sequencing thread does per

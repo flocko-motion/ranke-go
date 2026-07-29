@@ -115,7 +115,7 @@ func TestGroupCommitIsOneRevisionPerBatch(t *testing.T) {
 	require.Equal(t, before+1, after,
 		"%d contributions merged in one group commit must cost exactly one archive revision", batch)
 
-	head := s.Head()
+	head := s.currentHead()
 	for i, p := range ps {
 		select {
 		case <-p.done:
@@ -165,7 +165,7 @@ func TestGroupCommitAdvancesSeveralBranchesAtOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before+1, after, "one commit, whatever the number of branches it advances")
 
-	arc, err := ranke.NewArchive(ctx, u, s.Head())
+	arc, err := ranke.NewArchive(ctx, u, s.currentHead())
 	require.NoError(t, err)
 	for i, b := range branches {
 		br, err := arc.GetBranch(ctx, b)
@@ -215,12 +215,12 @@ func TestDrainOnEmptyQueueIsANoop(t *testing.T) {
 
 	before, err := hist.Len(ctx)
 	require.NoError(t, err)
-	head := s.Head()
+	head := s.currentHead()
 
 	s.drain(ctx)
 
 	after, err := hist.Len(ctx)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "draining an empty queue records no revision")
-	require.True(t, head.Equal(s.Head()), "and does not move the head")
+	require.True(t, head.Equal(s.currentHead()), "and does not move the head")
 }
