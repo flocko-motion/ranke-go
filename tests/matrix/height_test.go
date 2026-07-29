@@ -14,6 +14,7 @@ import (
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/tests/backends"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -98,11 +99,15 @@ func buildRevisions(t *testing.T, u ranke.Universe) revisions {
 		return c
 	}
 
+	// Two contributions, so the archive carries two revisions of "main".
+	commit := func(c ranke.Claim) ranke.Id {
+		head, err := helpers.Contribute(ctx, seq, "main", []ranke.Claim{c})
+		require.NoError(t, err)
+		return head
+	}
+
 	first, second := note("the first claim"), note("the second claim")
-	head1, err := seq.AddClaims(ctx, []ranke.Claim{first})
-	require.NoError(t, err)
-	head2, err := seq.AddClaims(ctx, []ranke.Claim{second})
-	require.NoError(t, err)
+	head1, head2 := commit(first), commit(second)
 
 	return revisions{first: first.ID(), second: second.ID(), head1: head1, head2: head2}
 }

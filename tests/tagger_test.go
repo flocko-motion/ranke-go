@@ -12,6 +12,7 @@ import (
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,8 +37,8 @@ func TestTagArchive(t *testing.T) {
 		WithHeight(ranke.HeightOf(self)).
 		Sign()
 	require.NoError(t, err, "sign email")
-	_, err = seq.AddClaims(ctx, []ranke.Claim{em})
-	require.NoError(t, err, "AddClaims")
+	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{em})
+	require.NoError(t, err, "contribute to main")
 
 	arc, err := seq.GetArchive(ctx)
 	require.NoError(t, err, "GetArchive")

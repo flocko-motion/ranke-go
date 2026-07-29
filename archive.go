@@ -15,6 +15,9 @@ import (
 // Archive is an immutable read snapshot RA_k = (𝒰, k): the Universe plus the
 // head claim 𝒰(k), which plays the paper's branch-table role (spec §Branches).
 type Archive interface {
+	// Head is k, the half of the tuple that fixes which snapshot this is.
+	Head() Id
+
 	HasClaim(ctx context.Context, id Id) (bool, error)
 	GetClaim(ctx context.Context, id Id) (Claim, error)
 	GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
@@ -67,6 +70,9 @@ func NewArchive(ctx context.Context, u Universe, k Id) (Archive, error) {
 	}
 	return &archive{u: u, bth: c}, nil
 }
+
+// Head is k, the head claim's id.
+func (a *archive) Head() Id { return a.bth.ID() }
 
 func (a *archive) HasClaim(ctx context.Context, id Id) (bool, error) {
 	if id == nil {
