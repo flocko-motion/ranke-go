@@ -16,6 +16,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 )
 
 var errGenerate = errors.New("generator")
@@ -82,7 +83,7 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	for i, chunk := range contributionChunks(b.batch, spec.Seed, len(branches)) {
 		// Round-robin contributions across the branches (main takes the first,
 		// so the shared base lands there);
-		head, err = seq.AddClaimsToBranch(ctx, branches[i%len(branches)], chunk)
+		head, err = helpers.Contribute(ctx, seq, branches[i%len(branches)], chunk)
 		if err != nil {
 			return nil, fmt.Errorf("%w: merge: %w", errGenerate, err)
 		}

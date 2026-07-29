@@ -65,9 +65,9 @@ func persisted(t *testing.T, ctx context.Context, s *Sequencer, op ranke.Contrib
 		Sign()
 	require.NoError(t, err)
 
-	contrib, err := s.NewContributionToBranch(ctx, branch)
+	contrib, err := s.NewContribution(ctx)
 	require.NoError(t, err)
-	require.NoError(t, contrib.AddClaims([]ranke.Claim{c}))
+	require.NoError(t, contrib.AddClaims(branch, []ranke.Claim{c}))
 	v, err := contrib.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 	m, err := v.Persist(ctx)
@@ -82,7 +82,7 @@ func enqueueAll(s *Sequencer, ms []*mergable) []*pending {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
 	for _, m := range ms {
-		p := &pending{branch: m.branch, heads: m.heads, ids: m.ids, done: make(chan struct{})}
+		p := &pending{heads: m.heads, ids: m.ids, done: make(chan struct{})}
 		ps = append(ps, p)
 		s.queue = append(s.queue, p)
 	}

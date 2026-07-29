@@ -1,7 +1,7 @@
 // package: adapter/sequencer/dev / testkit
 // type:    adapter
 // job:     a blocking, single-threaded reference Sequencer for tests and development — the sole writer that advances a Ranke-Archive by driving the paper's six steps one contribution at a time
-// limits:  not concurrent (steps run serially per AddClaims); manages named branches but does NOT propagate changes between them (paper 2's cross-branch merge); stamps minted claims from the injected Clock so heads are deterministic. NOT for production (-> adapter/sequencer/concurrent).
+// limits:  blocking and single-threaded — every step runs inline, one contribution at a time; manages named branches without propagating between them (paper 2's cross-branch merge); mints from the injected Clock, so heads are deterministic. NOT for production (-> adapter/sequencer/concurrent).
 package dev
 
 import (
@@ -14,14 +14,19 @@ import (
 )
 
 var (
-	errNilArg       = errors.New("dev.NewSequencer: nil argument")
-	errNoSigningKey = errors.New("dev.NewSequencer: self contributor carries no signing key")
-	errNewSequencer = errors.New("dev.NewSequencer")
-	errSequencer    = errors.New("dev.Sequencer")
+	errNilArg            = errors.New("dev.NewSequencer: nil argument")
+	errNoSigningKey      = errors.New("dev.NewSequencer: self contributor carries no signing key")
+	errNewSequencer      = errors.New("dev.NewSequencer")
+	errSequencer         = errors.New("dev.Sequencer")
+	errSealed            = errors.New("dev.Contribution: already sealed")
+	errNoBranch          = errors.New("dev.Contribution: claims must name the branch they join")
+	errNilClaim          = errors.New("dev.Contribution.AddClaims: nil claim")
+	errNilGraph          = errors.New("dev.Contribution.AddGraph: nil graph")
+	errEmptyContribution = errors.New("dev.Contribution.CompleteAndVerify: nothing was added")
+	errForeign           = errors.New("dev.Sequencer.Merge: contribution came from another Sequencer")
 )
 
-// mainBranch is the branch AddClaims advances by default.
-const mainBranch = "main"
+var _ ranke.Sequencer = (*Sequencer)(nil)
 
 // Clock is the deterministic time source for the claims the Sequencer mints,
 // local to this adapter so it depends only on ranke. Tick returns now, then
@@ -60,7 +65,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 		return nil, fmt.Errorf("%w: store contributor: %w", errNewSequencer, err)
 	}
 	// Empty branch table → archive head k₀, revision 0.
-	bt0, err := s.mintBranchTable(ctx, "")
+	bt0, err := s.mintBranchTable(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -82,64 +87,47 @@ func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
 	return ranke.NewArchive(ctx, s.u, s.head)
 }
 
-// AddClaims advances the "main" branch via AddClaimsToBranch.
-func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.Id, error) {
-	return s.AddClaimsToBranch(ctx, mainBranch, claims)
+// NewContribution is step 1: it captures the base (k, t) and returns a
+// contribution to fill, whose claims name the branches they join.
+func (s *Sequencer) NewContribution(_ context.Context) (ranke.Contribution, error) {
+	return &contribution{
+		s:        s,
+		baseHead: s.head,
+		baseTime: s.clock.Tick(),
+		staged:   map[string][]ranke.Claim{},
+		adopted:  map[string][]ranke.Id{},
+	}, nil
 }
 
-// AddClaimsToBranch advances the named branch with a batch of claims — a
-// sub-graph in topological order — creating the branch on first use, and returns
-// the new archive head k′. The six steps run blocking, labelled below.
-func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims []ranke.Claim) (ranke.Id, error) {
-	if len(claims) == 0 {
-		return s.head, nil
+// Merge is step 6: it folds each named branch's head in, mints one branch table
+// restating them all, records the revision, and publishes the new archive head.
+func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (ranke.Receipt, error) {
+	m, ok := mc.(*mergable)
+	if !ok || m.s != s {
+		return nil, errForeign
 	}
 
-	// Step 2 — populate: add the batch to a graph over 𝒰, tracking open heads.
-	g, err := ranke.NewGraph(ctx, s.u)
-	if err != nil {
-		return nil, fmt.Errorf("%w: new graph: %w", errSequencer, err)
-	}
-	if err := g.AddClaims(ctx, claims...); err != nil {
-		return nil, fmt.Errorf("%w: populate: %w", errSequencer, err)
-	}
-
-	// Steps 3–4 — verify the batch over its closure.
-	run := g.Verify()
-	run.Wait()
-	if err := run.Err(); err != nil {
-		return nil, fmt.Errorf("%w: verify: %w", errSequencer, err)
-	}
-	if fs := run.Failures(); len(fs) > 0 {
-		return nil, fmt.Errorf("%w: verify: %d failure(s), first: %v", errSequencer, len(fs), fs[0])
-	}
-
-	// Step 5 — seed. This Graph writes every added claim straight to 𝒰, so populate
-	// already seeded the batch; everything below goes THROUGH the graph, so each
-	// claim is written exactly once.
-
-	// Consolidate the batch's open heads into one head.
-	batchHead, err := s.consolidateGraph(ctx, g)
-	if err != nil {
-		return nil, err
-	}
-
-	// Fold this branch's previous head in so its closure accumulates across adds.
-	newHead := batchHead
-	if prior, ok := s.heads[branch]; ok {
-		hc, err := s.consolidateHeads(ctx, prior, batchHead)
-		if err != nil {
-			return nil, err
+	for _, branch := range m.branches {
+		// Fold the branch's previous head in so its closure accumulates across merges.
+		folded := m.heads[branch]
+		if prior, ok := s.heads[branch]; ok {
+			folded = append(append([]ranke.Id{}, folded...), prior)
 		}
-		if err := g.AddClaims(ctx, hc); err != nil {
-			return nil, fmt.Errorf("%w: fold heads: %w", errSequencer, err)
+		newHead := folded[0]
+		if len(folded) > 1 {
+			hc, err := s.consolidateHeads(ctx, folded...)
+			if err != nil {
+				return nil, err
+			}
+			if err := s.u.PutClaims(ctx, []ranke.Claim{hc}); err != nil {
+				return nil, fmt.Errorf("%w: fold heads: %w", errSequencer, err)
+			}
+			newHead = hc.ID()
 		}
-		newHead = hc.ID()
+		s.heads[branch] = newHead
 	}
-	s.heads[branch] = newHead
 
-	// Step 6 — merge: mint the next branch table, advance head, record the revision.
-	bt, err := s.mintBranchTable(ctx, branch)
+	bt, err := s.mintBranchTable(ctx, m.branches)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +144,7 @@ func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims
 	if err := s.u.Tag(ctx, s.head); err != nil {
 		return nil, fmt.Errorf("%w: tag: %w", errSequencer, err)
 	}
-	return s.head, nil
+	return receipt{head: s.head}, nil
 }
 
 // consolidateGraph returns g's single open head, folding several into one via a
@@ -194,19 +182,19 @@ func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ra
 
 // mintBranchTable builds and stores the next contribution/branches claim, whose
 // id is the new archive head k: a diff over the previous table restating ONLY the
-// changed branch, so the others are inherited by overlaying the chain (§Branches)
+// changed branches, so the others are inherited by overlaying the chain (§Branches)
 // and the prior tables stay in the head's provenance — the spine (§Archive).
-func (s *Sequencer) mintBranchTable(ctx context.Context, changed string) (ranke.Claim, error) {
+func (s *Sequencer) mintBranchTable(ctx context.Context, changed []string) (ranke.Claim, error) {
 	b := ranke.NewClaim(ranke.NodeBranches, s.self).WithCreatedAt(s.clock.Tick())
 	if s.head != nil {
 		b = b.WithDiff(s.head) // diff over the previous table — build the spine
 	}
-	if changed != "" {
-		// Restate only the advanced branch, its edge named as diff edges must be.
+	for _, branch := range changed {
+		// Restate each advanced branch, its edge named as diff edges must be.
 		e, err := ranke.NewEdge(ranke.EdgeConfig{
-			Reference: s.heads[changed],
+			Reference: s.heads[branch],
 			Type:      ranke.EdgeTypeBranch,
-			Fields:    map[string]string{ranke.FieldName: changed},
+			Fields:    map[string]string{ranke.FieldName: branch},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("%w: branch edge: %w", errSequencer, err)

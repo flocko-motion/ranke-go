@@ -12,16 +12,15 @@ import (
 // Contribution is an in-progress advance of a Ranke-Archive — the paper's
 // six steps, up to sealing. Open it against a base RA_k, fill it with
 // claims, then CompleteAndVerify seals and verifies it.
-//
-// NOTE: this is a draft contract for the write path; the concrete
-// implementation lives in the Sequencer mechanism (adapter), not here.
 type Contribution interface {
 	// Base is the (k, t) the contribution was opened against.
 	Base() (head Id, t time.Time)
-	// AddGraph / AddClaims fill the contribution (step 2, Filling).
-	// Refused once the contribution has been sealed.
-	AddGraph(g Graph) error
-	AddClaims(claims []Claim) error
+	// AddGraph / AddClaims fill the contribution (step 2, Filling), naming the
+	// branch the claims join. One contribution may name several, so a bulk
+	// contribution advances them all in one merge. An empty branch is an error,
+	// and a sealed contribution refuses both.
+	AddGraph(branch string, g Graph) error
+	AddClaims(branch string, claims []Claim) error
 	// CompleteAndVerify closes the contribution over the base closure and
 	// verifies it (steps 3–4), yielding a sealed VerifiedContribution.
 	CompleteAndVerify(ctx context.Context) (VerifiedContribution, error)
@@ -41,7 +40,7 @@ type VerifiedContribution interface {
 // Sequencer to merge (step 6): its claims are durably in 𝒰 and its head
 // claim(s) are known.
 type MergableContribution interface {
-	// Heads are the contribution's open head claim ids, which the
-	// Sequencer references from the new branch-table claim.
-	Heads() []Id
+	// Heads are the contribution's open head claim ids per branch, which the
+	// Sequencer references under those names from the new branch-table claim.
+	Heads() map[string][]Id
 }

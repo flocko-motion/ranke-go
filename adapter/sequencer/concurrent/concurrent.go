@@ -19,13 +19,9 @@ var (
 	errNilArg              = errors.New("concurrent.NewSequencer: nil argument")
 	errNoSigningKey        = errors.New("concurrent.NewSequencer: self contributor carries no signing key")
 	errNewSequencer        = errors.New("concurrent.NewSequencer")
-	errNoBranch            = errors.New("concurrent.Sequencer: empty branch name")
 	errSequencer           = errors.New("concurrent.Sequencer")
 	errForeignContribution = errors.New("concurrent.Sequencer.Merge: contribution was not opened by this Sequencer")
 )
-
-// mainBranch is the branch NewContribution and AddClaims target when unnamed.
-const mainBranch = "main"
 
 // Clock stamps the claims the Sequencer mints. A local interface, so this adapter
 // depends only on ranke; every Tick happens on the sequencing thread.
@@ -62,12 +58,11 @@ type Sequencer struct {
 
 var _ ranke.Sequencer = (*Sequencer)(nil)
 
-// pending is one persisted contribution queued for step 6, plus the slot the
-// group commit writes its outcome back into.
+// pending is one persisted contribution queued for step 6 — the heads it
+// contributes per branch, plus the slot the commit writes its outcome into.
 type pending struct {
-	branch string
-	heads  []ranke.Id
-	ids    []ranke.Id
+	heads map[string][]ranke.Id
+	ids   []ranke.Id
 
 	done chan struct{}
 	head ranke.Id // the archive head k′ the commit advanced to
@@ -130,54 +125,18 @@ func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
 	return ranke.NewArchive(ctx, s.u, s.Head())
 }
 
-// NewContribution opens a contribution against "main" — the branch-defaulted
-// form of NewContributionToBranch.
+// NewContribution is step 1 and the only work the sequencing thread does per
+// writer: it captures (k, t) for a contribution whose claims name their branches.
 func (s *Sequencer) NewContribution(ctx context.Context) (ranke.Contribution, error) {
-	return s.NewContributionToBranch(ctx, mainBranch)
-}
-
-// NewContributionToBranch is step 1: it captures the base (k, t) and returns a
-// contribution to fill. The only work the sequencing thread does per writer.
-func (s *Sequencer) NewContributionToBranch(ctx context.Context, branch string) (ranke.Contribution, error) {
-	if branch == "" {
-		return nil, errNoBranch
-	}
 	s.seq.Lock()
 	defer s.seq.Unlock()
-	return &contribution{s: s, branch: branch, baseHead: s.head, baseTime: s.clock.Tick()}, nil
-}
-
-// AddClaims advances "main" — the branch-defaulted form of AddClaimsToBranch.
-func (s *Sequencer) AddClaims(ctx context.Context, claims []ranke.Claim) (ranke.Id, error) {
-	return s.AddClaimsToBranch(ctx, mainBranch, claims)
-}
-
-// AddClaimsToBranch drives all six steps for one topologically ordered batch and
-// returns the new archive head k′. Safe from many goroutines.
-func (s *Sequencer) AddClaimsToBranch(ctx context.Context, branch string, claims []ranke.Claim) (ranke.Id, error) {
-	if len(claims) == 0 {
-		return s.Head(), nil
-	}
-	c, err := s.NewContributionToBranch(ctx, branch)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.AddClaims(claims); err != nil {
-		return nil, err
-	}
-	v, err := c.CompleteAndVerify(ctx)
-	if err != nil {
-		return nil, err
-	}
-	m, err := v.Persist(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r, err := s.Merge(ctx, m)
-	if err != nil {
-		return nil, err
-	}
-	return r.Head(), nil
+	return &contribution{
+		s:        s,
+		baseHead: s.head,
+		baseTime: s.clock.Tick(),
+		staged:   map[string][]ranke.Claim{},
+		adopted:  map[string][]ranke.Id{},
+	}, nil
 }
 
 // Merge is step 6: it queues the contribution, then races the other writers for
@@ -188,7 +147,12 @@ func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (r
 	if !ok || m.s != s {
 		return nil, errForeignContribution
 	}
-	p := &pending{branch: m.branch, heads: m.heads, ids: m.ids, done: make(chan struct{})}
+	// The queue entry takes its own map of the branches the contribution named.
+	heads := make(map[string][]ranke.Id, len(m.branches))
+	for _, b := range m.branches {
+		heads[b] = m.heads[b]
+	}
+	p := &pending{heads: heads, ids: m.ids, done: make(chan struct{})}
 
 	s.qmu.Lock()
 	s.queue = append(s.queue, p)
@@ -235,7 +199,9 @@ func (s *Sequencer) drain(ctx context.Context) {
 func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	byBranch := map[string][]ranke.Id{}
 	for _, p := range batch {
-		byBranch[p.branch] = append(byBranch[p.branch], p.heads...)
+		for b, hs := range p.heads {
+			byBranch[b] = append(byBranch[b], hs...)
+		}
 	}
 	changed := make([]string, 0, len(byBranch))
 	for b := range byBranch {
@@ -272,6 +238,9 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	s.markCommitted(bt.ID())
 	for _, p := range batch {
 		s.markCommitted(p.ids...)
+		for _, hs := range p.heads { // the per-branch heads step 4 consolidated
+			s.markCommitted(hs...)
+		}
 	}
 	return nil
 }

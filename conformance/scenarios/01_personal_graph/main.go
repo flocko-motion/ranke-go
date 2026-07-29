@@ -31,6 +31,7 @@ import (
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
 	"github.com/flocko-motion/ranke-go/conformance/helpers"
+	testhelpers "github.com/flocko-motion/ranke-go/tests/helpers"
 )
 
 // must aliases helpers.Must so error-checked calls read with a
@@ -228,7 +229,7 @@ func main() {
 	u := must(fs.New(helpers.UniverseDir))
 	hist := must(histfile.New(helpers.BranchTableHeadPath))
 	seq := must(devseq.NewSequencer(ctx, u, hist, alice, s))
-	head := must(seq.AddClaims(ctx, []ranke.Claim{
+	head := must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		emailApples, emailFamily, summary,
 		aliceEntity, applesEntity, likes,
 		bobSr, knows, bobJr, familyRel,

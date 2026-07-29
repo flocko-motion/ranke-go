@@ -9,6 +9,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	historymem "github.com/flocko-motion/ranke-go/adapter/history/mem"
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,7 +76,7 @@ func TestInvalidContributionDenied(t *testing.T) {
 		Sign()
 	require.NoError(t, err, "the claim itself is well-formed; only its reference dangles")
 
-	_, err = seq.AddClaimsToBranch(ctx, "main", []ranke.Claim{bad})
+	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{bad})
 	require.Error(t, err, "the Sequencer must deny a contribution that references a non-existent claim")
 
 	require.True(t, headBefore.Equal(seq.Head()),
@@ -102,7 +103,7 @@ func TestValidContributionAccepted(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	head, err := seq.AddClaimsToBranch(ctx, "main", []ranke.Claim{good})
+	head, err := helpers.Contribute(ctx, seq, "main", []ranke.Claim{good})
 	require.NoError(t, err, "a valid contribution must be accepted")
 	require.False(t, headBefore.Equal(head), "a merged contribution must advance the archive head")
 	require.True(t, head.Equal(seq.Head()))

@@ -11,6 +11,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	historymem "github.com/flocko-motion/ranke-go/adapter/history/mem"
 	concseq "github.com/flocko-motion/ranke-go/adapter/sequencer/concurrent"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,7 +127,7 @@ func TestConcurrentAddsAllSurvive(t *testing.T) {
 			defer wg.Done()
 			c := f.note(t, fmt.Sprintf("concurrent note %d", i))
 			ids[i] = c.ID()
-			_, errs[i] = f.seq.AddClaims(ctx, []ranke.Claim{c})
+			_, errs[i] = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{c})
 		}()
 	}
 	wg.Wait()
@@ -156,7 +157,7 @@ func TestConcurrentBranchesAllSurvive(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				c := f.note(t, fmt.Sprintf("%s note %d", b, i))
-				_, err := f.seq.AddClaimsToBranch(ctx, b, []ranke.Claim{c})
+				_, err := helpers.Contribute(ctx, f.seq, b, []ranke.Claim{c})
 				mu.Lock()
 				defer mu.Unlock()
 				require.NoError(t, err)
@@ -176,6 +177,75 @@ func TestConcurrentBranchesAllSurvive(t *testing.T) {
 	in, err := g.ContainsClaim(ctx, ids["alpha"][0])
 	require.NoError(t, err)
 	require.False(t, in, "a claim contributed to alpha must not appear in beta")
+}
+
+// TestOneContributionAdvancesSeveralBranches is the bulk-contribution capability:
+// a contribution names the branch each batch joins and may name SEVERAL, so one
+// merge advances them all — a branch table being a set of named edges. Where
+// TestConcurrentBranchesAllSurvive spreads branches across contributions, here a
+// single contribution does the fan-out, so nothing else can account for it.
+func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, ctx)
+
+	// Seed both branches first, so "the head moved" is a comparison, not an appearance.
+	seedA, seedB := f.note(t, "alpha seed"), f.note(t, "beta seed")
+	_, err := helpers.Contribute(ctx, f.seq, "alpha", []ranke.Claim{seedA})
+	require.NoError(t, err)
+	_, err = helpers.Contribute(ctx, f.seq, "beta", []ranke.Claim{seedB})
+	require.NoError(t, err)
+	beforeA, beforeB := f.branchHead(t, ctx, "alpha"), f.branchHead(t, ctx, "beta")
+	revisions, err := f.hist.Len(ctx)
+	require.NoError(t, err)
+
+	onAlpha, onBeta := f.note(t, "for alpha"), f.note(t, "for beta")
+	c, err := f.seq.NewContribution(ctx)
+	require.NoError(t, err)
+	require.NoError(t, c.AddClaims("alpha", []ranke.Claim{onAlpha}))
+	require.NoError(t, c.AddClaims("beta", []ranke.Claim{onBeta}))
+	v, err := c.CompleteAndVerify(ctx)
+	require.NoError(t, err)
+	m, err := v.Persist(ctx)
+	require.NoError(t, err)
+	require.Len(t, m.Heads(), 2, "one open head per branch the contribution named")
+	r, err := f.seq.Merge(ctx, m)
+	require.NoError(t, err)
+	require.True(t, r.Head().Equal(f.seq.Head()))
+
+	after, err := f.hist.Len(ctx)
+	require.NoError(t, err)
+	require.Equal(t, revisions+1, after, "one contribution, one revision, two branches advanced")
+	require.False(t, beforeA.Equal(f.branchHead(t, ctx, "alpha")), "alpha advanced")
+	require.False(t, beforeB.Equal(f.branchHead(t, ctx, "beta")), "beta advanced")
+
+	// Each branch reaches its own batch from its own head, and keeps its seed.
+	f.requireReachable(t, ctx, "alpha", []ranke.Id{seedA.ID(), onAlpha.ID()})
+	f.requireReachable(t, ctx, "beta", []ranke.Id{seedB.ID(), onBeta.ID()})
+	g, err := ranke.NewGraphFromClosure(ctx, f.branchHead(t, ctx, "beta"), f.u)
+	require.NoError(t, err)
+	in, err := g.ContainsClaim(ctx, onAlpha.ID())
+	require.NoError(t, err)
+	require.False(t, in, "a batch named for alpha must not land in beta")
+}
+
+// TestUnnamedBranchRefused: every batch names the branch it joins, and there is no
+// default to fall back on — an unnamed one is refused, admitting nothing.
+func TestUnnamedBranchRefused(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, ctx)
+
+	orphan, adopted := f.note(t, "nowhere"), f.note(t, "also nowhere")
+	g, err := ranke.NewGraph(ctx, f.u)
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(ctx, adopted))
+
+	c, err := f.seq.NewContribution(ctx)
+	require.NoError(t, err)
+	require.Error(t, c.AddClaims("", []ranke.Claim{orphan}))
+	require.Error(t, c.AddGraph("", g))
+
+	_, err = c.CompleteAndVerify(ctx)
+	require.Error(t, err, "nothing was admitted, so there is nothing to verify")
 }
 
 // TestInvalidContributionDenied is the guarantee the Sequencer must uphold under
@@ -200,7 +270,7 @@ func TestInvalidContributionDenied(t *testing.T) {
 		Sign()
 	require.NoError(t, err, "the claim itself is well-formed; only its reference dangles")
 
-	_, err = f.seq.AddClaims(ctx, []ranke.Claim{bad})
+	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{bad})
 	require.Error(t, err, "a contribution referencing a non-existent claim must be denied")
 	require.True(t, before.Equal(f.seq.Head()), "a denied contribution must not advance the head")
 }
@@ -212,7 +282,7 @@ func TestValidContributionAccepted(t *testing.T) {
 	f := newFixture(t, ctx)
 	before := f.seq.Head()
 
-	head, err := f.seq.AddClaims(ctx, []ranke.Claim{f.note(t, "a real source note")})
+	head, err := helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{f.note(t, "a real source note")})
 	require.NoError(t, err)
 	require.False(t, before.Equal(head), "a merged contribution advances the head")
 	require.True(t, head.Equal(f.seq.Head()))
@@ -232,7 +302,7 @@ func TestReservedTypeRefused(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	_, err = f.seq.AddClaims(ctx, []ranke.Claim{forged})
+	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{forged})
 	require.Error(t, err, "a client-authored branch table must be refused")
 	require.True(t, before.Equal(f.seq.Head()))
 }
@@ -256,7 +326,7 @@ func TestFutureDatedClaimRefused(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	require.Error(t, c.AddClaims([]ranke.Claim{future}),
+	require.Error(t, c.AddClaims("main", []ranke.Claim{future}),
 		"a claim dated after the contribution base must be refused")
 }
 
@@ -276,7 +346,7 @@ func TestBaseIsTheSnapshotItOpenedAt(t *testing.T) {
 	require.NoError(t, err)
 	baseHead, _ := c.Base()
 
-	_, err = f.seq.AddClaims(ctx, []ranke.Claim{f.note(t, "someone else got there first")})
+	_, err = helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{f.note(t, "someone else got there first")})
 	require.NoError(t, err)
 	require.False(t, baseHead.Equal(f.seq.Head()), "the head moved while the contribution was open")
 
@@ -284,7 +354,7 @@ func TestBaseIsTheSnapshotItOpenedAt(t *testing.T) {
 	require.True(t, baseHead.Equal(stillBase), "the base is pinned to the snapshot it opened at")
 
 	// And the contribution still merges cleanly onto the advanced head.
-	require.NoError(t, c.AddClaims([]ranke.Claim{late}))
+	require.NoError(t, c.AddClaims("main", []ranke.Claim{late}))
 	v, err := c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 	m, err := v.Persist(ctx)
@@ -305,17 +375,17 @@ func TestSealedContributionRefusesMoreClaims(t *testing.T) {
 
 	c, err := f.seq.NewContribution(ctx)
 	require.NoError(t, err)
-	require.NoError(t, c.AddClaims([]ranke.Claim{first}))
+	require.NoError(t, c.AddClaims("main", []ranke.Claim{first}))
 	_, err = c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 
-	require.Error(t, c.AddClaims([]ranke.Claim{second}),
+	require.Error(t, c.AddClaims("main", []ranke.Claim{second}),
 		"a sealed contribution must refuse further claims")
 	_, err = c.CompleteAndVerify(ctx)
 	require.Error(t, err, "a sealed contribution must refuse to re-seal")
 }
 
-// TestForeignContributionRefused: a mergable carries the branch it targets and
+// TestForeignContributionRefused: a mergable carries the branches it advances and
 // the archive it belongs to, neither of which is on the public contract. Merging
 // one into a different Sequencer would be silent corruption, so it is refused.
 func TestForeignContributionRefused(t *testing.T) {
@@ -325,7 +395,7 @@ func TestForeignContributionRefused(t *testing.T) {
 	mine := a.note(t, "belongs to a")
 	c, err := a.seq.NewContribution(ctx)
 	require.NoError(t, err)
-	require.NoError(t, c.AddClaims([]ranke.Claim{mine}))
+	require.NoError(t, c.AddClaims("main", []ranke.Claim{mine}))
 	v, err := c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 	m, err := v.Persist(ctx)
@@ -352,7 +422,7 @@ func TestAddGraphAdoptsOpenHeads(t *testing.T) {
 
 	c, err := f.seq.NewContribution(ctx)
 	require.NoError(t, err)
-	require.NoError(t, c.AddGraph(g))
+	require.NoError(t, c.AddGraph("main", g))
 	v, err := c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 	m, err := v.Persist(ctx)

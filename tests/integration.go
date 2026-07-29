@@ -34,6 +34,7 @@ import (
 	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,7 +64,7 @@ func IntegrationTest(t *testing.T, ctx context.Context, backend Backend) {
 type fixture struct {
 	ctx   context.Context
 	u     ranke.Universe
-	seq   *devseq.Sequencer
+	seq   ranke.Sequencer // the contract, so a scenario exercises what any Sequencer offers
 	clock *generator.Clock
 	self  ranke.Contributor // signs branch tables and authors content: contributor 0, the operator
 }
@@ -82,11 +83,12 @@ func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
 	return &fixture{ctx: ctx, u: u, seq: seq, clock: clock, self: self}
 }
 
-// write advances the "main" branch with claims in topological order, returning head k′.
+// write advances the "main" branch with claims in topological order, returning
+// head k′.
 func (f *fixture) write(t *testing.T, claims ...ranke.Claim) ranke.Id {
 	t.Helper()
-	head, err := f.seq.AddClaims(f.ctx, claims)
-	require.NoError(t, err, "AddClaims")
+	head, err := helpers.Contribute(f.ctx, f.seq, "main", claims)
+	require.NoError(t, err, "contribute to main")
 	return head
 }
 
@@ -96,6 +98,12 @@ func (f *fixture) snapshot(t *testing.T) ranke.Archive {
 	arc, err := f.seq.GetArchive(f.ctx)
 	require.NoError(t, err, "GetArchive")
 	return arc
+}
+
+// head is the archive head k a fresh snapshot sits at.
+func (f *fixture) head(t *testing.T) ranke.Id {
+	t.Helper()
+	return f.snapshot(t).Head()
 }
 
 // mainHead returns the root of branch "main" in a fresh snapshot.
