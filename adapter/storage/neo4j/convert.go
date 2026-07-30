@@ -1,7 +1,9 @@
 // package: neo4j / persistence-cache
 // type:    logic
 // job:     map ranke claims to/from neo4j node + relationship property maps (the cache's on-graph shape)
-// limits:  pure mapping, no I/O; the Cypher and driver calls live in neo4j.go. Inline content is carried as a legible text property (text encodings only), not base64 — the graph is meant to be read in the browser
+// limits:  pure mapping, no I/O; the Cypher and driver calls live in neo4j.go. Inline content is
+// carried as a legible text property (text encodings only), not base64 — the graph is
+// meant to be read in the browser
 package neo4j
 
 import (

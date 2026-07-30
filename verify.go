@@ -1,7 +1,9 @@
 // package: ranke / verify
 // type:    logic
-// job:     the configurable closure verifier — §5.10 per-claim integrity + authenticity over a graph, archive, or branch closure, as a live progress run
-// limits:  does not fetch content bytes unless asked (WithExternalContent); does not persist or advance anything (-> universe, sequencer)
+// job:     the configurable closure verifier — §5.10 per-claim integrity + authenticity over a
+// graph, archive, or branch closure, as a live progress run
+// limits:  does not fetch content bytes unless asked (WithExternalContent); does not persist or
+// advance anything (-> universe, sequencer)
 package ranke
 
 import (

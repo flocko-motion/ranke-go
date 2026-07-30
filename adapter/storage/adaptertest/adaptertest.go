@@ -1,7 +1,8 @@
 // package: adaptertest / conformance
 // type:    test
 // job:     black-box conformance suite exercising any ranke.Universe via the public API
-// limits:  no medium-specific scenarios; each adapter adds those alongside (-> adapter/storage/fs, adapter/storage/mem)
+// limits:  no medium-specific scenarios; each adapter adds those alongside
+// (-> adapter/storage/fs, adapter/storage/mem)
 //
 // Package adaptertest is a black-box conformance suite for ranke.Universe
 // implementations. It exercises an adapter purely through the public

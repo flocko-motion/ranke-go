@@ -1,7 +1,9 @@
 // package: tests/backends / integration
 // type:    tool
-// job:     shared podman lifecycle for the ephemeral service pods — remove a container together with the anonymous volumes its image declared
-// limits:  containers the suite started; a host-native service is never torn down (-> redis_pod, minio_pod, neo4j_pod)
+// job:     shared podman lifecycle for the ephemeral service pods — remove a container together
+// with the anonymous volumes its image declared
+// limits:  containers the suite started; a host-native service is never torn down (-> redis_pod,
+// minio_pod, neo4j_pod)
 package backends
 
 import "os/exec"

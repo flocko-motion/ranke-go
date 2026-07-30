@@ -1,6 +1,7 @@
 // package: ranke / taxonomy
 // type:    logic
-// job:     the closed node-type vocabulary (§4.8) — classes, subtypes, and their compact aliases — with enumeration/validation helpers
+// job:     the closed node-type vocabulary (§4.8) — classes, subtypes, and their compact aliases —
+// with enumeration/validation helpers
 // limits:  vocabulary only; node construction and content live elsewhere (-> node)
 package ranke
 

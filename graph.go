@@ -1,7 +1,9 @@
 // package: ranke / graph
 // type:    logic
-// job:     a Ranke-Graph handle RG ⊆ 𝒰 — stages claims into a Universe under the atomic-creation rule, tracks open heads, consolidates
-// limits:  claims live in the Universe (-> universe); does not bind graphs to branches (-> archive); verification lives in verify.go
+// job:     a Ranke-Graph handle RG ⊆ 𝒰 — stages claims into a Universe under the atomic-creation
+// rule, tracks open heads, consolidates
+// limits:  claims live in the Universe (-> universe); does not bind graphs to branches
+// (-> archive); verification lives in verify.go
 package ranke
 
 import (

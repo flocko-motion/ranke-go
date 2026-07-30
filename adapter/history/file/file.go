@@ -1,6 +1,7 @@
 // package: file / coordination
 // type:    adapter
-// job:     file-backed History storing the head-id timeline as a text file, one "id timestamp" line per entry, atomic-rename writes
+// job:     file-backed History storing the head-id timeline as a text file, one "id timestamp" line
+// per entry, atomic-rename writes
 // limits:  single-node only (-> a db timeline for distributed); stores ids only (-> ranke)
 //
 // Package file is a filesystem head-id timeline: it persists the sequence

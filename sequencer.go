@@ -1,7 +1,9 @@
 // package: ranke / sequencer
 // type:    logic
-// job:     the Sequencer contract — the sole writer of a Ranke-Archive: hands out read snapshots and advances the head by merging contributions
-// limits:  interfaces only; the naive concrete implementation is a write-path mechanism (-> adapter/sequencer_mechanism)
+// job:     the Sequencer contract — the sole writer of a Ranke-Archive: hands out read snapshots
+// and advances the head by merging contributions
+// limits:  interfaces only; the naive concrete implementation is a write-path mechanism
+// (-> adapter/sequencer_mechanism)
 package ranke
 
 import "context"

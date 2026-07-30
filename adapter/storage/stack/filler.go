@@ -1,7 +1,9 @@
 // package: stack / persistence
 // type:    logic
-// job:     the background filler — a bounded, deduplicating, lossy batch queue for opportunistic cache writes that must never slow or fail a read
-// limits:  puts claims into layers the stack chose; deciding WHICH layers and WHY is the router's (-> stack.go, query.go)
+// job:     the background filler — a bounded, deduplicating, lossy batch queue for opportunistic
+// cache writes that must never slow or fail a read
+// limits:  puts claims into layers the stack chose; deciding WHICH layers and WHY is the router's
+// (-> stack.go, query.go)
 package stack
 
 import (

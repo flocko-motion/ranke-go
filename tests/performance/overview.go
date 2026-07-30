@@ -1,6 +1,8 @@
 // package: tests/performance / integration
 // type:    tool
-// job:     summarise the generated archive (totals, per-type histograms, content/shape stats) and print it once before the matrix — so the scale of a --size N run is legible (N is a scale knob, not a node count)
+// job:     summarise the generated archive (totals, per-type histograms, content/shape stats) and
+// print it once before the matrix — so the scale of a --size N run is legible (N is a
+// scale knob, not a node count)
 // limits:  read-only over the reference (mem) graph; the matrix run + per-backend timing live in harness.go
 package performance
 

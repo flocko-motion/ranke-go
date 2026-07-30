@@ -1,7 +1,8 @@
 // package: redis / persistence-cache
 // type:    adapter
 // job:     stores claims and content blobs as keys in redis — a fast, shared, in-memory byte cache tier
-// limits:  a storage.BlobStore behind storage.NewBlobUniverse (-> adapter); not authoritative — a cache under a query layer and above a durable store (paper §Composing Universes)
+// limits:  a storage.BlobStore behind storage.NewBlobUniverse (-> adapter); not authoritative — a
+// cache under a query layer and above a durable store (paper §Composing Universes)
 //
 // Package redis is a redis persistence adapter for a ranke Universe: a fast,
 // shared, in-memory byte cache. It stores claims (by id) and content (by hash)

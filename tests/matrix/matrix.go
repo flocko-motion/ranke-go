@@ -1,7 +1,11 @@
 // package: tests/matrix / conformance
 // type:    test
-// job:     the cross-backend agreement matrix — build one deterministic archive into every available backend, run the shared RQL corpus against each, and assert every backend's answer matches the reference's
-// limits:  correctness only, never timing (-> tests/performance); it asks whether an answer is right, never how a backend produced it — routing, lowering, and cache tiers are the backend's business
+// job:     the cross-backend agreement matrix — build one deterministic archive into every
+// available backend, run the shared RQL corpus against each, and assert every backend's
+// answer matches the reference's
+// limits:  correctness only, never timing (-> tests/performance); it asks whether an answer is
+// right, never how a backend produced it — routing, lowering, and cache tiers are the
+// backend's business
 //
 // Two backends implementing the read language must answer a query identically;
 // a divergence is a conformance bug in at least one. Run it over your own rows

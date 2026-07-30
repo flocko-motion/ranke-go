@@ -1,7 +1,9 @@
 // package: adapter/sequencer/concurrent / adapter
 // type:    adapter
-// job:     the concurrent Sequencer's contribution stages — steps 2–5 (adding, completing, verifying, persisting), the work that runs OFF the sequencing thread
-// limits:  one contribution is not itself concurrency-safe for filling beyond the mutex here (fill it from one goroutine); merging is step 6 and lives with the Sequencer (-> concurrent.go)
+// job:     the concurrent Sequencer's contribution stages — steps 2–5 (adding, completing,
+// verifying, persisting), the work that runs OFF the sequencing thread
+// limits:  one contribution is not itself concurrency-safe for filling beyond the mutex here (fill
+// it from one goroutine); merging is step 6 and lives with the Sequencer (-> concurrent.go)
 package concurrent
 
 import (

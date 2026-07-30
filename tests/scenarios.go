@@ -1,6 +1,7 @@
 // package: tests / conformance
 // type:    test
-// job:     multi-stage scenario stories that write through the Sequencer, re-read via immutable snapshots, and verify survival
+// job:     multi-stage scenario stories that write through the Sequencer, re-read via immutable
+// snapshots, and verify survival
 // limits:  no public entry point; driven by IntegrationTest (-> tests/integration.go)
 package tests
 

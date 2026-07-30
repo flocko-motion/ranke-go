@@ -1,7 +1,10 @@
 // package: ranke / taxonomy
 // type:    logic
-// job:     the encoding (MIME media-type) vocabulary — the closed top-level class set with compact aliases, well-known subtype aliases with two-way resolution, the class constructors, and named constants for the popular media types
-// limits:  vocabulary + alias resolution only; the codec applies the aliases into the canonical bytes and the node holds the value (-> codec, node)
+// job:     the encoding (MIME media-type) vocabulary — the closed top-level class set with compact
+// aliases, well-known subtype aliases with two-way resolution, the class constructors, and
+// named constants for the popular media types
+// limits:  vocabulary + alias resolution only; the codec applies the aliases into the canonical
+// bytes and the node holds the value (-> codec, node)
 package ranke
 
 import "strings"

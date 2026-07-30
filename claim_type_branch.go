@@ -1,7 +1,8 @@
 // package: ranke / claim_type_branch
 // type:    logic
 // job:     the Branch view over a contribution/branch edge — a named pointer into an archive's branch table
-// limits:  the branch-table logic (materialising the diff chain) lives in the Archive (-> archive); a Branch only navigates the subgraph its edge references
+// limits:  the branch-table logic (materialising the diff chain) lives in the Archive (-> archive);
+// a Branch only navigates the subgraph its edge references
 package ranke
 
 import (

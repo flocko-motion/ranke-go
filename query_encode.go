@@ -1,7 +1,9 @@
 // package: ranke / query
 // type:    logic
-// job:     fill QueryResult's Encoded fields per Output.Encoding — the stored CBOR verbatim, or the same fields as JSON
-// limits:  serialisation only; which claims a read returns is the executor's (-> query_default, adapter/storage/neo4j)
+// job:     fill QueryResult's Encoded fields per Output.Encoding — the stored CBOR verbatim, or the
+// same fields as JSON
+// limits:  serialisation only; which claims a read returns is the executor's (-> query_default,
+// adapter/storage/neo4j)
 package ranke
 
 // routeIds renders a route's claim ids in order.
@@ -16,32 +18,19 @@ func routeIds(route []Claim) []Id {
 	return out
 }
 
-// EncodeResults fills each result's ClaimEncoded/PathEncoded per out.Encoding.
-// Native asks for the Go objects, which the executor already set. A layer holding
-// no canonical CBOR fails a cbor read here rather than re-encoding.
+// EncodeResults fills each result's ClaimEncoded/PathEncoded per out.Encoding, in
+// out.Form. Native asks for the Go objects, which the executor already set.
 func EncodeResults(results []QueryResult, out Output) error {
 	switch out.Encoding {
 	case "", ResultNative:
 		return nil
 	case ResultCBOR:
-		return encodeCBOR(results)
+		return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeCBOR(out.Form) })
 	case ResultJSON:
-		return encodeJSON(results)
+		return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeJSON(out.Form) })
 	default:
 		return WithDetail(ErrQueryEncoding, string(out.Encoding))
 	}
-}
-
-// encodeCBOR serves each claim as canonical CBOR — the stored record where the
-// decode kept it, encoded from the claim's own views otherwise.
-func encodeCBOR(results []QueryResult) error {
-	return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeCBOR() })
-}
-
-// encodeJSON converts each parsed claim to JSON — the cheap direction, since the
-// traversal already parsed it.
-func encodeJSON(results []QueryResult) error {
-	return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeJSON() })
 }
 
 // encodeEach fills every result's ClaimEncoded and PathEncoded through enc.

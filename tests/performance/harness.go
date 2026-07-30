@@ -1,7 +1,11 @@
 // package: tests/performance / integration
 // type:    tool
-// job:     the reusable performance-matrix harness — generate a deterministic size-N archive into each backend and time the chapters (write / verify / random access), reporting per-step latency distributions
-// limits:  decoupled from the testing package so both the _test.go entrypoint and cmd/test can drive it; timing only — the backend rows come from tests/backends and correctness belongs to tests/matrix
+// job:     the reusable performance-matrix harness — generate a deterministic size-N archive into
+// each backend and time the chapters (write / verify / random access), reporting per-step
+// latency distributions
+// limits:  decoupled from the testing package so both the _test.go entrypoint and cmd/test can
+// drive it; timing only — the backend rows come from tests/backends and correctness
+// belongs to tests/matrix
 package performance
 
 import (

@@ -1,7 +1,9 @@
 // package: tests/rql / integration
 // type:    tool
-// job:     execute a corpus query against any Universe and render its answer as a deterministic fingerprint — the comparable form the conformance matrix diffs across backends
-// limits:  no assertions and no backend knowledge; the corpus lives alongside (-> corpus.go) and the comparing is the matrix's job (-> tests/matrix)
+// job:     execute a corpus query against any Universe and render its answer as a deterministic
+// fingerprint — the comparable form the conformance matrix diffs across backends
+// limits:  no assertions and no backend knowledge; the corpus lives alongside (-> corpus.go) and
+// the comparing is the matrix's job (-> tests/matrix)
 package rql
 
 import (

@@ -1,7 +1,9 @@
 // package: ranke / archive
 // type:    logic
-// job:     an immutable Ranke-Archive snapshot RA_k = (𝒰, k); reads claims and branches through the head claim, delegating closure ops to the Universe
-// limits:  advances nothing — writes go through the Sequencer (-> sequencer); closure traversal belongs to the Universe (-> universe)
+// job:     an immutable Ranke-Archive snapshot RA_k = (𝒰, k); reads claims and branches through the
+// head claim, delegating closure ops to the Universe
+// limits:  advances nothing — writes go through the Sequencer (-> sequencer); closure traversal
+// belongs to the Universe (-> universe)
 package ranke
 
 import (

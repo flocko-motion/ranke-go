@@ -1,6 +1,7 @@
 // package: ranke / query_report
 // type:    logic
-// job:     the RQL execution report — a structured event log a query collects across the call chain when Execution.Report is set
+// job:     the RQL execution report — a structured event log a query collects across the call chain
+// when Execution.Report is set
 // limits:  a passive collector carried in ctx; a nil collector (report off) makes every log a no-op
 package ranke
 

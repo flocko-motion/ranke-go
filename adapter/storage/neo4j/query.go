@@ -1,7 +1,10 @@
 // package: neo4j / query
 // type:    adapter
-// job:     native RQL execution — lower the whole query to one Cypher statement, run it, reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure when it names none; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk; a cbor read yields ids only
+// job:     native RQL execution — lower the whole query to one Cypher statement, run it,
+// reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
+// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure
+// when it names none; branch confinement is the _b_<branch> tag (<= Height,
+// point-in-time), not a walk; a cbor read yields ids only
 package neo4j
 
 import (

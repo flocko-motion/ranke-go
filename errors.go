@@ -1,7 +1,8 @@
 // package: ranke / errors
 // type:    data
 // job:     centralized package error sentinels — one static error per fixed condition
-// limits:  no fmt.Errorf anywhere in the package — dynamic errors compose via wrap/withDetail/wrapDetail over these sentinels
+// limits:  no fmt.Errorf anywhere in the package — dynamic errors compose via
+// wrap/withDetail/wrapDetail over these sentinels
 package ranke
 
 import "errors"

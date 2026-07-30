@@ -1,6 +1,8 @@
 // package: ranke / codec
 // type:    io
-// job:     canonical CBOR (de)serialization at two levels — the node record encoding that ids are computed over (edges inlined), and the whole-claim storage codec (Claim.Encode / DecodeClaim)
+// job:     canonical CBOR (de)serialization at two levels — the node record encoding that ids are
+// computed over (edges inlined), and the whole-claim storage codec (Claim.Encode /
+// DecodeClaim)
 // limits:  persists nothing (-> universe, adapter); content integrity lives in content.go
 package ranke
 
@@ -206,14 +208,17 @@ type encClaimFile struct {
 	Node encNode `cbor:"1,keyasint"`
 }
 
-// EncodeCBOR serializes the claim to its canonical CBOR record — the delta a diff
-// claim stores, so the bytes stay the ones its id derives from and persistence can
-// round-trip them. A decoded claim serves the record the decode kept.
-func (c *claim) EncodeCBOR() ([]byte, error) {
-	if c.raw != nil {
-		return c.raw, nil
+// EncodeCBOR serializes the claim to canonical CBOR in the form asked for: the
+// record as written, which persistence stores, or that record with its diff overlay
+// resolved.
+func (c *claim) EncodeCBOR(form Form) ([]byte, error) {
+	node, edges := c.node, c.edges
+	if form == FormMaterialized && c.diffClaim != nil {
+		node, edges = c.node.flattened(), c.effectiveEdges()
+	} else if c.raw != nil {
+		return c.raw, nil // the record the decode kept, so the id still derives from it
 	}
-	en, err := buildEncNode(c.node, c.edges)
+	en, err := buildEncNode(node, edges)
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +230,14 @@ func (c *claim) EncodeCBOR() ([]byte, error) {
 	return data, nil
 }
 
-// EncodeJSON renders the claim's ADT fields, named as the taxonomy names them, so
-// JSON and CBOR carry the same information. Content is base64, as JSON renders bytes.
-func (c *claim) EncodeJSON() ([]byte, error) {
-	n := c.node
+// EncodeJSON renders the claim's ADT fields, named as the taxonomy names them, in
+// the form asked for — so JSON and CBOR carry the same information. Content is
+// base64, as JSON renders bytes.
+func (c *claim) EncodeJSON(form Form) ([]byte, error) {
+	n, edges := c.node, c.edges
+	if form == FormMaterialized {
+		n, edges = c.node.flattened(), c.effectiveEdges()
+	}
 	m := map[string]any{
 		"id":         c.ID().String(),
 		"type":       n.Type(),
@@ -252,7 +261,7 @@ func (c *claim) EncodeJSON() ([]byte, error) {
 			m[k] = v
 		}
 	}
-	if edges := c.Edges(); len(edges) > 0 {
+	if len(edges) > 0 {
 		list := make([]map[string]any, 0, len(edges))
 		for _, e := range edges {
 			list = append(list, map[string]any{"type": e.Type(), "reference": e.Reference().String()})

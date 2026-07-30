@@ -1,7 +1,9 @@
 // package: stack / persistence
 // type:    adapter
-// job:     compose ordered Universe layers into one read-through / write-through Universe — cache + durable tiers with self-healing repair (paper §Composing Universes)
-// limits:  no storage of its own (-> the layer Universes); naming/selecting layers is the caller's (-> ranke-db config)
+// job:     compose ordered Universe layers into one read-through / write-through Universe — cache +
+// durable tiers with self-healing repair (paper §Composing Universes)
+// limits:  no storage of its own (-> the layer Universes); naming/selecting layers is the caller's
+// (-> ranke-db config)
 package stack
 
 import (

@@ -1,7 +1,9 @@
 // package: ranke / query
 // type:    logic
-// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a forward-closure walk (reverse via closure inversion) with filter/order/limit/shape
-// limits:  performance-ignorant; a graph-native backend overrides with a native lowering (-> adapter/storage/neo4j)
+// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a
+// forward-closure walk (reverse via closure inversion) with filter/order/limit/shape
+// limits:  performance-ignorant; a graph-native backend overrides with a native lowering
+// (-> adapter/storage/neo4j)
 package ranke
 
 import (

@@ -27,7 +27,7 @@ func corruptNode(t *testing.T, g Graph, c Claim) {
 	cc, ok := c.(*claim)
 	require.True(t, ok, "claim is the package's concrete type")
 	cc.node.createdAt = cc.node.createdAt.Add(time.Hour) // id stays as-signed
-	bad, err := cc.EncodeCBOR()
+	bad, err := cc.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
 	mu.mu.Lock()
 	mu.claims[c.ID().String()] = bad

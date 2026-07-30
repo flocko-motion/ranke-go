@@ -1,7 +1,9 @@
 // package: stack / persistence
 // type:    adapter
-// job:     the stack's read path — run the query on the top layer, re-read the claims from a layer holding the stored record when the top layer keeps none, then encode
-// limits:  routing only, no storage and no query execution of its own (-> the layer Universes); the serialising itself is the library's (-> ranke.EncodeResults)
+// job:     the stack's read path — run the query on the top layer, re-read the claims from a layer
+// holding the stored record when the top layer keeps none, then encode
+// limits:  routing only, no storage and no query execution of its own (-> the layer Universes); the
+// serialising itself is the library's (-> ranke.EncodeResults)
 package stack
 
 import (

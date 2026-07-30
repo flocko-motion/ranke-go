@@ -1,6 +1,7 @@
 // package: ranke / claim_type_contributor
 // type:    logic
-// job:     the Contributor extension of Claim — a contribution/contributor claim, plus a session-scoped signing key
+// job:     the Contributor extension of Claim — a contribution/contributor claim, plus a
+// session-scoped signing key
 // limits:  the base Claim + concrete claim live in claim.go; construction/signing in claim_builder.go
 package ranke
 
@@ -86,6 +87,6 @@ func (s *signedContributor) unwrap() *claim { return s.contributor.unwrap() }
 func (s *signedContributor) verifyID(pubkey, raw []byte) error {
 	return s.contributor.verifyID(pubkey, raw)
 }
-func (s *signedContributor) EncodeCBOR() ([]byte, error) { return s.contributor.EncodeCBOR() }
-func (s *signedContributor) EncodeJSON() ([]byte, error) { return s.contributor.EncodeJSON() }
-func (s *signedContributor) SigningKey() crypto.Signer   { return s.key }
+func (s *signedContributor) EncodeCBOR(f Form) ([]byte, error) { return s.contributor.EncodeCBOR(f) }
+func (s *signedContributor) EncodeJSON(f Form) ([]byte, error) { return s.contributor.EncodeJSON(f) }
+func (s *signedContributor) SigningKey() crypto.Signer         { return s.key }

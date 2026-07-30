@@ -1,7 +1,9 @@
 // package: tests/backends / integration
 // type:    tool
-// job:     the shared backend matrix — one named opener per storage configuration, each spinning up a FRESH, EMPTY local instance (podman pods for s3/redis/neo4j, or host-native services)
-// limits:  wiring only — no test logic and no assertions; the rows are consumed by the conformance matrix (-> tests/matrix) and the timing harness (-> tests/performance)
+// job:     the shared backend matrix — one named opener per storage configuration, each spinning up
+// a FRESH, EMPTY local instance (podman pods for s3/redis/neo4j, or host-native services)
+// limits:  wiring only — no test logic and no assertions; the rows are consumed by the conformance
+// matrix (-> tests/matrix) and the timing harness (-> tests/performance)
 package backends
 
 import (
