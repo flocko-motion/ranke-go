@@ -1,6 +1,7 @@
 // package: tests / conformance
 // type:    test
-// job:     public IntegrationTest entry point + a per-scenario fixture that drives the reference dev Sequencer over a pluggable storage backend
+// job:     public IntegrationTest entry point + a per-scenario fixture that drives the reference
+// dev Sequencer over a pluggable storage backend
 // limits:  no scenario bodies here; those live alongside (-> tests/scenarios.go)
 //
 // Package tests is the public conformance suite for the Ranke-Graph
@@ -11,7 +12,9 @@
 //
 //	func TestMyBackend(t *testing.T) {
 //	    ctx := context.Background()
-//	    tests.IntegrationTest(t, ctx, func(t *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
+//	    tests.IntegrationTest(t, ctx, func(
+//	        t *testing.T, clk *generator.Clock,
+//	    ) (ranke.Universe, ranke.History, error) {
 //	        return mybackend.NewUniverse(t.TempDir()), mybackend.NewHistory(clk), nil
 //	    })
 //	}

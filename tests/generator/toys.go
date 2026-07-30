@@ -1,7 +1,9 @@
 // package: tests/generator / testkit
 // type:    tool
-// job:     the toy specs — each the SMALLEST archive exhibiting one corner, so a test asserting on that corner has nothing else in the graph to explain
-// limits:  specs only, built by the same builder as the sized graphs (-> generate.go); for breadth at scale use SpecForSize instead
+// job:     the toy specs — each the SMALLEST archive exhibiting one corner, so a test asserting on
+// that corner has nothing else in the graph to explain
+// limits:  specs only, built by the same builder as the sized graphs (-> generate.go); for breadth
+// at scale use SpecForSize instead
 package generator
 
 import "time"
@@ -60,16 +62,6 @@ func ToyExternalContent(seed int64) Spec {
 	s := toyBase(seed)
 	s.Sources = 1
 	s.ExternalBlobs = 1
-	return s
-}
-
-// ToyOverCapContent holds a source whose inline content is larger than a
-// projection layer's inline cap, so a read asking for more than that cap has
-// content only a durable tier holds in full.
-func ToyOverCapContent(seed int64) Spec {
-	s := toyBase(seed)
-	s.Sources = 2
-	s.LargeBlobBytes = 8 << 10 // over the neo4j cache's 4 KiB default
 	return s
 }
 

@@ -1,7 +1,9 @@
 // package: ranke / contribution
 // type:    logic
-// job:     the contribution contract — the staged → verified → mergable advance of a Ranke-Archive (RA_k → RA_k')
-// limits:  interfaces only; the concrete implementation is a write-path mechanism (-> adapter/sequencer_mechanism)
+// job:     the contribution contract — the staged → verified → mergable advance of a Ranke-Archive
+// (RA_k → RA_k')
+// limits:  interfaces only; the concrete implementation is a write-path mechanism
+// (-> adapter/sequencer_mechanism)
 package ranke
 
 import (

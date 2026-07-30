@@ -1,7 +1,9 @@
 // package: ranke / universe
 // type:    io
-// job:     the 𝒰 interface — a content-addressed bag of claims and content with bulk get/put/has, copy, and single-item wrappers
-// limits:  defines the contract only; concrete backends live under adapter/; does no validation (-> graph, content)
+// job:     the 𝒰 interface — a content-addressed bag of claims and content with bulk get/put/has,
+// copy, and single-item wrappers
+// limits:  defines the contract only; concrete backends live under adapter/; does no validation
+// (-> graph, content)
 package ranke
 
 import (

@@ -1,6 +1,7 @@
 // package: mem / persistence
 // type:    adapter
-// job:     ephemeral in-memory Universe for tests and short-lived sessions — a thin alias to the core reference implementation
+// job:     ephemeral in-memory Universe for tests and short-lived sessions — a thin alias to the
+// core reference implementation
 // limits:  nothing persists across process restarts (-> adapter/fs)
 //
 // Package mem is an ephemeral in-memory persistence adapter for a ranke

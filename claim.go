@@ -1,7 +1,8 @@
 // package: ranke / claim
 // type:    logic
 // job:     the Claim type and the concrete claim with its methods
-// limits:  the Contributor extension lives in claim_type_contributor.go; construction/signing in claim_builder.go; pure helpers in claim_helpers.go; codec in codec.go
+// limits:  the Contributor extension lives in claim_type_contributor.go;
+// construction/signing in claim_builder.go; helpers in claim_helpers.go; codec in codec.go
 package ranke
 
 import (
@@ -16,8 +17,7 @@ import (
 // Atomically created (spec §4.3); immutable after.
 type Claim interface {
 	Node() Node
-	// Edges returns the edges in canonical order, keeping those every filter
-	// matches (AND).
+	// Edges returns the edges in canonical order, keeping those every filter matches (AND).
 	Edges(filters ...Filter) []Edge
 
 	Tags() map[string]string
@@ -39,9 +39,11 @@ type Claim interface {
 	// external streamed from u, as is a dropped inline body.
 	GetContent(ctx context.Context, u Universe) (io.Reader, error)
 
-	// Encode returns the canonical CBOR storage record — node, edge bodies,
-	// inline content — a superset of the id preimage S(node).
-	Encode() ([]byte, error)
+	// EncodeJSON is EncodeCBOR's information as text, content base64.
+	EncodeJSON(form Form) ([]byte, error)
+	// EncodeCBOR returns the claim as canonical CBOR: FormOriginal the record as
+	// written, which persistence stores; FormMaterialized its overlay resolved.
+	EncodeCBOR(form Form) ([]byte, error)
 	// verifyID checks the claim's id is a valid signature by pubkey over
 	// H(S(node)), preimaged from the caller's stored CBOR, never a re-encoding.
 	verifyID(pubkey, raw []byte) error
@@ -54,6 +56,10 @@ type claim struct {
 	node        *node
 	edges       []*edge // same order as node.edges
 	contributor Contributor
+
+	// raw is the stored record this claim was decoded from — the bytes its id was
+	// signed over. Nil for a claim built in memory or from a lossy projection.
+	raw []byte
 
 	// Diff materialisation, set by the loader: the materialised predecessor and
 	// merged edge view. The delta stays intact, so ID()/Encode() hold.
@@ -118,9 +124,8 @@ func (c *claim) Edges(filters ...Filter) []Edge {
 	return out
 }
 
-// computeDiffEdges builds diffEdges, keyed by name: inherit the predecessor's
-// named edges, drop those in edges_diff_omit, overlay self's named edges, then
-// append self's unnamed singletons.
+// computeDiffEdges builds diffEdges keyed by name: inherit the predecessor's named
+// edges, drop edges_diff_omit, overlay self's named, append self's unnamed singletons.
 func (c *claim) computeDiffEdges() {
 	named := map[string]*edge{}
 	for _, e := range c.diffClaim.effectiveEdges() {
@@ -163,8 +168,7 @@ func (c *claim) AsContributor(ctx context.Context, u Universe, signingKey ...cry
 	if !c.IsContributor() {
 		return nil, WithDetail(errNotContributorClaim, c.node.Type())
 	}
-	// Resolved once — inline from the node, external streamed from u (§5.7) —
-	// and cached on the wrapper.
+	// Resolved once — inline from the node, external streamed from u (§5.7) — and cached.
 	rdr, err := c.node.GetContent(ctx, u)
 	if err != nil {
 		return nil, Wrap(errResolveContributorPubkey, err)

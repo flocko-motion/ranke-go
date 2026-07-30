@@ -1,7 +1,9 @@
 // package: neo4j / persistence-cache
-// job:     link each write batch's diff overlays before it is projected, so the cache stores materialised claims only
+// job:     link each write batch's diff overlays before it is projected, so the cache stores
+// materialised claims only
 // type:    logic
-// limits:  write-path only; reads need no overlay pass because what is stored is already materialised (-> neo4j.go)
+// limits:  write-path only; reads need no overlay pass because what is stored is already
+// materialised (-> neo4j.go)
 package neo4j
 
 import (

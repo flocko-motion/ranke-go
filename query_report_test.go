@@ -32,7 +32,7 @@ func TestReportRecordsExecutionLog(t *testing.T) {
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
-	require.True(t, got[0].Claim.ID().Equal(a.ID()))
+	require.True(t, got[0].ClaimNative.ID().Equal(a.ID()))
 
 	rep := rs.Report()
 	require.NotNil(t, rep)
@@ -104,7 +104,7 @@ func TestReportFilterCounts(t *testing.T) {
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
-	require.True(t, got[0].Claim.ID().Equal(a.ID()))
+	require.True(t, got[0].ClaimNative.ID().Equal(a.ID()))
 
 	f := opsOf(rs.Report())["filter"]
 	require.Equal(t, 3, f.Attrs["in"], "closure had 3 claims")

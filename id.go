@@ -1,6 +1,7 @@
 // package: ranke / id
 // type:    crypto
-// job:     the content-addressed Id type — a self-describing payload (multihash or signature) with parsing and equality
+// job:     the content-addressed Id type — a self-describing payload (multihash or signature) with
+// parsing and equality
 // limits:  does not sign or verify ids (-> sign); does not verify content bytes (-> content)
 package ranke
 

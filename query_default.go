@@ -1,14 +1,15 @@
 // package: ranke / query
 // type:    logic
-// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a forward-closure walk (reverse via closure inversion) with filter/order/limit/shape
-// limits:  performance-ignorant; a graph-native backend overrides with a native lowering (-> adapter/storage/neo4j)
+// job:     DefaultQuery — the reference RQL executor a byte-store Universe delegates to: a
+// forward-closure walk (reverse via closure inversion) with filter/order/limit/shape
+// limits:  performance-ignorant; a graph-native backend overrides with a native lowering
+// (-> adapter/storage/neo4j)
 package ranke
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"sort"
 	"strings"
@@ -88,17 +89,24 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	idsOnly := q.Output.Detail == DetailID
 	results := make([]QueryResult, 0, len(filtered))
 	for _, c := range filtered {
-		r := QueryResult{Id: c.ID()}
-		if !idsOnly { // DetailID asks for identity alone
-			r.Claim = c
-		}
+		r := QueryResult{ClaimId: c.ID(), Kind: KindClaimId}
 		if needPaths {
-			r.Path = routes[c.ID().String()]
+			route := routes[c.ID().String()]
+			r.PathId = routeIds(route)
+			r.Kind = KindPathId
 		}
-		if q.Output.Content != nil {
-			r.Content = ShapeContent(ctx, u, c, q.Output)
+		if !idsOnly { // DetailID asks for identity alone
+			r.ClaimNative = c
+			r.Kind = KindClaimNative
+			if needPaths {
+				r.PathNative = routes[c.ID().String()]
+				r.Kind = KindPathNative
+			}
 		}
 		results = append(results, r)
+	}
+	if err := EncodeResults(results, q.Output); err != nil {
+		return nil, err
 	}
 
 	rc.log("native", "results", ReportInfo, "", map[string]any{"results": len(results)})
@@ -366,43 +374,6 @@ func compareValues(a, b any, col Collation) int {
 			return c
 		}
 		return strings.Compare(toStringValue(a), toStringValue(b))
-	}
-}
-
-// ShapeContent loads up to Output.Content bytes of a claim's content, applying the
-// overflow policy beyond that; it reads through u, and a read error yields no content.
-func ShapeContent(ctx context.Context, u Universe, c Claim, out Output) []byte {
-	n := c.Node()
-	inline, _ := n.GetInlineContent() // nil for external or no content
-	if inline == nil && n.GetContentHash() == nil {
-		return nil // no content
-	}
-	rdr, err := c.GetContent(ctx, u) // claim in hand, no scope check
-	if err != nil {
-		return nil
-	}
-	data, err := io.ReadAll(io.LimitReader(rdr, out.Content.Max+1))
-	if err != nil {
-		return nil
-	}
-	if int64(len(data)) <= out.Content.Max {
-		return data
-	}
-	switch out.Content.Overflow {
-	case OverflowOmit:
-		return nil
-	case OverflowReference:
-		// Inline content has no address in the id (§Content), so hash on demand.
-		hash := n.GetContentHash()
-		if hash == nil {
-			hash, err = HashContent(inline)
-			if err != nil {
-				return nil
-			}
-		}
-		return []byte(hash.String())
-	default: // OverflowCutoff
-		return data[:out.Content.Max]
 	}
 }
 

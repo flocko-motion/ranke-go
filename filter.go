@@ -1,6 +1,7 @@
 // package: ranke / filter
 // type:    logic
-// job:     the Filter contract and the built-in edge filters (by field value, by type) that Claim.Edges applies, AND-combined
+// job:     the Filter contract and the built-in edge filters (by field value, by type) that
+// Claim.Edges applies, AND-combined
 // limits:  selection only; edge and claim construction live elsewhere (-> edge, claim)
 package ranke
 

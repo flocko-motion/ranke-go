@@ -1,7 +1,9 @@
 // package: adapter/sequencer/dev / testkit
-// job:     the dev Sequencer's contribution — steps 2–5 (filling, completing, verifying, persisting) behind the ranke.Contribution contract
+// job:     the dev Sequencer's contribution — steps 2–5 (filling, completing, verifying,
+// persisting) behind the ranke.Contribution contract
 // type:    adapter
-// limits:  one contribution at a time, filled from one goroutine; merging is step 6 and belongs to the Sequencer (-> dev.go)
+// limits:  one contribution at a time, filled from one goroutine; merging is step 6 and belongs to
+// the Sequencer (-> dev.go)
 package dev
 
 import (

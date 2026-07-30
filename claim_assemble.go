@@ -1,7 +1,10 @@
 // package: ranke / claim
 // type:    logic
-// job:     AssembleClaim — rebuild a Claim from its parsed components + id, without CBOR and without signing (the field-oriented sibling of DecodeClaim, for non-CBOR cache backends)
-// limits:  reconstructs a cache view, not a self-verifiable claim — it has no canonical bytes, so it cannot be structurally verified; a cache is checked by comparison to the authoritative layer (-> verify.go)
+// job:     AssembleClaim — rebuild a Claim from its parsed components + id, without CBOR and
+// without signing (the field-oriented sibling of DecodeClaim, for non-CBOR cache backends)
+// limits:  reconstructs a cache view, not a self-verifiable claim — it has no canonical bytes, so
+// it cannot be structurally verified; a cache is checked by comparison to the
+// authoritative layer (-> verify.go)
 package ranke
 
 import (

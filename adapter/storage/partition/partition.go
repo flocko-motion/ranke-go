@@ -1,7 +1,9 @@
 // package: partition / persistence
 // type:    adapter
-// job:     shard one Universe across N backends — each key routed to a shard by hash(id) mod N (paper §Composing Universes)
-// limits:  no storage of its own (-> the shard Universes); N is fixed (consistent-hashing / resharding not modelled)
+// job:     shard one Universe across N backends — each key routed to a shard by hash(id) mod N
+// (paper §Composing Universes)
+// limits:  no storage of its own (-> the shard Universes); N is fixed (consistent-hashing /
+// resharding not modelled)
 //
 // Package partition spreads a single Universe across N shard Universes by
 // content-addressed id: each claim id and content hash is routed to one shard

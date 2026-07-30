@@ -1,7 +1,9 @@
 // package: tests/backends / integration
 // type:    tool
-// job:     spawn a real MinIO (S3-compatible) instance in a podman pod for the s3 matrix row, tear it down after — so s3 runs against a real object store on the wire, not an in-process fake
-// limits:  requires podman on PATH and network to pull the image; returns ErrUnavailable when podman is absent (e.g. this sandbox). mem/fs/sqlite need no pod.
+// job:     spawn a real MinIO (S3-compatible) instance in a podman pod for the s3 matrix row, tear
+// it down after — so s3 runs against a real object store on the wire
+// limits:  requires podman on PATH and network to pull the image; returns ErrUnavailable when
+// podman is absent. mem/fs/sqlite need no pod.
 package backends
 
 import (

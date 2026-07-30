@@ -1,7 +1,9 @@
 // package: main / cli
 // type:    cmd
-// job:     `test` — a cobra CLI for running the project's customizable test tooling; today one subcommand, `performance`, drives the backend matrix
-// limits:  a thin flag→Config→RunMatrix adapter; the matrix logic lives in tests/performance (shared with `go test`)
+// job:     `test` — a cobra CLI for running the project's customizable test tooling; today one
+// subcommand, `performance`, drives the backend matrix
+// limits:  a thin flag→Config→RunMatrix adapter; the matrix logic lives in tests/performance
+// (shared with `go test`)
 package main
 
 import (

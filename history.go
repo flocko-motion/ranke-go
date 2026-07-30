@@ -1,6 +1,7 @@
 // package: ranke / history
 // type:    logic
-// job:     the History contract — persists the archive head-id timeline k₀…kₙ (append + read-back) — plus SpliceHistory, the graft a tagging pass uses to update it
+// job:     the History contract — persists the archive head-id timeline k₀…kₙ (append + read-back)
+// — plus SpliceHistory, the graft a tagging pass uses to update it
 // limits:  interface only; concrete timeline stores live in adapters (-> adapter/history)
 package ranke
 

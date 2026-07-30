@@ -1,7 +1,9 @@
 // package: stack / persistence
 // type:    adapter
-// job:     compose ordered Universe layers into one read-through / write-through Universe — cache + durable tiers with self-healing repair (paper §Composing Universes)
-// limits:  no storage of its own (-> the layer Universes); naming/selecting layers is the caller's (-> ranke-db config)
+// job:     compose ordered Universe layers into one read-through / write-through Universe — cache +
+// durable tiers with self-healing repair (paper §Composing Universes)
+// limits:  no storage of its own (-> the layer Universes); naming/selecting layers is the caller's
+// (-> ranke-db config)
 package stack
 
 import (
@@ -535,14 +537,12 @@ func (s *stack) fillClaims(ctx context.Context, servedAt int, cs []ranke.Claim) 
 func (s *stack) fillContents(ctx context.Context, servedAt int, refs []ranke.ContentRef, datas [][]byte) {
 	for i := 0; i < servedAt; i++ {
 		l := s.layers[i]
-		var blobs []ranke.ContentBlob
 		for j, r := range refs {
+			// Each layer takes what its own cap allows — neo4j wants content for
+			// full-text search, up to its threshold.
 			if couldHoldContent(l.caps, uint64(len(datas[j]))) {
-				blobs = append(blobs, ranke.ContentBlob{Hash: r.Hash, Content: datas[j]})
+				s.heal.offerBlob(ctx, i, ranke.ContentBlob{Hash: r.Hash, Content: datas[j]})
 			}
-		}
-		if len(blobs) > 0 {
-			_ = l.u.PutContents(ctx, blobs)
 		}
 	}
 }

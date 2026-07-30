@@ -1,7 +1,10 @@
 // package: adapter/history/dev / testkit
 // type:    adapter
-// job:     an in-memory History for tests and development — the head-id timeline k₀…kₙ held in a slice, stamped from an injected deterministic Clock
-// limits:  not durable and not concurrent (single-threaded, no locks); stores ids only, like adapter/history/mem but with a controllable clock so a generated archive's history is reproducible
+// job:     an in-memory History for tests and development — the head-id timeline k₀…kₙ held in a
+// slice, stamped from an injected deterministic Clock
+// limits:  not durable and not concurrent (single-threaded, no locks); stores ids only, like
+// adapter/history/mem but with a controllable clock so a generated archive's history is
+// reproducible
 package dev
 
 import (

@@ -77,6 +77,21 @@ func (n *node) fieldMap() map[string]string {
 	return n.diffFields
 }
 
+// flattened is the node with its diff overlay resolved into its own fields and
+// content, so an encode emits the values a materialised read presents.
+func (n *node) flattened() *node {
+	if n.diffNode == nil {
+		return n
+	}
+	cs := n.contentSource()
+	out := *n
+	out.diffNode, out.diffFields = nil, nil
+	out.fields = n.fieldMap()
+	out.content, out.contentHash, out.contentSize = cs.content, cs.contentHash, cs.contentSize
+	out.encodingClass, out.encodingSub = cs.encodingClass, cs.encodingSub
+	return &out
+}
+
 // computeDiffFields builds diffFields: inherit diffNode → drop fields_diff_omit → overlay self.
 func (n *node) computeDiffFields() {
 	m := make(map[string]string, len(n.diffNode.fieldMap())+len(n.fields))

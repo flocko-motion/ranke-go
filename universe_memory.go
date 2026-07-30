@@ -1,7 +1,9 @@
 // package: ranke / universe_memory
 // type:    io
-// job:     NewMemoryUniverse — a naive in-process Universe storing canonical CBOR in maps, decoded on read: the Graph's nil-Universe fallback and the reference Universe for tests
-// limits:  ephemeral; correctness over speed (decodes per read, no caching); closure/copy via the Default* helpers; persistent/graph-native backends live under adapter/
+// job:     NewMemoryUniverse — a naive in-process Universe storing canonical CBOR in maps, decoded
+// on read: the Graph's nil-Universe fallback and the reference Universe for tests
+// limits:  ephemeral; correctness over speed (decodes per read, no caching); closure/copy via the
+// Default* helpers; persistent/graph-native backends live under adapter/
 package ranke
 
 import (
@@ -69,7 +71,8 @@ func (u *memoryUniverse) PutClaims(_ context.Context, cs []Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		b, err := c.Encode()
+		// As written: the stored record is what the id derives from.
+		b, err := c.EncodeCBOR(FormOriginal)
 		if err != nil {
 			return err
 		}

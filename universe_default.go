@@ -1,7 +1,9 @@
 // package: ranke / universe_default
 // type:    logic
-// job:     the reference Default* implementations a Universe delegates to — diff materialisation, closure membership/lookup, and copy walkers — all in terms of the public Universe API
-// limits:  called by Universe implementations (byte-store adapters delegate here; a graph-native backend may override with native queries); does no storage of its own
+// job:     the reference Default* implementations a Universe delegates to — diff materialisation,
+// closure membership/lookup, and copy walkers — all in terms of the public Universe API
+// limits:  called by Universe implementations (byte-store adapters delegate here; a graph-native
+// backend may override with native queries); does no storage of its own
 package ranke
 
 import (

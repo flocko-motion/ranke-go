@@ -1,7 +1,9 @@
 // package: neo4j / persistence-cache
 // type:    adapter
-// job:     native branch tagging — stamp each branch's closure with its _b_<branch> membership in ONE Cypher traversal per branch-revision, instead of the generic claim-by-claim walk
-// limits:  the spine itself (a claim per revision) is read normally; only the closure stamping is lowered (-> universe_default_tagger.go for the k/v fallback)
+// job:     native branch tagging — stamp each branch's closure with its _b_<branch> membership in
+// ONE Cypher traversal per branch-revision, instead of the generic claim-by-claim walk
+// limits:  the spine itself (a claim per revision) is read normally; only the closure stamping is
+// lowered (-> universe_default_tagger.go for the k/v fallback)
 package neo4j
 
 import (

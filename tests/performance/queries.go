@@ -1,7 +1,9 @@
 // package: tests/performance / integration
 // type:    test
-// job:     time the shared RQL corpus' timed subset on a backend — each query run repeatedly for a per-query latency distribution, with an optional per-query execution report
-// limits:  timing only; the queries come from tests/rql and whether a backend's ANSWERS are right is the conformance matrix's question (-> tests/matrix)
+// job:     time the shared RQL corpus' timed subset on a backend — each query run repeatedly for a
+// per-query latency distribution, with an optional per-query execution report
+// limits:  timing only; the queries come from tests/rql and whether a backend's ANSWERS are right
+// is the conformance matrix's question (-> tests/matrix)
 package performance
 
 import (

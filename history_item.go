@@ -1,6 +1,7 @@
 // package: ranke / history
 // type:    logic
-// job:     HistoryItem — one immutable entry in the head-id timeline (head id, height, append time) plus its constructor and getters
+// job:     HistoryItem — one immutable entry in the head-id timeline (head id, height, append time)
+// plus its constructor and getters
 // limits:  a value type; the timeline it belongs to is History (-> history)
 package ranke
 

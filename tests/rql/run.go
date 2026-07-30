@@ -1,7 +1,9 @@
 // package: tests/rql / integration
 // type:    tool
-// job:     execute a corpus query against any Universe and render its answer as a deterministic fingerprint — the comparable form the conformance matrix diffs across backends
-// limits:  no assertions and no backend knowledge; the corpus lives alongside (-> corpus.go) and the comparing is the matrix's job (-> tests/matrix)
+// job:     execute a corpus query against any Universe and render its answer as a deterministic
+// fingerprint — the comparable form the conformance matrix diffs across backends
+// limits:  no assertions and no backend knowledge; the corpus lives alongside (-> corpus.go) and
+// the comparing is the matrix's job (-> tests/matrix)
 package rql
 
 import (
@@ -14,15 +16,12 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-// Answer is one backend's response to one query: a fingerprint per result, in
-// the order the stream emitted them. Order is part of the contract, so the slice
-// is compared as a sequence, never as a set.
+// Answer is one backend's response to one query: a fingerprint per result, in the
+// order the stream emitted them, compared as a sequence since order is contract.
 type Answer []string
 
-// Run executes q through the Archive at archiveHead and returns its Answer. It
-// goes through the Archive, not Universe.Query, so the query meets the library's
-// own scope resolution — a hand-rolled Scope would test the helper's idea of
-// $universe/$archive/branch rather than the library's.
+// Run executes q through the Archive at archiveHead, so the query meets the
+// library's own scope resolution rather than a hand-rolled Scope.
 func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (Answer, error) {
 	arc, err := ranke.NewArchive(ctx, u, archiveHead)
 	if err != nil {
@@ -46,41 +45,51 @@ func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke
 	return out, nil
 }
 
-// Fingerprint renders one result deterministically — id, path, claim fields and
-// edges, content — so the shape axes are compared, not just which claims came
-// back. Two backends can return the same ids and disagree on their contents.
+// Fingerprint renders one result deterministically — id, kind, path, claim fields
+// and edges, encoded bytes — so every output axis is compared, not just the ids.
 func Fingerprint(r ranke.QueryResult) string {
 	var b strings.Builder
-	b.WriteString(idOf(r.Id))
+	// The id leads, so a caller can read it straight off the fingerprint.
+	b.WriteString(idOf(r.ClaimId))
+	b.WriteString(" kind=")
+	b.WriteString(string(r.Kind))
 
-	if len(r.Path) > 0 {
+	if len(r.PathId) > 0 {
 		b.WriteString(" path[")
-		for i, c := range r.Path {
+		for i, id := range r.PathId {
 			if i > 0 {
 				b.WriteByte(' ')
 			}
-			b.WriteString(idOf(c.ID()))
+			b.WriteString(idOf(id))
 		}
 		b.WriteByte(']')
 	}
 
-	// Claim is nil under DetailID — there is nothing to reconstruct — so the
-	// fingerprint is the id alone, which is exactly what that detail promises.
-	if r.Claim != nil {
+	// ClaimNative is nil under DetailID and the encoded kinds — the id or the bytes
+	// are the payload, which is exactly what those ask for.
+	if r.ClaimNative != nil {
 		b.WriteString(" claim{")
-		b.WriteString(claimFields(r.Claim))
-		b.WriteString(edgeList(r.Claim))
+		b.WriteString(claimFields(r.ClaimNative))
+		b.WriteString(edgeList(r.ClaimNative))
 		b.WriteByte('}')
 	}
 
-	// Content is present only when Output.Content asked for it; hash rather than
-	// inline the bytes so a mismatch stays readable, and carry the length so a
-	// cutoff at the cap is visible.
-	if r.Content != nil {
-		sum := sha256.Sum256(r.Content)
-		b.WriteString(fmt.Sprintf(" content{len=%d sha=%s}", len(r.Content), hex.EncodeToString(sum[:6])))
+	// Hash the serialised bytes rather than inline them, so a mismatch stays
+	// readable, and carry the length so a cutoff at the cap is visible.
+	b.WriteString(digest("encoded", r.ClaimEncoded))
+	for _, e := range r.PathEncoded {
+		b.WriteString(digest("hop", e))
 	}
 	return b.String()
+}
+
+// digest renders a byte payload as its length plus a short hash.
+func digest(label string, b []byte) string {
+	if b == nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf(" %s{len=%d sha=%s}", label, len(b), hex.EncodeToString(sum[:6]))
 }
 
 // claimFields renders the node's projected fields — the ones RQL can filter and

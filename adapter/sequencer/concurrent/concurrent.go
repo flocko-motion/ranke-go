@@ -1,7 +1,12 @@
 // package: adapter/sequencer/concurrent / adapter
 // type:    adapter
-// job:     the concurrent Sequencer — the paper's six steps with 2–5 run in parallel off the sequencing thread, and step 6 a serialised group commit folding a whole batch of contributions into ONE branch-table advance
-// limits:  single-process (the sequencing thread is a mutex, not a consensus protocol); holds its committed-id set in memory, so that set grows with the archive; does NOT propagate changes between branches (paper 2's cross-branch merge) and mints no limiting/expiry claims
+// job:     the concurrent Sequencer — the paper's six steps with 2–5 run in parallel off the
+// sequencing thread, and step 6 a serialised group commit folding a whole batch of
+// contributions into ONE branch-table advance
+// limits:  single-process (the sequencing thread is a mutex, not a consensus protocol); holds its
+// committed-id set in memory, so that set grows with the archive; does NOT propagate
+// changes between branches (paper 2's cross-branch merge) and mints no limiting/expiry
+// claims
 package concurrent
 
 import (

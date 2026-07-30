@@ -209,7 +209,7 @@ func TestSignedContributorForwarding(t *testing.T) {
 	require.Equal(t, "contribution/contributor", wrapped.Node().Type(), "node forwarded")
 	require.Empty(t, wrapped.Edges(), "edges forwarded (root has none)")
 
-	enc, err := wrapped.Encode()
+	enc, err := wrapped.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
 	require.NotEmpty(t, enc, "Encode forwarded")
 
@@ -523,9 +523,9 @@ func TestClaimDiffIsSmallerThanFull(t *testing.T) {
 	diff, err := NewClaim(TypeSource("note"), alice).WithDiff(pred.ID()).WithHeight(HeightOf(alice, pred)).Sign()
 	require.NoError(t, err)
 
-	fullBytes, err := full.Encode()
+	fullBytes, err := full.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
-	diffBytes, err := diff.Encode()
+	diffBytes, err := diff.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
 
 	require.Less(t, len(diffBytes), len(fullBytes),

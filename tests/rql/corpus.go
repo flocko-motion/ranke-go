@@ -1,7 +1,10 @@
 // package: tests/rql / integration
 // type:    tool
-// job:     the shared RQL corpus — a broad set covering each axis of the read language (traversal, filter, shape, order, bound) for the conformance matrix, plus the small subset the timing harness measures
-// limits:  queries and their names only; executing them and comparing answers live alongside (-> run.go), and the backend rows come from tests/backends
+// job:     the shared RQL corpus — a broad set covering each axis of the read language (traversal,
+// filter, shape, order, bound) for the conformance matrix, plus the small subset the
+// timing harness measures
+// limits:  queries and their names only; executing them and comparing answers live alongside
+// (-> run.go), and the backend rows come from tests/backends
 package rql
 
 import (
@@ -231,17 +234,6 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"output/form-original", ranke.Query{
 			Select: scanFrom(m.DiffChainHead),
 			Output: ranke.Output{Form: ranke.FormOriginal}}},
-
-		// ── shape: inline content and its overflow handling ──────────────────
-		{"output/content-cutoff", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowCutoff}}}},
-		{"output/content-omit", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowOmit}}}},
-		{"output/content-reference", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowReference}}}},
 
 		// ── order and bound ─────────────────────────────────────────────────
 		{"order/height-desc-limit", ranke.Query{Select: sel(),

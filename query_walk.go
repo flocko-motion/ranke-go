@@ -1,7 +1,11 @@
 // package: ranke / query walk
 // type:    logic
-// job:     the reference RQL traversal — walk a Select's Path from its root (forward, and reverse via a built closure-inversion index), returning the reached set and each claim's canonical route
-// limits:  reachability only; filter/order/limit/shape live in query_default.go. Route ties break on the (created_at, id) total order so a path shape is byte-identical to a Cypher lowering
+// job:     the reference RQL traversal — walk a Select's Path from its root (forward, and reverse
+// via a built closure-inversion index), returning the reached set and each claim's
+// canonical route
+// limits:  reachability only; filter/order/limit/shape live in query_default.go. Route ties break
+// on the (created_at, id) total order so a path shape is byte-identical to a Cypher
+// lowering
 package ranke
 
 import (
