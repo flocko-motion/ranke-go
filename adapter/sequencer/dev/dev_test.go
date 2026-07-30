@@ -1,6 +1,7 @@
 package dev_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"testing"
@@ -115,4 +116,51 @@ func TestValidContributionAccepted(t *testing.T) {
 	require.NoError(t, err, "a valid contribution must be accepted")
 	require.False(t, headBefore.Equal(merged), "a merged contribution must advance the archive head")
 	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
+}
+
+// TestAddWireAdvancesNamedBranches drives a contribution the way a server does:
+// one wire stream, whose records name their own branches, merged in one advance.
+func TestAddWireAdvancesNamedBranches(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	note := func(body string) ranke.Claim {
+		c, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+			WithInlineContent([]byte(body)).
+			WithEncoding(ranke.EncodingPlain).
+			WithHeight(1).
+			WithCreatedAt(clk.Tick()).
+			Sign()
+		require.NoError(t, err)
+		return c
+	}
+	onAlpha, onBeta := note("for alpha"), note("for beta")
+
+	var buf bytes.Buffer
+	w := ranke.NewWireWriter(&buf)
+	require.NoError(t, w.WriteClaim("alpha", onAlpha))
+	require.NoError(t, w.WriteClaim("beta", onBeta))
+
+	c, err := seq.NewContribution(ctx)
+	require.NoError(t, err)
+	require.NoError(t, c.AddWire(ctx, bytes.NewReader(buf.Bytes())), "the stream carries its own branches")
+
+	v, err := c.CompleteAndVerify(ctx)
+	require.NoError(t, err)
+	m, err := v.Persist(ctx)
+	require.NoError(t, err)
+	require.Len(t, m.Heads(), 2, "one head per branch the stream named")
+	_, err = seq.Merge(ctx, m)
+	require.NoError(t, err)
+
+	// Both branches exist at the merged head, each reaching its own claim.
+	arc, err := seq.GetArchive(ctx)
+	require.NoError(t, err)
+	for branch, want := range map[string]ranke.Claim{"alpha": onAlpha, "beta": onBeta} {
+		br, err := arc.GetBranch(ctx, branch)
+		require.NoErrorf(t, err, "branch %q exists", branch)
+		ok, err := br.HasClaim(ctx, want.ID())
+		require.NoError(t, err)
+		require.Truef(t, ok, "branch %q holds the claim the stream named for it", branch)
+	}
 }
