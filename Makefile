@@ -31,6 +31,11 @@ COVERDRIVERS := ./tests/... ./adapter/storage/mem/... ./adapter/storage/fs/... .
 
 BINDIR ?= $(HOME)/.local/bin
 
+# Every test target goes through GOTEST, so one override reaches all of them:
+# `make test GOTEST="go test -count=1"` to defeat the cache, for instance.
+# Packages run in parallel — internal/exclusive locks the shared services.
+GOTEST ?= go test
+
 # Foundational papers live in the ranke-graph repo. `make docs` pulls a
 # fresh copy into docs/papers/ for local reference; the directory is
 # gitignored and never committed — always fetched, never vendored.
@@ -65,7 +70,7 @@ uninstall:
 # content, id, signing, graph, guarantees. No infrastructure, no fs, no
 # adapters. Fast; the correctness of the datatype itself lives here.
 test/core:
-	go test .
+	$(GOTEST) .
 
 # test/core/coverage — the datatype layer with statement coverage. Prints a
 # per-file breakdown (from the raw profile, statement-weighted) and the core
@@ -74,7 +79,7 @@ test/core:
 # or open the annotated source with:
 #   go tool cover -html=coverage-core.out
 test/core/coverage:
-	@go test . -covermode=atomic -coverprofile=coverage-core.out
+	@$(GOTEST) . -covermode=atomic -coverprofile=coverage-core.out
 	@echo ""
 	@echo "coverage by file:"
 	@awk 'NR>1 { split($$1,a,":"); f=a[1]; sub(/.*\//,"",f); t[f]+=$$2; if ($$3>0) c[f]+=$$2 } \
@@ -88,7 +93,7 @@ test/core/coverage:
 # recreates each run; the path is echoed so it's visible without `-v`.
 RANKE_FS_DIR ?= /tmp/ranke-go-test
 test/integration:
-	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./tests/... && \
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) ./tests/... && \
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
 	echo "  $(RANKE_FS_DIR)"
@@ -102,7 +107,7 @@ test/integration:
 #   services/redis.sh native up    # adds the redis row
 # Verbose so the per-row, per-query sub-tests are visible.
 test/matrix:
-	go test ./tests/matrix/ -v -count=1
+	$(GOTEST) ./tests/matrix/ -v -count=1
 
 # test/performance/N — the backend matrix: generate the same deterministic
 # size-N archive into each storage backend and time build + verify, one row
@@ -110,7 +115,7 @@ test/matrix:
 #   make test/performance/2000   # a 10k+-claim archive per backend
 # Verbose so the per-backend timing rows print; generous timeout for large N.
 test/performance/%:
-	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
+	@RANKE_PERF_SIZE=$* $(GOTEST) ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
 
 # test/vectors — the spec's own conformance artifacts, fetched from the latest
 # ranke-graph release. The gate that catches an encoder change: verification hashes
@@ -128,13 +133,13 @@ test/vectors:
 test: test/core test/vectors test/integration test/matrix
 
 test-verbose:
-	go test -v ./tests/...
+	$(GOTEST) -v ./tests/...
 
 # Merged library coverage from `go test ./...`. -coverpkg attributes
 # coverage to the /tests package, which imports the library. (Packages
 # without _test.go files, like conformance, are skipped by go test.)
 coverage:
-	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test -coverpkg=$(COVERPKG) \
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) -coverpkg=$(COVERPKG) \
 		-covermode=atomic -coverprofile=coverage.out $(COVERDRIVERS)
 	@go tool cover -func=coverage.out | tail -1
 
@@ -151,7 +156,7 @@ coverage-gaps: coverage
 # Narrative output: scenarios print what they are doing at every step.
 # Useful for understanding what the integration suite covers.
 test-debug:
-	go test -v -run "TestIntegration|TestProvenance" ./...
+	$(GOTEST) -v -run "TestIntegration|TestProvenance" ./...
 
 # Static checks.
 vet:
@@ -296,4 +301,4 @@ check:
 	go build ./...
 	go vet ./...
 	brokkr lint
-	@RANKE_FS_DIR=$(RANKE_FS_DIR) go test ./...
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) ./...
