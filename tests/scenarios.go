@@ -21,11 +21,8 @@ func hasClaim(t *testing.T, f *fixture, arc ranke.Archive, id ranke.Id) bool {
 	return ok
 }
 
-// --- Scenario: AliceEmail ---
-//
-// Paper §1 — "A file exists, attributed to Alice by its headers, that appears
-// to be a copy of an email to Bob in which Alice claims to like apples." A
-// single source/email claim is written and must survive a re-read.
+// runAliceEmail is paper §1's opening case: a file attributed to Alice, appearing to
+// be an email in which she likes apples. One source/email claim must survive a re-read.
 func runAliceEmail(t *testing.T, f *fixture) {
 	t.Logf("Scenario: a single email is ingested as a source claim.")
 
@@ -51,11 +48,8 @@ func runAliceEmail(t *testing.T, f *fixture) {
 	require.True(t, f.mainHead(t, arc2).Equal(mh), "head id stable across re-read")
 }
 
-// --- Scenario: MultiHeadAutoConsolidates ---
-//
-// Two unrelated claims added in one batch leave the graph multi-headed; the
-// Sequencer wraps every open head in a single contribution/head claim (§4.6),
-// so the branch head is that consolidation and both originals are reachable.
+// runMultiHeadAutoConsolidates: two unrelated claims in one batch leave the graph
+// multi-headed, so the Sequencer wraps every open head in one head claim (§4.6).
 func runMultiHeadAutoConsolidates(t *testing.T, f *fixture) {
 	t.Logf("Scenario: a multi-headed batch auto-consolidates on commit.")
 
@@ -92,11 +86,8 @@ func runMultiHeadAutoConsolidates(t *testing.T, f *fixture) {
 	t.Logf("    ✓ contribution/head wraps both original heads")
 }
 
-// --- Scenario: SuccessiveAddsAccumulate ---
-//
-// Two successive AddClaims commits must both survive: the Sequencer folds the
-// prior main head into the new one, so the branch closure accumulates rather
-// than dropping the earlier write (Q1 — no lost writes).
+// runSuccessiveAddsAccumulate: the Sequencer folds the prior main head into the new
+// one, so two successive commits both survive (Q1, no lost writes).
 func runSuccessiveAddsAccumulate(t *testing.T, f *fixture) {
 	t.Logf("Scenario: successive commits accumulate on the branch.")
 

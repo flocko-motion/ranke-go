@@ -3,14 +3,9 @@
 // job:     stores claims and content blobs as rows in a single SQLite table
 // limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
-// Package sqlite is a SQLite persistence adapter for a ranke Universe. It
-// stores claims and content blobs as rows in one flat table, addressed by
-// their id strings — the database analogue of the fs adapter's flat
-// directory. It is a thin storage.BlobStore; the claim/content/copy
-// machinery comes from storage.NewBlobUniverse.
-//
-// Backed by the pure-Go modernc.org/sqlite driver, so it needs no cgo and
-// no external infrastructure.
+// Package sqlite keys claims and blobs by their id strings in one flat table, the
+// database analogue of the fs adapter's directory. The pure-Go modernc.org/sqlite
+// driver backs it, so it needs neither cgo nor external infrastructure.
 package sqlite
 
 import (
@@ -26,18 +21,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// New opens (creating if needed) a SQLite-backed Universe at dsn. dsn is a
-// modernc.org/sqlite data source name — typically a file path or
-// "file:..." URI. For an in-memory store use a temp file or a shared-cache
-// URI ("file:mem?mode=memory&cache=shared"); a bare ":memory:" gives each
-// pooled connection its own database and will not behave as one store.
 var (
 	errEmptyDSN = errors.New("adapter/sqlite.New: empty dsn")
 	errNew      = errors.New("adapter/sqlite.New")
 	errIO       = errors.New("adapter/sqlite: io")
 )
 
-// New opens a sqlite-backed Universe at dsn, creating its schema if absent.
+// New opens a sqlite-backed Universe at dsn, creating its schema if absent. In
+// memory, use "file:mem?mode=memory&cache=shared" — bare ":memory:" gives each
+// pooled connection a database of its own.
 func New(dsn string) (ranke.Universe, error) {
 	if dsn == "" {
 		return nil, errEmptyDSN
@@ -75,10 +67,8 @@ type store struct {
 	caps ranke.Capabilities
 }
 
-// probeWritable tests write access without mutating: BEGIN IMMEDIATE takes a
-// write lock (failing at once on a read-only database), then ROLLBACK releases
-// it. It uses one dedicated connection so the BEGIN/ROLLBACK pair is not split
-// across the pool.
+// probeWritable takes a write lock with BEGIN IMMEDIATE and rolls it back, on one
+// dedicated connection so the pair is not split across the pool.
 func probeWritable(ctx context.Context, db *sql.DB) bool {
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -111,9 +101,8 @@ func (s *store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Put stores data under key, overwriting any existing row (INSERT OR REPLACE).
-// Content-addressed, so a normal re-put writes identical bytes; the overwrite
-// is what repairs a corrupted row in place. Callers dedup via Has.
+// Put stores data under key by INSERT OR REPLACE. Keys are content-addressed, so the
+// overwrite repairs a corrupted row in place; callers dedup via Has.
 func (s *store) Put(ctx context.Context, key string, data []byte) error {
 	if _, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO blobs (id, data) VALUES (?, ?)`, key, data); err != nil {
 		return fmt.Errorf("%w: write %s: %w", errIO, key, err)
@@ -135,9 +124,8 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 
 func (s *store) Close() error { return s.db.Close() }
 
-// Capabilities returns what New probed: persistence from the DSN (file vs
-// in-memory) and overwrite/delete from a write-lock probe (a read-only database
-// reports neither).
+// Capabilities returns what New probed: persistence from the DSN, overwrite and
+// delete from the write-lock probe.
 func (s *store) Capabilities() ranke.Capabilities {
 	return s.caps
 }
