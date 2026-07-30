@@ -3,17 +3,10 @@
 // job:     stores claims and content blobs as objects in an S3 bucket
 // limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
-// Package s3 is an S3 persistence adapter for a ranke Universe. It stores
-// claims and content blobs as objects in a single bucket, keyed by their
-// id strings — the object-store analogue of the fs adapter's flat
-// directory. It is a thin storage.BlobStore — the claim/content/copy
-// machinery comes from storage.NewBlobUniverse — plus an Open method
-// (storage.Streamer) so large content streams from the response body
-// without buffering.
-//
-// New takes an already-configured *s3.Client so the adapter stays free of
-// credential/endpoint concerns: production wires a real client, tests wire
-// one pointed at an in-process fake (gofakes3).
+// Package s3 keys claims and blobs by their id strings in one bucket, the
+// object-store analogue of the fs adapter's flat directory. Open (storage.Streamer)
+// streams large content off the response body. New takes a configured client, so
+// tests point one at an in-process fake (gofakes3).
 package s3
 
 import (

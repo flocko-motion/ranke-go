@@ -8,7 +8,6 @@ package ranke
 
 import (
 	"context"
-	"io"
 	"time"
 )
 
@@ -21,18 +20,17 @@ type Contribution interface {
 	// claims join. Several may be named, and an empty one is an error.
 	AddGraph(branch string, g Graph) error
 	AddClaims(branch string, claims []Claim) error
-	// AddWire fills from a WireMediaType stream, whose records name their own
-	// branches — so it takes none. DrainWire is the shared implementation.
-	AddWire(ctx context.Context, r io.Reader) error
+	// AddWire fills from a WireMediaType stream, which declares its own branches.
+	// It takes the reader, so a caller that checked Branches hands on the same one.
+	AddWire(ctx context.Context, wr *WireReader) error
 	// CompleteAndVerify closes the contribution over its base and verifies it
 	// (steps 3–4), yielding a sealed VerifiedContribution.
 	CompleteAndVerify(ctx context.Context) (VerifiedContribution, error)
 }
 
-// DrainWire fills c from a contribution stream: content lands in u under its hash,
-// each claim stages under the branch its record names, applied as they arrive.
-func DrainWire(ctx context.Context, c Contribution, u Universe, r io.Reader) error {
-	wr := NewWireReader(r)
+// DrainWire fills c as records arrive: content lands in u under its hash, each
+// claim stages under its branch, and an undeclared branch stops the fill.
+func DrainWire(ctx context.Context, c Contribution, u Universe, wr *WireReader) error {
 	for wr.Next() {
 		switch rec := wr.Record(); rec.Kind {
 		case WireContent:
@@ -58,11 +56,10 @@ type VerifiedContribution interface {
 	Persist(ctx context.Context) (MergableContribution, error)
 }
 
-// MergableContribution is a persisted contribution ready for the
-// Sequencer to merge (step 6): its claims are durably in 𝒰 and its head
-// claim(s) are known.
+// MergableContribution is ready for step 6: its claims are durably in 𝒰 and its
+// head claim(s) are known.
 type MergableContribution interface {
-	// Heads are the contribution's open head claim ids per branch, which the
-	// Sequencer references under those names from the new branch-table claim.
+	// Heads are the open head ids per branch, which the new branch-table claim
+	// references under those names.
 	Heads() map[string][]Id
 }

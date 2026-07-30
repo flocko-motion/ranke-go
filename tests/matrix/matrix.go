@@ -7,9 +7,8 @@
 // right, never how a backend produced it — routing, lowering, and cache tiers are the
 // backend's business
 //
-// Two backends implementing the read language must answer a query identically;
-// a divergence is a conformance bug in at least one. Run it over your own rows
-// with matrix.Run(t, Config{Rows: ...}).
+// Two backends must answer a query identically; a divergence is a conformance bug
+// in at least one. Run it over your own rows with matrix.Run(t, Config{Rows: ...}).
 package matrix
 
 import (
@@ -31,9 +30,8 @@ const defaultSize = 5
 
 // Config parameterises an agreement run.
 type Config struct {
-	// Reference is the engine every row is compared against. The zero value is
-	// backends.Reference() — the in-memory store, which answers through the
-	// library's reference executor.
+	// Reference is the engine every row is compared against; the zero value is
+	// backends.Reference(), the in-memory store on the reference executor.
 	Reference *backends.Backend
 	// Rows are the backends under test; nil means backends.All(). A row whose
 	// name matches the reference is skipped (nothing is compared to itself).
@@ -107,9 +105,8 @@ func Run(t *testing.T, cfg Config) {
 			defer cleanup()
 
 			m, head := build(t, ctx, u, spec)
-			// Content addressing makes generation reproducible: the same spec
-			// must yield the same ids in every backend, or comparing answers to
-			// the same query would be meaningless.
+			// Content addressing makes generation reproducible: one spec yields the
+			// same ids everywhere, which is what makes answers comparable.
 			require.Equalf(t, refHead.String(), head.String(),
 				"branch head differs from the %s reference — the archives are not the same graph", ref.Name)
 
@@ -149,8 +146,7 @@ func corpus(m *generator.Manifest, root ranke.Id, only string) []rql.NamedQuery 
 }
 
 // build writes the archive into an open backend, returning its manifest and the
-// "main" branch head. It prepares nothing: a backend needing an external call to
-// become correct is itself the defect.
+// "main" head. A backend needing a preparation call to become correct is the defect.
 func build(t *testing.T, ctx context.Context, u ranke.Universe, spec generator.Spec) (*generator.Manifest, ranke.Id) {
 	t.Helper()
 	m, err := generator.Generate(ctx, u, spec)

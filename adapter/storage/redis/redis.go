@@ -4,22 +4,10 @@
 // limits:  a storage.BlobStore behind storage.NewBlobUniverse (-> adapter); not authoritative — a
 // cache under a query layer and above a durable store (paper §Composing Universes)
 //
-// Package redis is a redis persistence adapter for a ranke Universe: a fast,
-// shared, in-memory byte cache. It stores claims (by id) and content (by hash)
-// as opaque redis string values — a thin storage.BlobStore, with the
-// claim/content/copy machinery supplied by storage.NewBlobUniverse.
-//
-// It is a CACHE tier, not authoritative. Keys are content-addressed and
-// immutable, so cached values never go stale and no invalidation is ever
-// needed; capacity is managed by redis itself (maxmemory + LRU/LFU eviction),
-// and an optional per-key TTL bounds staleness in time. Stack it under a
-// graph/query layer (-> adapter/storage/neo4j) and above a durable store
-// (-> adapter/storage/s3, adapter/storage/fs).
-//
-// New takes an already-configured *redis.Client so the adapter stays free of
-// connection concerns: production wires a real client, tests point one at a
-// local or pod redis (services/redis.sh). The adapter does not own the client;
-// Close is a no-op.
+// Package redis stores claims (by id) and content (by hash) as opaque string values.
+// Keys are content-addressed and immutable, so a cached value stays correct and
+// capacity is redis's own concern (maxmemory + eviction), with an optional per-key
+// TTL. New takes a configured client it does not own, so Close is a no-op.
 package redis
 
 import (

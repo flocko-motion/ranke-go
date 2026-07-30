@@ -4,25 +4,9 @@
 // dev Sequencer over a pluggable storage backend
 // limits:  no scenario bodies here; those live alongside (-> tests/scenarios.go)
 //
-// Package tests is the public conformance suite for the Ranke-Graph
-// library. A storage backend (a Universe + a History) proves it conforms
-// to the Ranke-Graph ADT by running IntegrationTest from a *_test.go:
-//
-//	import "github.com/flocko-motion/ranke-go/tests"
-//
-//	func TestMyBackend(t *testing.T) {
-//	    ctx := context.Background()
-//	    tests.IntegrationTest(t, ctx, func(
-//	        t *testing.T, clk *generator.Clock,
-//	    ) (ranke.Universe, ranke.History, error) {
-//	        return mybackend.NewUniverse(t.TempDir()), mybackend.NewHistory(clk), nil
-//	    })
-//	}
-//
-// The suite stands the reference dev Sequencer (adapter/sequencer/dev) over
-// the backend and drives the paper's write path — AddClaims advances a
-// single "main" branch — then reads the archive back through immutable
-// snapshots and validates each closure.
+// Package tests is the public conformance suite: a backend (Universe + History)
+// proves it conforms to the Ranke-Graph ADT by running IntegrationTest, which stands
+// the dev Sequencer over it and validates every closure it reads back.
 package tests
 
 import (
@@ -60,10 +44,7 @@ func IntegrationTest(t *testing.T, ctx context.Context, backend Backend) {
 	})
 }
 
-// --- fixture ---
-
-// fixture is one scenario's write path: the reference dev Sequencer over the backend's
-// Universe + History, sharing the deterministic clock for reproducible created_at.
+// fixture is one scenario's write path, on the clock that makes created_at reproduce.
 type fixture struct {
 	ctx   context.Context
 	u     ranke.Universe
@@ -129,10 +110,7 @@ func (f *fixture) validate(t *testing.T, head ranke.Id) {
 	require.Empty(t, run.Failures(), "closure has no verification failures")
 }
 
-// --- shared claim builders ---
-
-// keyedContributor builds a deterministic Ed25519-signed root contributor whose
-// multikey-encoded pubkey is its content (§5.7); seedTag fixes the identity.
+// keyedContributor builds a root contributor from seedTag, its pubkey its content (§5.7).
 func keyedContributor(t *testing.T, ctx context.Context, clock *generator.Clock, seedTag string) ranke.Contributor {
 	t.Helper()
 	seed := sha256.Sum256([]byte(seedTag))

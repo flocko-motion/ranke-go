@@ -3,18 +3,8 @@
 // job:     read-only CLI to inspect filesystem-backed Ranke-Graph archives
 // limits:  no mutation commands; building claims lives in tests + downstream apps (-> tests)
 //
-// ranke is a small CLI for inspecting filesystem-backed Ranke-Graph
-// archives. It opens an archive at <dir> and runs read-only queries
-// against it. No mutation commands yet — building claims live in
-// the test suite and downstream apps.
-//
-// Subcommands:
-//
-//	ranke info <dir>            — high-level summary (B_h, branches)
-//	ranke branches <dir>        — list every branch and its head id
-//	ranke show <file>           — heuristically decode any archive file (claim or content)
-//	ranke show <dir> <id>       — resolve a claim by id via the archive
-//	ranke validate <dir>        — verify every branch end-to-end (§5.10)
+// ranke opens a filesystem-backed archive at <dir> and runs read-only queries
+// against it. Run it without arguments for the subcommands.
 package main
 
 import (
@@ -82,10 +72,8 @@ func exit(err error) {
 	}
 }
 
-// openArchive opens the bundle at dir: the fs Universe under universe/ plus
-// the head-id timeline in branches/B_h, resolved to an Archive at the latest
-// head. It returns the Universe too, since closure walks (validate) open a
-// graph over it directly.
+// openArchive opens the bundle at dir — fs Universe plus the B_h timeline — at its
+// latest head. The Universe comes back too, for closure walks over it directly.
 func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive, error) {
 	u, err := fs.New(filepath.Join(dir, "universe"))
 	if err != nil {
@@ -152,10 +140,8 @@ func cmdBranches(ctx context.Context, args []string) error {
 	return nil
 }
 
-// --- show ---
-//
-//	ranke show <file>        heuristic: claim if CBOR-decodes, else content
-//	ranke show <dir> <id>    open the archive, resolve id with full wiring
+// cmdShow takes a file — a claim if it CBOR-decodes, else content — or a dir and an
+// id to resolve through the archive.
 func cmdShow(ctx context.Context, args []string) error {
 	switch len(args) {
 	case 1:
@@ -252,11 +238,8 @@ func cmdValidate(ctx context.Context, args []string) error {
 	return nil
 }
 
-// printClosure walks the closure from its open heads breadth-first, printing
-// each claim once (✓, or ✗ with its error when it is in failByID) indented by
-// depth, and returns the claim count. The per-claim visitor Graph.Validate
-// once offered is gone; a closure walk plus Verify's failure set rebuilds the
-// same tree.
+// printClosure walks from the open heads breadth-first, printing each claim once
+// (✓, or ✗ with its error from failByID) indented by depth, and counts them.
 func printClosure(ctx context.Context, g ranke.Graph, failByID map[string]error) int {
 	type node struct {
 		id    ranke.Id

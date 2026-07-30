@@ -4,20 +4,10 @@
 // limits:  no medium-specific scenarios; each adapter adds those alongside
 // (-> adapter/storage/fs, adapter/storage/mem)
 //
-// Package adaptertest is a black-box conformance suite for ranke.Universe
-// implementations. It exercises an adapter purely through the public
-// ranke API — claims and content go in and come back out, copies merge
-// closures, lookups of absent ids report absence — without any knowledge
-// of how or where the adapter stores its bytes.
-//
-// Each adapter wraps it in a one-line test:
-//
-//	func TestConformance(t *testing.T) {
-//	    adaptertest.Run(t, func(t *testing.T) ranke.Universe { return mem.New() })
-//	}
-//
-// and adds its own medium-specific scenarios (e.g. fs simulating a
-// corrupted file on disk) alongside.
+// Package adaptertest exercises a ranke.Universe purely through the public API:
+// claims and content go in and come back out, copies merge closures, absent ids
+// report absence. An adapter calls Run with its constructor, then adds its own
+// medium-specific scenarios (fs corrupting a file on disk, say) alongside.
 package adaptertest
 
 import (

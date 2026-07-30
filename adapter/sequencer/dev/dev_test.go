@@ -118,9 +118,9 @@ func TestValidContributionAccepted(t *testing.T) {
 	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
 }
 
-// TestAddWireAdvancesNamedBranches drives a contribution the way a server does:
-// one wire stream, whose records name their own branches, merged in one advance.
-func TestAddWireAdvancesNamedBranches(t *testing.T) {
+// TestAddWireAdvancesDeclaredBranches drives a contribution the way a server does:
+// read the declaration, check it, then hand the same reader on for one advance.
+func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
 	ctx := context.Background()
 	seq, op, clk := newSequencer(t, ctx)
 
@@ -137,13 +137,20 @@ func TestAddWireAdvancesNamedBranches(t *testing.T) {
 	onAlpha, onBeta := note("for alpha"), note("for beta")
 
 	var buf bytes.Buffer
-	w := ranke.NewWireWriter(&buf)
+	w := ranke.NewWireWriter(&buf, "alpha", "beta")
 	require.NoError(t, w.WriteClaim("alpha", onAlpha))
 	require.NoError(t, w.WriteClaim("beta", onBeta))
 
+	// What a server does before accepting: learn the branches from the header alone,
+	// check them against the caller's grants, then drain with the same reader.
+	wr := ranke.NewWireReader(bytes.NewReader(buf.Bytes()))
+	branches, err := wr.Branches()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"alpha", "beta"}, branches)
+
 	c, err := seq.NewContribution(ctx)
 	require.NoError(t, err)
-	require.NoError(t, c.AddWire(ctx, bytes.NewReader(buf.Bytes())), "the stream carries its own branches")
+	require.NoError(t, c.AddWire(ctx, wr), "the reader goes on from where the check left it")
 
 	v, err := c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
@@ -163,4 +170,26 @@ func TestAddWireAdvancesNamedBranches(t *testing.T) {
 		require.NoError(t, err)
 		require.Truef(t, ok, "branch %q holds the claim the stream named for it", branch)
 	}
+}
+
+// TestAddWireAbortsOnViolation: a stream that breaks its own rules stops the fill
+// and stages nothing, so a server cannot half-apply a bad contribution.
+func TestAddWireAbortsOnViolation(t *testing.T) {
+	ctx := context.Background()
+	seq, _, _ := newSequencer(t, ctx)
+
+	// The blob does not hash to the key it is filed under.
+	hash, err := ranke.HashContent([]byte("the real bytes"))
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	w := ranke.NewWireWriter(&buf, "alpha")
+	require.NoError(t, w.WriteContent(ranke.ContentBlob{Hash: hash, Content: []byte("tampered")}))
+
+	c, err := seq.NewContribution(ctx)
+	require.NoError(t, err)
+	require.ErrorIs(t, c.AddWire(ctx, ranke.NewWireReader(&buf)), ranke.ErrIntegrity,
+		"AddWire surfaces the stream's own violation")
+
+	_, err = c.CompleteAndVerify(ctx)
+	require.Error(t, err, "the aborted fill staged nothing")
 }
