@@ -5,6 +5,7 @@
 package ranke
 
 import (
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -178,9 +179,13 @@ func buildEncEdge(e *edge) (encEdge, error) {
 	return ee, nil
 }
 
+// iso8601Nano is the created_at wire format: fixed-width nanoseconds in UTC, so
+// the canonical serialization is byte-stable.
+const iso8601Nano = "2006-01-02T15:04:05.000000000Z"
+
 // parseRFC3339Nano parses the timestamp format we emit for CreatedAt.
 func parseRFC3339Nano(s string) (time.Time, error) {
-	return time.Parse("2006-01-02T15:04:05.000000000Z", s)
+	return time.Parse(iso8601Nano, s)
 }
 
 // idBytes extracts the raw self-describing payload bytes from an Id.
@@ -201,8 +206,13 @@ type encClaimFile struct {
 	Node encNode `cbor:"1,keyasint"`
 }
 
-// Encode serializes the claim to the canonical CBOR bytes its id derives from.
-func (c *claim) Encode() ([]byte, error) {
+// EncodeCBOR serializes the claim to its canonical CBOR record — the delta a diff
+// claim stores, so the bytes stay the ones its id derives from and persistence can
+// round-trip them. A decoded claim serves the record the decode kept.
+func (c *claim) EncodeCBOR() ([]byte, error) {
+	if c.raw != nil {
+		return c.raw, nil
+	}
 	en, err := buildEncNode(c.node, c.edges)
 	if err != nil {
 		return nil, err
@@ -213,6 +223,43 @@ func (c *claim) Encode() ([]byte, error) {
 		return nil, WrapDetail(errEncodeClaim, c.node.id.String(), err)
 	}
 	return data, nil
+}
+
+// EncodeJSON renders the claim's ADT fields, named as the taxonomy names them, so
+// JSON and CBOR carry the same information. Content is base64, as JSON renders bytes.
+func (c *claim) EncodeJSON() ([]byte, error) {
+	n := c.node
+	m := map[string]any{
+		"id":         c.ID().String(),
+		"type":       n.Type(),
+		"created_at": n.CreatedAt().UTC().Format(iso8601Nano),
+		"height":     n.Height(),
+	}
+	if enc := n.Encoding(); enc != "" {
+		m["encoding"] = enc
+	}
+	if n.ContentKind() != ContentNone {
+		m[FieldContentSize] = n.GetContentSize()
+	}
+	if h := n.GetContentHash(); h != nil {
+		m[FieldContentHash] = h.String()
+	}
+	if b, err := n.GetInlineContent(); err == nil && len(b) > 0 {
+		m[FieldContent] = b
+	}
+	for _, k := range n.Fields() {
+		if v, err := n.GetField(k); err == nil {
+			m[k] = v
+		}
+	}
+	if edges := c.Edges(); len(edges) > 0 {
+		list := make([]map[string]any, 0, len(edges))
+		for _, e := range edges {
+			list = append(list, map[string]any{"type": e.Type(), "reference": e.Reference().String()})
+		}
+		m["edges"] = list
+	}
+	return json.Marshal(m)
 }
 
 // DecodeClaim decodes a claim's canonical CBOR into a Claim with its id set.
@@ -248,7 +295,9 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 		edges[i] = e
 		n.edges[i] = eid
 	}
-	return &claim{node: n, edges: edges}, nil
+	// Keep the stored record: it is the canonical CBOR, so a read asking for that
+	// encoding is served from what the decode already held.
+	return &claim{node: n, edges: edges, raw: b}, nil
 }
 
 // nodePreimage extracts S(node) — field 1 — from a claim's stored CBOR as raw

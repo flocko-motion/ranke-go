@@ -35,8 +35,8 @@ func TestToyDiffByQuery(t *testing.T) {
 		require.NoError(t, err)
 		var got ranke.Claim
 		for rs.Next() {
-			if r := rs.Result(); r.Id.String() == delta.String() {
-				got = r.Claim
+			if r := rs.Result(); r.ClaimId.String() == delta.String() {
+				got = r.ClaimNative
 			}
 		}
 		require.NoError(t, rs.Err())

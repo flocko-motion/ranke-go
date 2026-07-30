@@ -39,9 +39,12 @@ type Claim interface {
 	// external streamed from u, as is a dropped inline body.
 	GetContent(ctx context.Context, u Universe) (io.Reader, error)
 
-	// Encode returns the canonical CBOR storage record — node, edge bodies,
+	// EncodeJSON renders the claim's ADT fields as JSON, content base64 — the same
+	// information Encode carries, as text.
+	EncodeJSON() ([]byte, error)
+	// EncodeCBOR returns the canonical CBOR storage record — node, edge bodies,
 	// inline content — a superset of the id preimage S(node).
-	Encode() ([]byte, error)
+	EncodeCBOR() ([]byte, error)
 	// verifyID checks the claim's id is a valid signature by pubkey over
 	// H(S(node)), preimaged from the caller's stored CBOR, never a re-encoding.
 	verifyID(pubkey, raw []byte) error
@@ -54,6 +57,10 @@ type claim struct {
 	node        *node
 	edges       []*edge // same order as node.edges
 	contributor Contributor
+
+	// raw is the stored record this claim was decoded from — the bytes its id was
+	// signed over. Nil for a claim built in memory or from a lossy projection.
+	raw []byte
 
 	// Diff materialisation, set by the loader: the materialised predecessor and
 	// merged edge view. The delta stays intact, so ID()/Encode() hold.

@@ -9,8 +9,8 @@ import (
 
 // Correctness tests for the RQL reference executor (DefaultQuery), covering the
 // gaps beyond query_test.go: boolean Where trees, every comparison operator,
-// path node/edge exclusion, overflow policies, and ordering. Assertions key on
-// deterministic properties only (set membership, height, type, content) — never
+// path node/edge exclusion, and ordering. Assertions key on
+// deterministic properties only (set membership, height, type) — never
 // on ids or created_at, since the fixture's keys are random and its timestamps
 // are wall-clock.
 
@@ -162,38 +162,6 @@ func TestQueryPathEdgeExclude(t *testing.T) {
 	require.Equal(t, idsOf(a["hub"], a["s1"], a["s2"], a["eAlice"], a["eApples"]), got)
 }
 
-// TestQueryOverflowOmit: content past the cap is dropped entirely.
-func TestQueryOverflowOmit(t *testing.T) {
-	u, a := queryOpsFixture(t)
-	q := Query{
-		Select: Select{Branch: BranchUniverse, Head: a["s1"].ID()},
-		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
-		Output: Output{Content: &Content{Max: 3, Overflow: OverflowOmit}},
-	}
-	got := drain(t, mustQuery(t, u, q))
-	require.Len(t, got, 1)
-	require.Nil(t, got[0].Content, "over-cap content omitted")
-}
-
-// TestQueryOverflowReference: content past the cap is replaced by its hash.
-func TestQueryOverflowReference(t *testing.T) {
-	u, a := queryOpsFixture(t)
-	q := Query{
-		Select: Select{Branch: BranchUniverse, Head: a["s1"].ID()},
-		Where:  &Where{Field: "type", Test: &Comparison{Glob: "source/*"}},
-		Output: Output{Content: &Content{Max: 3, Overflow: OverflowReference}},
-	}
-	got := drain(t, mustQuery(t, u, q))
-	require.Len(t, got, 1)
-	// s1's content is inline, so it has no stored content_hash; the reference is
-	// H(content) computed on demand.
-	inline, err := a["s1"].Node().GetInlineContent()
-	require.NoError(t, err)
-	wantHash, err := HashContent(inline)
-	require.NoError(t, err)
-	require.Equal(t, wantHash.String(), string(got[0].Content), "over-cap inline content replaced by its H(content) reference")
-}
-
 // TestQueryOrderHeightAscending: ascending order by height puts the height-0
 // root first and the height-3 hub last, with heights non-decreasing throughout.
 func TestQueryOrderHeightAscending(t *testing.T) {
@@ -201,10 +169,10 @@ func TestQueryOrderHeightAscending(t *testing.T) {
 	q := Query{Select: Select{Branch: BranchUniverse, Head: a["hub"].ID()}, Order: []OrderKey{{Field: "height"}}}
 	got := drain(t, mustQuery(t, u, q))
 	require.Len(t, got, 6)
-	require.True(t, got[0].Claim.ID().Equal(a["root"].ID()), "height-0 root first")
-	require.True(t, got[len(got)-1].Claim.ID().Equal(a["hub"].ID()), "height-3 hub last")
+	require.True(t, got[0].ClaimNative.ID().Equal(a["root"].ID()), "height-0 root first")
+	require.True(t, got[len(got)-1].ClaimNative.ID().Equal(a["hub"].ID()), "height-3 hub last")
 	for i := 1; i < len(got); i++ {
-		require.LessOrEqual(t, got[i-1].Claim.Node().Height(), got[i].Claim.Node().Height(), "heights non-decreasing")
+		require.LessOrEqual(t, got[i-1].ClaimNative.Node().Height(), got[i].ClaimNative.Node().Height(), "heights non-decreasing")
 	}
 }
 

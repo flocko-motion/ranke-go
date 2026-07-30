@@ -178,7 +178,7 @@ func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		data, err := c.Encode()
+		data, err := c.EncodeCBOR()
 		if err != nil {
 			return err
 		}

@@ -45,7 +45,7 @@ func roundTrip(t *testing.T, c Claim) Claim {
 	t.Helper()
 
 	// claim → cbor
-	encoded, err := c.Encode()
+	encoded, err := c.EncodeCBOR()
 	require.NoError(t, err, "Encode")
 
 	// cbor → claim
@@ -54,7 +54,7 @@ func roundTrip(t *testing.T, c Claim) Claim {
 
 	// claim → cbor again — canonical CBOR is deterministic, so a faithful
 	// decode must reproduce the exact input bytes.
-	reencoded, err := decoded.Encode()
+	reencoded, err := decoded.EncodeCBOR()
 	require.NoError(t, err, "re-Encode")
 	require.Equal(t, encoded, reencoded,
 		"canonical re-encode must be byte-identical to the original bytes")

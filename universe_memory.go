@@ -69,7 +69,7 @@ func (u *memoryUniverse) PutClaims(_ context.Context, cs []Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		b, err := c.Encode()
+		b, err := c.EncodeCBOR()
 		if err != nil {
 			return err
 		}

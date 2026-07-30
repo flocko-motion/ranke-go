@@ -50,7 +50,7 @@ func computeOverview(ctx context.Context, u ranke.Universe, m *generator.Manifes
 		encodings: map[string]int{},
 	}
 	for rs.Next() {
-		c := rs.Result().Claim
+		c := rs.Result().ClaimNative
 		n := c.Node()
 		ov.claims++
 		ov.nodeTypes[n.Type()]++

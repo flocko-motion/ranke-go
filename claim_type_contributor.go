@@ -86,5 +86,6 @@ func (s *signedContributor) unwrap() *claim { return s.contributor.unwrap() }
 func (s *signedContributor) verifyID(pubkey, raw []byte) error {
 	return s.contributor.verifyID(pubkey, raw)
 }
-func (s *signedContributor) Encode() ([]byte, error)   { return s.contributor.Encode() }
-func (s *signedContributor) SigningKey() crypto.Signer { return s.key }
+func (s *signedContributor) EncodeCBOR() ([]byte, error) { return s.contributor.EncodeCBOR() }
+func (s *signedContributor) EncodeJSON() ([]byte, error) { return s.contributor.EncodeJSON() }
+func (s *signedContributor) SigningKey() crypto.Signer   { return s.key }

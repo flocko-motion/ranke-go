@@ -43,7 +43,7 @@ func TestInlinePreimageConsistency(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	raw, err := c.Encode()
+	raw, err := c.EncodeCBOR()
 	require.NoError(t, err)
 	pre, err := nodePreimage(raw)
 	require.NoError(t, err)

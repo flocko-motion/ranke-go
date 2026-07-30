@@ -1,7 +1,7 @@
 // package: stack / persistence
 // type:    adapter
-// job:     the stack's read path — run the query on the engine layer, and when the form asked for is one that layer cannot hold, re-read the claims from a layer that can
-// limits:  routing only, no storage and no query execution of its own (-> the layer Universes); claim/content routing and repair live alongside (-> stack.go)
+// job:     the stack's read path — run the query on the top layer, re-read the claims from a layer holding the stored record when the top layer keeps none, then encode
+// limits:  routing only, no storage and no query execution of its own (-> the layer Universes); the serialising itself is the library's (-> ranke.EncodeResults)
 package stack
 
 import (
@@ -10,22 +10,29 @@ import (
 	"github.com/flocko-motion/ranke-go"
 )
 
-var errNoOriginals = ranke.WithDetail(ranke.ErrUnsupported,
-	"adapter/stack: original form — no layer keeps canonical claims")
+var errNoRawClaims = ranke.WithDetail(ranke.ErrUnsupported,
+	"adapter/stack: canonical claims — no layer keeps them")
 
-// Query runs the read on the engine layer, then re-reads the claims from a layer
-// that holds the form asked for.
+// Query runs the read on the top layer, then re-reads the claims from a layer that
+// keeps the stored record when the top layer keeps none, and serialises the result.
+// The top layer is asked in native form, since a claim is only complete enough to
+// encode once that re-read has happened.
 func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	engine := s.layers[0]
-	wantOriginals := q.Output.Form == ranke.FormOriginal && !engine.caps.RawClaims
-	wantContent := q.Output.Content != nil
-	if !wantOriginals && !wantContent {
-		return engine.u.Query(ctx, q, scope)
+	top := s.layers[0]
+	// The original form and verbatim cbor are both the stored record, which a layer
+	// reconstructing its claims never holds; ids need no claim at all.
+	needRaw := q.Output.Detail != ranke.DetailID && !top.caps.RawClaims &&
+		(q.Output.Form == ranke.FormOriginal || q.Output.Encoding == ranke.ResultCBOR)
+	wantEncoding := q.Output.Encoding != "" && q.Output.Encoding != ranke.ResultNative
+	if !needRaw && !wantEncoding {
+		return top.u.Query(ctx, q, scope)
 	}
-	if wantOriginals && !s.holdsRawClaims() {
-		return nil, errNoOriginals
+	if needRaw && !s.holdsRawClaims() {
+		return nil, errNoRawClaims
 	}
-	rs, err := engine.u.Query(ctx, q, scope)
+	down := q
+	down.Output.Encoding = ranke.ResultNative
+	rs, err := top.u.Query(ctx, down, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -33,58 +40,21 @@ func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ra
 	if err != nil {
 		return nil, err
 	}
-	if wantOriginals {
+	if needRaw {
 		if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
-			ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "original form from a RawClaims layer",
+			ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "claims from a RawClaims layer",
 				map[string]any{"results": len(results)})
 		}
-		if err := s.hydrateOriginals(ctx, results); err != nil {
+		if err := s.hydrateClaims(ctx, results, q.Output.Form); err != nil {
 			return nil, err
 		}
 	}
-	if wantContent {
-		if err := s.hydrateContent(ctx, q, results); err != nil {
-			return nil, err
-		}
+	// The top layer's Kind stands for what it produced; EncodeResults restamps the
+	// results it serialises.
+	if err := ranke.EncodeResults(results, q.Output); err != nil {
+		return nil, err
 	}
 	return &hydratedStream{results: results, report: report}, nil
-}
-
-// hydrateContent reads missing content from a layer holding it, offering each
-// fetched claim to the content-holding layers.
-func (s *stack) hydrateContent(ctx context.Context, q ranke.Query, results []ranke.QueryResult) error {
-	var missing []ranke.Id
-	var at []int
-	for i, r := range results {
-		if r.Content == nil && r.Id != nil {
-			missing = append(missing, r.Id)
-			at = append(at, i)
-		}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	if ranke.ReportEnabled(ctx, ranke.ReportDebug) {
-		ranke.ReportEvent(ctx, "stack", "hydrate", ranke.ReportDebug, "content from a holding layer",
-			map[string]any{"results": len(missing)})
-	}
-	// GetClaims descends to a layer holding the bytes.
-	got, err := s.GetClaims(ctx, missing)
-	if err != nil {
-		return err
-	}
-	for j, c := range got {
-		if c == nil {
-			continue
-		}
-		results[at[j]].Content = ranke.ShapeContent(ctx, s, c, q.Output)
-		for li := range s.layers {
-			if s.layers[li].caps.ContentCap > 0 || s.layers[li].caps.ExternalContent {
-				s.heal.offer(ctx, li, c)
-			}
-		}
-	}
-	return nil
 }
 
 // holdsRawClaims reports whether any layer keeps the canonical claim bytes.
@@ -111,10 +81,11 @@ func drain(rs ranke.ResultStream) ([]ranke.QueryResult, *ranke.QueryReport, erro
 	return out, report, rs.Close()
 }
 
-// hydrateOriginals replaces every claim in results — endpoints and each path's
-// route — with its stored delta form, read in one batch. GetClaims routes the
-// delta request to a RawClaims layer, so this is where the originals come from.
-func (s *stack) hydrateOriginals(ctx context.Context, results []ranke.QueryResult) error {
+// hydrateClaims refills every claim in results — endpoints and each path's route —
+// from a RawClaims layer in one batch, keyed by the ids the read returned, since a
+// layer answering with ids alone leaves the native fields empty. form picks what the
+// refilled claims are: the stored delta, or that delta with its overlay resolved.
+func (s *stack) hydrateClaims(ctx context.Context, results []ranke.QueryResult, form ranke.Form) error {
 	var ids []ranke.Id
 	seen := map[string]bool{}
 	add := func(id ranke.Id) {
@@ -125,8 +96,11 @@ func (s *stack) hydrateOriginals(ctx context.Context, results []ranke.QueryResul
 		ids = append(ids, id)
 	}
 	for _, r := range results {
-		add(r.Id)
-		for _, c := range r.Path {
+		add(r.ClaimId)
+		for _, id := range r.PathId {
+			add(id)
+		}
+		for _, c := range r.PathNative {
 			if c != nil {
 				add(c.ID())
 			}
@@ -135,21 +109,37 @@ func (s *stack) hydrateOriginals(ctx context.Context, results []ranke.QueryResul
 	if len(ids) == 0 {
 		return nil
 	}
+	// Delta form is what routes the read past the top layer to a RawClaims one, the
+	// only place the stored record lives; materialising is then a stack-level step,
+	// as it is in GetClaims.
 	got, err := s.GetClaims(ctx, ids, ranke.WithNotDiffMaterialized())
 	if err != nil {
 		return err
+	}
+	if form != ranke.FormOriginal {
+		if _, err := ranke.DefaultMaterialize(ctx, s, got); err != nil {
+			return err
+		}
 	}
 	byID := make(map[string]ranke.Claim, len(got))
 	for i, id := range ids {
 		byID[id.String()] = got[i]
 	}
 	for i := range results {
-		if results[i].Claim != nil {
-			results[i].Claim = byID[results[i].Id.String()]
+		if results[i].ClaimId != nil {
+			results[i].ClaimNative = byID[results[i].ClaimId.String()]
 		}
-		for j, c := range results[i].Path {
+		if route := results[i].PathId; len(route) > 0 {
+			hydrated := make([]ranke.Claim, 0, len(route))
+			for _, id := range route {
+				hydrated = append(hydrated, byID[id.String()])
+			}
+			results[i].PathNative = hydrated
+			continue
+		}
+		for j, c := range results[i].PathNative {
 			if c != nil {
-				results[i].Path[j] = byID[c.ID().String()]
+				results[i].PathNative[j] = byID[c.ID().String()]
 			}
 		}
 	}

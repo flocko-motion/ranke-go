@@ -232,17 +232,6 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 			Select: scanFrom(m.DiffChainHead),
 			Output: ranke.Output{Form: ranke.FormOriginal}}},
 
-		// ── shape: inline content and its overflow handling ──────────────────
-		{"output/content-cutoff", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowCutoff}}}},
-		{"output/content-omit", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowOmit}}}},
-		{"output/content-reference", ranke.Query{Select: sel(),
-			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
-			Output: ranke.Output{Content: &ranke.Content{Max: 256, Overflow: ranke.OverflowReference}}}},
-
 		// ── order and bound ─────────────────────────────────────────────────
 		{"order/height-desc-limit", ranke.Query{Select: sel(),
 			Order: []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}},

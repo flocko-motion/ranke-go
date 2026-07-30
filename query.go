@@ -93,20 +93,12 @@ type Comparison struct {
 	Glob string // shell-style wildcard (path.Match)
 }
 
-// Output shapes each result along orthogonal axes: Shape, Detail, Form, Encoding
-// and optional inline Content.
+// Output shapes each result along orthogonal axes: Shape, Detail, Form, Encoding.
 type Output struct {
 	Shape    Shape          // single | path
 	Detail   Detail         // id | graph | claims
 	Form     Form           // original | materialized
-	Content  *Content       // nil = no inline content
 	Encoding ResultEncoding // serialized form of each claim (json | cbor)
-}
-
-// Content bounds inline claim content: up to Max bytes, Overflow beyond that.
-type Content struct {
-	Max      int64
-	Overflow Overflow
 }
 
 // Form is whether a claim is returned as written (the id-defining bytes) or
@@ -118,12 +110,14 @@ const (
 	FormOriginal     Form = "original"     // as written (the stored/canonical claim)
 )
 
-// ResultEncoding is each claim's serialized form, orthogonal to Output.Form.
+// ResultEncoding is the form a result is returned in, carrying the same
+// information whichever it is.
 type ResultEncoding string
 
 const (
-	ResultJSON ResultEncoding = "json" // default; content base64 in the raw form
-	ResultCBOR ResultEncoding = "cbor" // binary; the original form is the id-defining bytes
+	ResultNative ResultEncoding = "native" // Go objects in ClaimNative/PathNative (default; empty == native)
+	ResultJSON   ResultEncoding = "json"   // Encoded holds text, content base64
+	ResultCBOR   ResultEncoding = "cbor"   // Encoded holds the stored canonical CBOR, verbatim
 )
 
 // Shape is whether each result is a single item or a path (the chain to it).
@@ -142,15 +136,6 @@ const (
 	DetailID     Detail = "id"     // identities only
 	DetailGraph  Detail = "graph"  // closed graph: nodes + edges among them
 	DetailClaims Detail = "claims" // claim parts: node + all outgoing edges (default; empty == claims)
-)
-
-// Overflow is how content larger than Content.Max is handled.
-type Overflow string
-
-const (
-	OverflowCutoff    Overflow = "cutoff"    // truncate at the cap
-	OverflowOmit      Overflow = "omit"      // drop the content
-	OverflowReference Overflow = "reference" // return a hash stub in its place
 )
 
 // OrderKey is one sort key; keys apply in priority order, ties by (created_at, id).
@@ -213,15 +198,27 @@ type ResultStream interface {
 	Close() error
 }
 
-// QueryResult is one reached claim, shaped per Output.
+// QueryResult is one reached claim, shaped per Output. Kind names the one field
+// carrying the payload, so a caller switches once and streams that field.
 type QueryResult struct {
-	// Id is always set. Claim is nil for DetailID (no reconstruction needed).
-	Id    Id
-	Claim Claim
-	// Path is the full route to the claim (root first), set for ShapePath.
-	Path []Claim
-	// Content is the claim's inlined content, capped per Output.Content.
-	Content []byte
+	Kind         ResultKind
+	ClaimId      Id
+	PathId       []Id
+	ClaimNative  Claim
+	PathNative   []Claim
+	ClaimEncoded []byte
+	PathEncoded  [][]byte
 }
 
-// QueryReport, QueryEvent, and the reporting machinery live in query_report.go.
+// ResultKind names the QueryResult field a result's payload is in — the product of
+// Output.Shape (single | path) and Output.Detail/Encoding (id | native | encoded).
+type ResultKind string
+
+const (
+	KindClaimId      ResultKind = "claim_id"
+	KindPathId       ResultKind = "path_id"
+	KindClaimNative  ResultKind = "claim_native"
+	KindPathNative   ResultKind = "path_native"
+	KindClaimEncoded ResultKind = "claim_encoded"
+	KindPathEncoded  ResultKind = "path_encoded"
+)

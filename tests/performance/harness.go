@@ -273,7 +273,7 @@ func accessIDs(ctx context.Context, u ranke.Universe, root ranke.Id, n int) ([]r
 	}
 	var pool []ranke.Id
 	for rs.Next() {
-		pool = append(pool, rs.Result().Claim.ID())
+		pool = append(pool, rs.Result().ClaimId)
 	}
 	if e := rs.Err(); e != nil {
 		_ = rs.Close()

@@ -39,7 +39,7 @@ func drain(t *testing.T, rs ResultStream) []QueryResult {
 func idSet(rs []QueryResult) map[string]bool {
 	m := map[string]bool{}
 	for _, r := range rs {
-		m[r.Claim.ID().String()] = true
+		m[r.ClaimNative.ID().String()] = true
 	}
 	return m
 }
@@ -112,23 +112,7 @@ func TestQueryOrderLimit(t *testing.T) {
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
-	require.True(t, got[0].Claim.ID().Equal(b.ID()), "highest-height claim first")
-}
-
-// TestQueryOutputContent: content is inlined up to the cap, truncated per the
-// overflow policy.
-func TestQueryOutputContent(t *testing.T) {
-	u, _, a, _ := queryFixture(t)
-	q := Query{
-		Select: Select{Branch: BranchUniverse, Head: a.ID()},
-		Where:  &Where{Field: "id", Test: &Comparison{Eq: a.ID().String()}},
-		Output: Output{Content: &Content{Max: 4, Overflow: OverflowCutoff}},
-	}
-	rs, err := u.Query(context.Background(), q, testScope(q))
-	require.NoError(t, err)
-	got := drain(t, rs)
-	require.Len(t, got, 1)
-	require.Equal(t, []byte("aard"), got[0].Content, "content cut off at the cap")
+	require.True(t, got[0].ClaimNative.ID().Equal(b.ID()), "highest-height claim first")
 }
 
 // TestQueryOutputPath: ShapePath returns the route root→claim.
@@ -143,9 +127,9 @@ func TestQueryOutputPath(t *testing.T) {
 	require.NoError(t, err)
 	got := drain(t, rs)
 	require.Len(t, got, 1)
-	require.Len(t, got[0].Path, 2, "route is b → a")
-	require.True(t, got[0].Path[0].ID().Equal(b.ID()))
-	require.True(t, got[0].Path[1].ID().Equal(a.ID()))
+	require.Len(t, got[0].PathNative, 2, "route is b → a")
+	require.True(t, got[0].PathNative[0].ID().Equal(b.ID()))
+	require.True(t, got[0].PathNative[1].ID().Equal(a.ID()))
 }
 
 // TestQueryReverseSupported: a byte store serves a reverse step via closure

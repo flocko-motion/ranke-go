@@ -8,6 +8,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
@@ -71,6 +72,7 @@ func TestWriteThroughAndReadFill(t *testing.T) {
 	if err != nil || string(got) != "alice" {
 		t.Fatalf("GetContent = %q, %v; want alice", got, err)
 	}
+	healed(t, st)
 	if !has(t, top, h) {
 		t.Fatal("read miss should have read-filled the lazy top layer")
 	}
@@ -131,6 +133,7 @@ func TestRepairViaReadThrough(t *testing.T) {
 	if err != nil || string(got) != "treasure" {
 		t.Fatalf("GetContent through corruption = %q, %v; want treasure", got, err)
 	}
+	healed(t, st)
 	if top.isCorrupt(h) {
 		t.Fatal("read-through should have repaired the corrupt top layer")
 	}
@@ -220,6 +223,23 @@ func has(t *testing.T, u ranke.Universe, h ranke.Id) bool {
 		t.Fatalf("HasContent: %v", err)
 	}
 	return ok
+}
+
+// healed waits for the stack's background filler to land every fill it was
+// offered, so a read-through repair is observable.
+func healed(t *testing.T, u ranke.Universe) {
+	t.Helper()
+	h, ok := u.(stack.Healing)
+	if !ok {
+		t.Fatal("the stack must report on its background filler")
+	}
+	for range 200 {
+		if h.HealIdle() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("the background filler did not settle")
 }
 
 // corruptUniverse wraps a real Universe and simulates byte corruption: a flagged
@@ -381,6 +401,132 @@ func (s structOnlyCache) Capabilities() ranke.Capabilities {
 	c.ContentCap = 0
 	c.Tier = ranke.StorageTierEager // a lossy projection can't be authoritative (like neo4j)
 	return c
+}
+
+// projectionEngine is a structure-only cache in the engine seat: its Query
+// reconstructs each claim from parts, so a result carries no stored record — the
+// shape a graph-native engine (neo4j) returns.
+type projectionEngine struct{ structOnlyCache }
+
+func (p projectionEngine) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return reshape(ctx, p.Universe, q, scope, func(r ranke.QueryResult) (ranke.QueryResult, error) {
+		if r.ClaimNative == nil {
+			return r, nil
+		}
+		c, err := stripContent(r.ClaimNative)
+		if err != nil {
+			return r, err
+		}
+		r.ClaimNative = c
+		return r, nil
+	})
+}
+
+// idOnlyEngine answers with identities alone, holding no canonical bytes to
+// serialise — what neo4j does for a cbor read: it selects, a byte layer encodes.
+type idOnlyEngine struct{ structOnlyCache }
+
+func (e idOnlyEngine) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	return reshape(ctx, e.Universe, q, scope, func(r ranke.QueryResult) (ranke.QueryResult, error) {
+		return ranke.QueryResult{Kind: ranke.KindClaimId, ClaimId: r.ClaimId, PathId: r.PathId}, nil
+	})
+}
+
+// reshape runs the query on u and rewrites every result through f.
+func reshape(ctx context.Context, u ranke.Universe, q ranke.Query, scope ranke.Scope,
+	f func(ranke.QueryResult) (ranke.QueryResult, error)) (ranke.ResultStream, error) {
+	rs, err := u.Query(ctx, q, scope)
+	if err != nil {
+		return nil, err
+	}
+	defer rs.Close()
+	var out []ranke.QueryResult
+	for rs.Next() {
+		r, err := f(rs.Result())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	return &sliceStream{results: out}, nil
+}
+
+// sliceStream serves an already-assembled result slice.
+type sliceStream struct {
+	results []ranke.QueryResult
+	i       int
+}
+
+func (s *sliceStream) Next() bool {
+	s.i++
+	return s.i <= len(s.results)
+}
+func (s *sliceStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
+func (s *sliceStream) Report() *ranke.QueryReport { return nil }
+func (s *sliceStream) Err() error                 { return nil }
+func (s *sliceStream) Close() error               { return nil }
+
+// TestQueryCBORIsTheStoredRecord: a cbor read through a stack whose engine layer
+// keeps no canonical bytes must answer with the RawClaims layer's stored record,
+// byte for byte. The engine does the selection — reconstructed claims, or ids
+// alone — and the stack re-reads those ids from the layer that holds the bytes.
+func TestQueryCBORIsTheStoredRecord(t *testing.T) {
+	ctx := context.Background()
+	engines := map[string]func(ranke.Universe) ranke.Universe{
+		"reconstructed claims": func(u ranke.Universe) ranke.Universe { return projectionEngine{structOnlyCache{u}} },
+		"ids only":             func(u ranke.Universe) ranke.Universe { return idOnlyEngine{structOnlyCache{u}} },
+	}
+	for name, engine := range engines {
+		t.Run(name, func(t *testing.T) {
+			store := mem.New()
+			st, err := stack.NewStack(engine(mem.New()), store)
+			if err != nil {
+				t.Fatalf("NewStack: %v", err)
+			}
+			c := signedClaim(t)
+			if err := ranke.PutClaim(ctx, st, c); err != nil {
+				t.Fatalf("PutClaim: %v", err)
+			}
+			q := ranke.Query{
+				Select: ranke.Select{Branch: ranke.BranchUniverse, Head: c.ID()},
+				Output: ranke.Output{Encoding: ranke.ResultCBOR},
+			}
+			rs, err := st.Query(ctx, q, ranke.Scope{Branch: ranke.BranchUniverse})
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			var got []ranke.QueryResult
+			for rs.Next() {
+				got = append(got, rs.Result())
+			}
+			if err := rs.Err(); err != nil {
+				t.Fatalf("stream: %v", err)
+			}
+			if err := rs.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("results = %d, want the one claim", len(got))
+			}
+			if got[0].Kind != ranke.KindClaimEncoded {
+				t.Fatalf("Kind = %q, want %q", got[0].Kind, ranke.KindClaimEncoded)
+			}
+			raw, err := store.GetClaimsRaw(ctx, []ranke.Id{c.ID()})
+			if err != nil {
+				t.Fatalf("GetClaimsRaw: %v", err)
+			}
+			if len(got[0].ClaimEncoded) == 0 {
+				t.Fatal("ClaimEncoded is empty — the cbor read served nothing")
+			}
+			if !bytes.Equal(got[0].ClaimEncoded, raw[0]) {
+				t.Fatalf("ClaimEncoded = %d bytes, want the %d stored bytes verbatim",
+					len(got[0].ClaimEncoded), len(raw[0]))
+			}
+		})
+	}
 }
 
 type fielder interface {

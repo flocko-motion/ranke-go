@@ -1,7 +1,7 @@
 // package: neo4j / query
 // type:    adapter
 // job:     native RQL execution — lower the whole query to one Cypher statement, run it, reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure when it names none; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk
+// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure when it names none; branch confinement is the _b_<branch> tag (<= Height, point-in-time), not a walk; a cbor read yields ids only
 package neo4j
 
 import (
@@ -33,6 +33,9 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 	rep.log("cypher", "execute", ranke.ReportInfo, time.Since(execStart), "")
 
 	recStart := time.Now()
+	// Native results only: this layer answers which claims, never their
+	// serialisation (-> stack.Query, ranke.EncodeResults).
+	ids := idsOnly(q.Output)
 	var results []ranke.QueryResult
 	switch {
 	case needPaths:
@@ -40,20 +43,22 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		if rerr != nil {
 			return nil, rerr
 		}
-		if q.Output.Detail == ranke.DetailID {
-			for i := range ps {
-				ps[i].Claim = nil // the route carries the identities
+		for i := range ps {
+			ps[i].Kind = ranke.KindPathNative
+			if ids {
+				ps[i].ClaimNative, ps[i].PathNative = nil, nil // the ids carry the identities
+				ps[i].Kind = ranke.KindPathId
 			}
 		}
 		results = ps
-	case q.Output.Detail == ranke.DetailID:
+	case ids:
 		// ids only — no reconstruction at all.
 		for _, r := range res.Records {
 			id, perr := ranke.ParseId(asString(valOf(r, "id")))
 			if perr != nil {
 				return nil, perr
 			}
-			results = append(results, ranke.QueryResult{Id: id})
+			results = append(results, ranke.QueryResult{Kind: ranke.KindClaimId, ClaimId: id})
 		}
 	default: // graph or claims: build from this query's own node records.
 		claims, rerr := u.claimsFromRecords(res.Records)
@@ -61,18 +66,17 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 			return nil, rerr
 		}
 		for _, c := range claims {
-			r := ranke.QueryResult{Id: c.ID(), Claim: c}
-			if q.Output.Content != nil {
-				r.Content = ranke.ShapeContent(ctx, u, c, q.Output)
-			}
-			results = append(results, r)
+			results = append(results, ranke.QueryResult{
+				Kind: ranke.KindClaimNative, ClaimId: c.ID(), ClaimNative: c,
+			})
 		}
 	}
 	rep.log("neo4j", "reconstruct", ranke.ReportInfo, time.Since(recStart), strconv.Itoa(len(results))+" results")
 	return &cypherStream{results: results, report: rep.finalize(len(results))}, nil
 }
 
-// reachedPaths assembles one result per record: a claim per route element, last is the endpoint.
+// reachedPaths assembles one result per record: a claim per route element, last is
+// the endpoint. Both the id and the native view of the route are filled; Kind decides.
 func (u *neo4jUniverse) reachedPaths(records []*neo4jdriver.Record) ([]ranke.QueryResult, error) {
 	out := make([]ranke.QueryResult, 0, len(records))
 	for _, r := range records {
@@ -81,6 +85,7 @@ func (u *neo4jUniverse) reachedPaths(records []*neo4jdriver.Record) ([]ranke.Que
 			return nil, fmt.Errorf("%w: route is not a list", errQuery)
 		}
 		route := make([]ranke.Claim, 0, len(hops))
+		ids := make([]ranke.Id, 0, len(hops))
 		for _, h := range hops {
 			m, _ := h.(map[string]any)
 			c, err := claimFromData(m)
@@ -88,14 +93,24 @@ func (u *neo4jUniverse) reachedPaths(records []*neo4jdriver.Record) ([]ranke.Que
 				return nil, err
 			}
 			route = append(route, c)
+			ids = append(ids, c.ID())
 		}
 		if len(route) == 0 {
 			continue
 		}
 		end := route[len(route)-1]
-		out = append(out, ranke.QueryResult{Id: end.ID(), Claim: end, Path: route})
+		out = append(out, ranke.QueryResult{
+			ClaimId: end.ID(), ClaimNative: end, PathId: ids, PathNative: route,
+		})
 	}
 	return out, nil
+}
+
+// idsOnly reports whether a read returns identities alone: DetailID asks for
+// them, and a cbor read gets them because the canonical bytes live in a
+// RawClaims layer — neo4j does the selection, that layer serialises.
+func idsOnly(out ranke.Output) bool {
+	return out.Detail == ranke.DetailID || out.Encoding == ranke.ResultCBOR
 }
 
 // nodeData is the Cypher map projection of a node's full data (props, labels, out-edges).
@@ -183,14 +198,15 @@ func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
 		conds = append(conds, wc)
 	}
 	return match + "\nWHERE " + strings.Join(conds, "\n  AND ") +
-		"\nRETURN " + returnCols(q.Output.Detail, "n") +
+		"\nRETURN " + returnCols(q.Output, "n") +
 		orderLimitClause(q.Order, q.Limit.Results, "n"), params
 }
 
-// returnCols is the RETURN projection for an endpoint node: the id for DetailID,
-// else its full data (node/labels/edges) so the claim rebuilds from this query.
-func returnCols(detail ranke.Detail, v string) string {
-	if detail == ranke.DetailID {
+// returnCols is the RETURN projection for an endpoint node: the id for an
+// ids-only read, else its full data (node/labels/edges) so the claim rebuilds
+// from this query.
+func returnCols(out ranke.Output, v string) string {
+	if idsOnly(out) {
 		return v + ".id AS id"
 	}
 	return "properties(" + v + ") AS node, labels(" + v + ") AS labels, " +
@@ -270,7 +286,7 @@ func frontierCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, pa
 		b.WriteString("\nWITH DISTINCT " + nv)
 	}
 	return b.String() +
-		"\nRETURN " + returnCols(q.Output.Detail, final) +
+		"\nRETURN " + returnCols(q.Output, final) +
 		orderLimitClause(q.Order, q.Limit.Results, final), params
 }
 
