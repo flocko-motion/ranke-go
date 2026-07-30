@@ -2,30 +2,50 @@
 // type:    logic
 // job:     the contribution contract — the staged → verified → mergable advance of a Ranke-Archive
 // (RA_k → RA_k')
-// limits:  interfaces only; the concrete implementation is a write-path mechanism
-// (-> adapter/sequencer_mechanism)
+// limits:  the contract plus the shared wire drain; opening, verifying and merging a contribution
+// are a Sequencer's (-> adapter/sequencer/dev, adapter/sequencer/concurrent)
 package ranke
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
-// Contribution is an in-progress advance of a Ranke-Archive — the paper's
-// six steps, up to sealing. Open it against a base RA_k, fill it with
-// claims, then CompleteAndVerify seals and verifies it.
+// Contribution is an in-progress advance of a Ranke-Archive: open it against a
+// base RA_k, fill it, then CompleteAndVerify seals and verifies it.
 type Contribution interface {
 	// Base is the (k, t) the contribution was opened against.
 	Base() (head Id, t time.Time)
-	// AddGraph / AddClaims fill the contribution (step 2, Filling), naming the
-	// branch the claims join. One contribution may name several, so a bulk
-	// contribution advances them all in one merge. An empty branch is an error,
-	// and a sealed contribution refuses both.
+	// AddGraph / AddClaims fill the contribution (step 2), naming the branch the
+	// claims join. Several may be named, and an empty one is an error.
 	AddGraph(branch string, g Graph) error
 	AddClaims(branch string, claims []Claim) error
-	// CompleteAndVerify closes the contribution over the base closure and
-	// verifies it (steps 3–4), yielding a sealed VerifiedContribution.
+	// AddWire fills from a WireMediaType stream, whose records name their own
+	// branches — so it takes none. DrainWire is the shared implementation.
+	AddWire(ctx context.Context, r io.Reader) error
+	// CompleteAndVerify closes the contribution over its base and verifies it
+	// (steps 3–4), yielding a sealed VerifiedContribution.
 	CompleteAndVerify(ctx context.Context) (VerifiedContribution, error)
+}
+
+// DrainWire fills c from a contribution stream: content lands in u under its hash,
+// each claim stages under the branch its record names, applied as they arrive.
+func DrainWire(ctx context.Context, c Contribution, u Universe, r io.Reader) error {
+	wr := NewWireReader(r)
+	for wr.Next() {
+		switch rec := wr.Record(); rec.Kind {
+		case WireContent:
+			if err := u.PutContents(ctx, []ContentBlob{rec.Blob}); err != nil {
+				return err
+			}
+		case WireClaim:
+			if err := c.AddClaims(rec.Branch, []Claim{rec.Claim}); err != nil {
+				return err
+			}
+		}
+	}
+	return wr.Err()
 }
 
 // VerifiedContribution is a sealed, verified contribution: its contents

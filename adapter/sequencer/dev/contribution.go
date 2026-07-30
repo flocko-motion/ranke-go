@@ -9,6 +9,7 @@ package dev
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
@@ -70,6 +71,11 @@ func (c *contribution) AddGraph(branch string, g ranke.Graph) error {
 	c.note(branch)
 	c.adopted[branch] = append(c.adopted[branch], g.Heads()...)
 	return nil
+}
+
+// AddWire is step 2 from a wire stream, whose records name their own branches.
+func (c *contribution) AddWire(ctx context.Context, r io.Reader) error {
+	return ranke.DrainWire(ctx, c, c.s.u, r)
 }
 
 // note records a branch the first time it is named.
