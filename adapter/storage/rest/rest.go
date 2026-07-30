@@ -3,17 +3,14 @@
 // job:     stores claims and content blobs over a tiny HTTP blob API (GET/PUT/HEAD)
 // limits:  no auth, retries, or pagination; just the BlobStore primitives over HTTP (-> adapter)
 //
-// Package rest is an HTTP persistence adapter for a ranke Universe. It
-// proves the BlobStore seam generalizes past local storage: the three
-// primitives map straight onto a trivial REST contract —
+// Package rest shows the BlobStore seam reaching past local storage, its three
+// primitives mapping onto a trivial contract:
 //
 //	GET    {baseURL}/{id}   -> 200 + bytes, or 404
 //	PUT    {baseURL}/{id}   <- bytes,        200/201
 //	HEAD   {baseURL}/{id}   -> 200, or 404
 //
-// storage.NewBlobUniverse supplies the claim codec, content integrity, and
-// copy machinery on top. Any object store or blob service exposing this
-// shape (or trivially wrapped to) is a ranke Universe.
+// Any blob service of this shape is a ranke Universe.
 package rest
 
 import (
@@ -36,11 +33,9 @@ var (
 	errStatus       = errors.New("adapter/rest: unexpected status")
 )
 
-// New returns a Universe backed by the blob API rooted at baseURL, using
-// the given client (nil = http.DefaultClient). caps declares what the remote
-// behind baseURL can do: the adapter is a thin GET/PUT/HEAD proxy and cannot
-// discover the remote's durability or delete/enumerate support itself, so the
-// operator wiring it supplies them.
+// New returns a Universe over the blob API at baseURL (nil client =
+// http.DefaultClient). A GET/PUT/HEAD proxy cannot discover the remote's
+// durability or delete support, so the operator declares it in caps.
 //
 //deadcode:keep
 func New(baseURL string, client *http.Client, caps ranke.Capabilities) (ranke.Universe, error) {
@@ -134,8 +129,8 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 //deadcode:keep
 func (s *store) Close() error { return nil }
 
-// Capabilities returns the remote's capabilities as declared at construction —
-// the adapter cannot discover them through its GET/PUT/HEAD contract.
+// Capabilities returns what was declared at construction, GET/PUT/HEAD being blind
+// to the rest.
 //
 //deadcode:keep
 func (s *store) Capabilities() ranke.Capabilities {

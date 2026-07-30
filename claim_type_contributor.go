@@ -11,38 +11,28 @@ import (
 	"io"
 )
 
-// Contributor is a typed view over a Claim whose node type is
-// "contribution/contributor". Obtain via Claim.AsContributor or
-// Claim.Contributor.
+// Contributor is a typed view over a "contribution/contributor" claim, from
+// Claim.AsContributor or Claim.Contributor.
 type Contributor interface {
 	Claim
-	// SigningKey returns the private key matching this contributor's
-	// pubkey, or nil for identity-Sign (§5.7) or unbound contributors
-	// loaded from disk. Attach a key via WithSigningKey for a session.
+	// SigningKey is the private key matching this contributor's pubkey, nil for
+	// identity-Sign (§5.7) or a contributor loaded from disk.
 	SigningKey() crypto.Signer
-	// Pubkey returns this contributor's multikey-encoded public key
-	// (§5.7). AsContributor resolves it once — transparently, inline or
-	// external via the Universe — and caches it here, so signing can check
-	// a key against it without a Universe. Empty for an identity
-	// contributor.
+	// Pubkey is the multikey public key (§5.7), which AsContributor resolves once
+	// and caches, so signing can check a key without a Universe.
 	Pubkey() []byte
 }
 
-// SigningKey on a bare *claim is always nil — the claim is the persisted
-// data structure and stores no private keys. Wrap with WithSigningKey
-// for a session-scoped signer.
+// SigningKey on a bare *claim is nil: a claim is persisted data and holds no
+// private keys. WithSigningKey attaches one for a session.
 func (c *claim) SigningKey() crypto.Signer { return nil }
 
-// Pubkey on a bare *claim is its inline content (§5.7: a contributor
-// carries its pubkey as content). Nil when the content is external and has
-// not been resolved through AsContributor — obtain the contributor that
-// way to make an external pubkey available here.
+// Pubkey on a bare *claim is its inline content (§5.7). An external pubkey becomes
+// available by obtaining the contributor through AsContributor.
 func (c *claim) Pubkey() []byte { return c.node.content }
 
-// WithSigningKey returns a Contributor carrying the private key matching
-// c's pubkey, so subsequent NewClaim/AddGraph/Consolidate calls sign on
-// the contributor's behalf without threading the key manually. Nil key
-// collapses to identity-Sign. Not persisted — a runtime convenience only.
+// WithSigningKey returns a Contributor carrying the key matching c's pubkey, so
+// later calls sign on its behalf. A nil key collapses to identity-Sign.
 func WithSigningKey(c Contributor, key crypto.Signer) Contributor {
 	return &signedContributor{contributor: c, key: key}
 }
@@ -53,8 +43,7 @@ type signedContributor struct {
 	pubkey      []byte // resolved pubkey (inline or external), cached at AsContributor
 }
 
-// Pubkey returns the resolved pubkey cached at AsContributor, falling back
-// to the wrapped contributor's (a plain WithSigningKey wrap carries none).
+// Pubkey is the pubkey cached at AsContributor, else the wrapped contributor's.
 func (s *signedContributor) Pubkey() []byte {
 	if s.pubkey != nil {
 		return s.pubkey
@@ -62,9 +51,8 @@ func (s *signedContributor) Pubkey() []byte {
 	return s.contributor.Pubkey()
 }
 
-// Forward every Claim/Contributor method to the wrapped Contributor.
-// Embedding the interface bare would shadow it with a same-named field —
-// Go's method promotion doesn't fire on a *named* field.
+// Forward every Claim/Contributor method to the wrapped Contributor: method
+// promotion does not fire on a named field, so embedding bare would shadow it.
 func (s *signedContributor) Node() Node { return s.contributor.Node() }
 
 func (s *signedContributor) Edges(filters ...Filter) []Edge { return s.contributor.Edges(filters...) }

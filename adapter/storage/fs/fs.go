@@ -3,12 +3,8 @@
 // job:     stores claims and content blobs as files in a single flat directory
 // limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
-// Package fs is a filesystem persistence adapter for a ranke Universe: it
-// stores claims and content blobs as files in a single flat directory,
-// named by their id strings. It is a thin storage.BlobStore — the
-// claim/content/copy machinery comes from storage.NewBlobUniverse — plus
-// an Open method (storage.Streamer) so large content streams straight off
-// disk without buffering.
+// Package fs names claims and blobs by their id strings in one flat directory.
+// Open (storage.Streamer) streams large content straight off disk.
 package fs
 
 import (
@@ -46,10 +42,8 @@ type store struct {
 	caps ranke.Capabilities
 }
 
-// detectCaps probes the directory's actual access once, at startup. A read-only
-// mount (or restrictive ACL) can still show writable permission bits, so it
-// attempts a real create+remove rather than trusting os.Stat. Persistence is
-// intrinsic to a filesystem; read/enumerate and write/delete are discovered.
+// detectCaps probes real access once at startup: a read-only mount can still show
+// writable permission bits, so it attempts a create+remove rather than os.Stat.
 func detectCaps(dir string) ranke.Capabilities {
 	caps := ranke.Capabilities{Persistent: true}
 	if _, err := os.ReadDir(dir); err == nil {
@@ -77,10 +71,8 @@ func (s *store) Get(_ context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// Put writes data under key, overwriting any existing file (atomic
-// temp+rename). Content-addressed, so a normal re-put writes identical bytes;
-// the overwrite is what repairs a corrupted file in place. Callers dedup via
-// Has when they want to skip a redundant write.
+// Put writes data under key by temp+rename. Keys are content-addressed, so the
+// overwrite repairs a corrupted file in place; callers dedup via Has.
 func (s *store) Put(_ context.Context, key string, data []byte) error {
 	return atomicWrite(s.path(key), data)
 }

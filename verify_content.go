@@ -13,15 +13,11 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
-// Content integrity (§5.10) — storage-agnostic. Content is addressed by
-// the multihash of its bytes, so verification is a property of the bytes,
-// not of where they live. Persistence adapters read raw bytes from their
-// backing store and lean on these helpers to verify them; they never
-// reimplement the hash scheme.
+// Content integrity (§5.10): content is addressed by the multihash of its bytes, so
+// verification is a property of the bytes alone, wherever an adapter read them.
 
-// VerifyContent checks that data is exactly the content addressed by hash
-// and has the expected size. Returns ErrIntegrity on a size or digest
-// mismatch.
+// VerifyContent checks data against the content hash addresses and the expected
+// size, answering ErrIntegrity on either mismatch.
 func VerifyContent(hash Id, size uint64, data []byte) error {
 	if hash == nil {
 		return errNilHash
@@ -43,11 +39,8 @@ func VerifyContent(hash Id, size uint64, data []byte) error {
 	return nil
 }
 
-// NewVerifyingReader wraps src so that a consumer reading to EOF also
-// verifies the streamed bytes against hash and size (§5.10): the final
-// Read returns an integrity error instead of a clean io.EOF if the bytes
-// are truncated, over-long, or modified. For adapters that stream large
-// content without buffering it whole.
+// NewVerifyingReader wraps src so reading to EOF also verifies the stream (§5.10):
+// the final Read answers an integrity error rather than a clean io.EOF.
 func NewVerifyingReader(src io.ReadCloser, hash Id, size uint64) (io.ReadCloser, error) {
 	if hash == nil {
 		return nil, errNilHash

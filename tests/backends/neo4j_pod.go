@@ -34,11 +34,8 @@ type Neo4jConn struct {
 	Password string
 }
 
-// neo4jConn obtains a Neo4j to test against. It uses an already-running instance
-// — the --native host install (forceNativeServices), one named by
-// RANKE_NEO4J_BOLT/HTTP, or one simply serving at the default local address —
-// and never tears it down; otherwise it spawns an ephemeral pod (needs podman).
-// Returns ErrUnavailable when neither is possible.
+// neo4jConn prefers an already-running Neo4j and leaves it standing, else spawns an
+// ephemeral pod. ErrUnavailable when neither is possible.
 func neo4jConn() (*Neo4jConn, func(), error) {
 	if forceNativeServices || neo4jRequested() || neo4jReachable() {
 		return neo4jExternal()
@@ -51,9 +48,8 @@ func neo4jRequested() bool {
 	return os.Getenv("RANKE_NEO4J_BOLT") != "" || os.Getenv("RANKE_NEO4J_HTTP") != ""
 }
 
-// neo4jReachable reports whether a Neo4j already serves at the default (or
-// env-named) HTTP endpoint — a fast single-shot probe, so tests run against a
-// running instance with no env var and skip cleanly when none is up.
+// neo4jReachable probes the default (or env-named) HTTP endpoint once, so tests find
+// a running instance with no env var set.
 func neo4jReachable() bool {
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(envOr("RANKE_NEO4J_HTTP", "http://127.0.0.1:7474") + "/")
@@ -64,10 +60,8 @@ func neo4jReachable() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// neo4jExternal points at an already-running Neo4j — the host-native install on
-// localhost by default (--native), or wherever RANKE_NEO4J_BOLT/HTTP name.
-// Cleanup is a no-op: we don't own it, so its graph persists after the run
-// (browsable). Verifies it is serving before returning.
+// neo4jExternal points at a running Neo4j, verifying it serves first. Cleanup is a
+// no-op, so its graph stays browsable after the run.
 func neo4jExternal() (*Neo4jConn, func(), error) {
 	conn := &Neo4jConn{
 		BoltURI:  envOr("RANKE_NEO4J_BOLT", "bolt://127.0.0.1:7687"),
@@ -88,19 +82,8 @@ func envOr(key, def string) string {
 	return def
 }
 
-// neo4jPod starts a Neo4j container in a podman pod, waits for it to serve, and
-// returns its connection details plus a cleanup func that removes the pod.
-// Returns ErrUnavailable when podman is not on PATH, so the matrix skips the
-// row rather than failing.
-//
-// When the neo4j adapter arrives, the s3-style wiring is one factory in
-// AllBackends:
-//
-//	conn, cleanup, err := neo4jPod()
-//	if err != nil { return nil, nil, err }
-//	u, err := neo4j.New(conn.BoltURI, conn.User, conn.Password)  // (adapter API TBD)
-//	if err != nil { cleanup(); return nil, nil, err }
-//	return u, cleanup, nil
+// neo4jPod starts Neo4j in a podman pod, waits for it to serve, and returns its
+// connection plus a cleanup that removes the pod. ErrUnavailable without podman.
 func neo4jPod() (*Neo4jConn, func(), error) {
 	if _, err := exec.LookPath("podman"); err != nil {
 		return nil, nil, fmt.Errorf("%w: podman not on PATH (neo4j needs a real graph-db pod)", ErrUnavailable)

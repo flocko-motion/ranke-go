@@ -14,14 +14,9 @@ import (
 	"time"
 )
 
-// ClaimParts is the parsed structure of a stored claim — everything needed to
-// rebuild it without the canonical CBOR. A graph-native cache (e.g. neo4j)
-// stores these as node/edge properties and calls AssembleClaim to reconstruct
-// the Claim. For EXTERNAL content the id commits only to content_hash +
-// content_size (never the bytes), so a cache may omit the blob and still
-// reconstruct id-faithfully — the durable layer serves it. For INLINE content
-// the id commits to the bytes themselves (§Content), so InlineContent must be
-// present to reconstruct the claim faithfully.
+// ClaimParts rebuilds a stored claim without its canonical CBOR, which a
+// graph-native cache holds as node and edge properties. External content needs no
+// blob — the id commits to hash and size — while inline content needs the bytes.
 type ClaimParts struct {
 	ID            Id                // the node/claim id (a signature — taken as given, not recomputed)
 	Type          string            // "class/sub"
@@ -51,14 +46,9 @@ type EdgeParts struct {
 	Fields            map[string]string
 }
 
-// AssembleClaim rebuilds a Claim from parsed parts and known ids, without CBOR
-// and without signing. The node id and each edge id are taken as given (the
-// node id is a signature; edge ids are cached by the field-oriented store — a
-// requirement, since recomputing them would need the claim CBOR the store
-// lacks), and the edges are ordered canonically — so, if the parts are
-// faithful, the result re-encodes to identical bytes and verifies against the
-// id. It performs no verification itself: a cache built from AssembleClaim is
-// checked by the closure verifier over the authoritative Universe.
+// AssembleClaim rebuilds a Claim from parts, taking every id as given and ordering
+// edges canonically, so faithful parts re-encode to identical bytes. The closure
+// verifier over the authoritative Universe is what checks the result.
 func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if parts.ID == nil {
 		return nil, errNilID
