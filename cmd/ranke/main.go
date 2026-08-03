@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,58 +19,38 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
 	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
+	"github.com/flocko-motion/ranke-go/internal/vectors"
+	"github.com/spf13/cobra"
 )
 
 var (
 	errOpen     = errors.New("open archive")
-	errUsage    = errors.New("usage")
 	errShow     = errors.New("show")
 	errValidate = errors.New("validate")
 )
 
+// dirHelp describes the one argument every command shares.
+const dirHelp = "dir is a data bundle: dir/universe/ (claims + content) plus dir/branches/B_h."
+
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
-	}
-	ctx := context.Background()
-	args := os.Args[2:]
-	switch os.Args[1] {
-	case "info":
-		exit(cmdInfo(ctx, args))
-	case "branches":
-		exit(cmdBranches(ctx, args))
-	case "show":
-		exit(cmdShow(ctx, args))
-	case "validate":
-		exit(cmdValidate(ctx, args))
-	case "-h", "--help", "help":
-		usage()
-	default:
-		fmt.Fprintf(os.Stderr, "ranke: unknown subcommand %q\n\n", os.Args[1])
-		usage()
-		os.Exit(2)
-	}
-}
-
-func usage() {
-	fmt.Fprintln(os.Stderr, `ranke — Ranke-Graph archive inspector
-
-usage:
-  ranke info     <dir>
-  ranke branches <dir>
-  ranke show     <file>
-  ranke show     <dir> <id>
-  ranke validate <dir>
-
-dir is a data bundle: dir/universe/ (claims + content) + dir/branches/B_h. Read-only.`)
-}
-
-func exit(err error) {
-	if err != nil {
+	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "ranke:", err)
 		os.Exit(1)
 	}
+}
+
+// newRootCmd builds the command tree. Errors print once, prefixed, without usage —
+// a failed read is not a misuse.
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "ranke",
+		Short:         "Ranke-Graph archive inspector",
+		Long:          "ranke reads a filesystem-backed Ranke-Graph archive.\n\n" + dirHelp,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.AddCommand(infoCmd(), branchesCmd(), showCmd(), validateCmd())
+	return root
 }
 
 // openArchive opens the bundle at dir — fs Universe plus the B_h timeline — at its
@@ -94,12 +75,20 @@ func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive
 	return u, arc, nil
 }
 
-// --- info ---
+// infoCmd summarises an archive: its branch count and each head.
+func infoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info <dir>",
+		Short: "Summarise an archive: branch count and heads",
+		Long:  "Summarise an archive.\n\n" + dirHelp,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmdInfo(cmd.Context(), args)
+		},
+	}
+}
 
 func cmdInfo(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("%w: ranke info <dir>", errUsage)
-	}
 	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
@@ -116,12 +105,20 @@ func cmdInfo(ctx context.Context, args []string) error {
 	return nil
 }
 
-// --- branches ---
+// branchesCmd lists every branch with its full head id.
+func branchesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "branches <dir>",
+		Short: "List every branch and its head id",
+		Long:  "List every branch and its head id.\n\n" + dirHelp,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmdBranches(cmd.Context(), args)
+		},
+	}
+}
 
 func cmdBranches(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("%w: ranke branches <dir>", errUsage)
-	}
 	_, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
@@ -140,41 +137,136 @@ func cmdBranches(ctx context.Context, args []string) error {
 	return nil
 }
 
-// cmdShow takes a file — a claim if it CBOR-decodes, else content — or a dir and an
-// id to resolve through the archive.
-func cmdShow(ctx context.Context, args []string) error {
-	switch len(args) {
-	case 1:
-		return showFile(args[0])
-	case 2:
-		return showInArchive(ctx, args[0], args[1])
-	default:
-		return fmt.Errorf("%w: ranke show <file>  OR  ranke show <dir> <id>", errUsage)
+// showCmd prints one claim, reached either way: a file on disk, or an id resolved
+// through an archive.
+func showCmd() *cobra.Command {
+	var idFlag string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "show <file> | <dir> <id>",
+		Short: "Print one claim, from a file or by id",
+		Long: "Print one claim, reached either way:\n\n" +
+			"  show <file>       read the file directly\n" +
+			"  show <dir> <id>   resolve the id through the archive at dir\n\n" +
+			"A claim record holds no id of its own, so a file is read as a claim only\n" +
+			"when its name is an id or --id supplies one. Otherwise it prints as content.\n\n" +
+			dirHelp,
+		Example: "  ranke show data/universe/b5uaxbgs...\n" +
+			"  ranke show data b5uaxbgs...\n" +
+			"  ranke show testdata/cbor/claims/derived-note.cbor --id b5uazx2e...\n" +
+			"  ranke show data b5uaxbgs... --json",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 2 {
+				if idFlag != "" {
+					return fmt.Errorf("%w: --id is for a single file; <dir> <id> already names one", errShow)
+				}
+				return showInArchive(cmd.Context(), args[0], args[1], asJSON)
+			}
+			return showFile(args[0], idFlag, asJSON)
+		},
 	}
+	cmd.Flags().StringVar(&idFlag, "id", "", "the claim's id, when the file is not named by one")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "render the claim as JSON instead of a field listing")
+	return cmd
 }
 
-func showFile(path string) error {
+// idUnknown is what a record read without its id prints in the id's place. A claim
+// record carries no id, so this is the honest answer, not a failure.
+const idUnknown = "unknown (not carried in the record)"
+
+// showFile reads path as a claim, falling back to a content dump only when the bytes
+// are not a claim record at all.
+func showFile(path, idOverride string, asJSON bool) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errShow, err)
 	}
-	idStr := filepath.Base(path)
-	id, idErr := ranke.ParseId(idStr)
-	if idErr == nil {
-		if c, err := ranke.DecodeClaim(id, b); err == nil {
-			fmt.Printf("file:  %s\n", path)
-			fmt.Printf("kind:  claim (%d bytes)\n\n", len(b))
-			printClaim(c)
-			return nil
+
+	// The id comes from --id, else the filename in an archive's flat layout, else a
+	// manifest naming this file. Absent all three, a placeholder lets the record
+	// decode and the id prints as unknown.
+	idText := idUnknown
+	id, idErr := ranke.ParseId(idOverride)
+	switch {
+	case idOverride != "" && idErr != nil:
+		return fmt.Errorf("%w: parse --id %q: %w", errShow, idOverride, idErr)
+	case idOverride != "":
+		idText = id.String()
+	default:
+		if fromName, err := ranke.ParseId(filepath.Base(path)); err == nil {
+			id, idText = fromName, fromName.String()
+		} else if fromManifest, ok := idFromManifest(path); ok {
+			id, idText = fromManifest, fromManifest.String()
+		} else if id, err = ranke.HashContent(nil); err != nil {
+			return fmt.Errorf("%w: %w", errShow, err)
 		}
 	}
-	fmt.Printf("file:  %s\n", path)
-	fmt.Printf("kind:  content (%d bytes)\n\n", len(b))
-	fmt.Println(previewBytes(b))
+
+	c, err := ranke.DecodeClaim(id, b)
+	if err != nil {
+		fmt.Printf("file:  %s\nkind:  content (%d bytes)\n\n", path, len(b))
+		fmt.Println(previewBytes(b))
+		return nil
+	}
+	fmt.Printf("file:  %s\nkind:  claim (%d bytes)\n\n", path, len(b))
+	return render(c, idText, asJSON)
+}
+
+// idFromManifest looks for a reference-artifact manifest at or above path's directory
+// and reports the id it names for this file, saying what it found and why.
+func idFromManifest(path string) (ranke.Id, bool) {
+	m, root, ok := vectors.Find(path)
+	if !ok {
+		return nil, false
+	}
+	c := m.ClaimFor(root, path)
+	if c == nil {
+		return nil, false
+	}
+	id, err := ranke.ParseId(c.Id)
+	if err != nil {
+		return nil, false
+	}
+
+	fmt.Printf("manifest: %s\n", filepath.Join(root, vectors.Name))
+	if v := m.Provenance.Version; v != "" {
+		fmt.Printf("          generated by %s %s\n", m.Provenance.Generator, v)
+	}
+	fmt.Printf("          %s has id %s\n", c.File, c.Id)
+	outcome := "must be rejected"
+	if c.Verify {
+		outcome = "must verify"
+	}
+	fmt.Printf("          %s (%s) — %s\n\n", outcome, c.Reason, c.Why)
+	return id, true
+}
+
+// render prints a claim as a field listing, or as the claim's own JSON.
+func render(c ranke.Claim, idText string, asJSON bool) error {
+	if !asJSON {
+		printClaim(c, idText)
+		return nil
+	}
+	raw, err := c.EncodeJSON(ranke.FormOriginal)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errShow, err)
+	}
+	// The claim renders its own id, which a placeholder would misreport.
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return fmt.Errorf("%w: %w", errShow, err)
+	}
+	fields["id"] = idText
+	pretty, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return fmt.Errorf("%w: %w", errShow, err)
+	}
+	fmt.Println(string(pretty))
 	return nil
 }
 
-func showInArchive(ctx context.Context, dir, idStr string) error {
+func showInArchive(ctx context.Context, dir, idStr string, asJSON bool) error {
 	_, a, err := openArchive(ctx, dir)
 	if err != nil {
 		return err
@@ -187,16 +279,24 @@ func showInArchive(ctx context.Context, dir, idStr string) error {
 	if err != nil {
 		return fmt.Errorf("%w: fetch claim: %w", errShow, err)
 	}
-	printClaim(c)
-	return nil
+	return render(c, id.String(), asJSON)
 }
 
-// --- validate ---
+// validateCmd verifies every branch closure end-to-end (§5.10).
+func validateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate <dir>",
+		Short: "Verify every branch closure end-to-end (§5.10)",
+		Long: "Walk each branch's closure, verifying every claim's integrity and\n" +
+			"authenticity, and print the tree with a mark per claim.\n\n" + dirHelp,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmdValidate(cmd.Context(), args)
+		},
+	}
+}
 
 func cmdValidate(ctx context.Context, args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("%w: ranke validate <dir>", errUsage)
-	}
 	u, a, err := openArchive(ctx, args[0])
 	if err != nil {
 		return err
@@ -290,43 +390,68 @@ func shortId(id ranke.Id) string {
 	return s
 }
 
-func printClaim(c ranke.Claim) {
+// printClaim lists a claim's ADT fields. idText overrides the printed id, so a record
+// read without one says so.
+func printClaim(c ranke.Claim, idText string) {
 	n := c.Node()
-	fmt.Printf("id:           %s\n", c.ID().String())
+	fmt.Printf("id:           %s\n", idText)
 	fmt.Printf("type:         %s\n", n.Type())
-	fmt.Printf("encoding:     %s\n", n.Encoding())
-	fmt.Printf("created_at:   %s\n", n.CreatedAt().Format("2006-01-02T15:04:05.000000000Z"))
-	switch n.ContentKind() {
-	case ranke.ContentExternal:
-		fmt.Printf("content_hash: %s\n", n.GetContentHash().String())
-		fmt.Printf("content_size: %d\n", n.GetContentSize())
-		fmt.Printf("content:      (external, %d bytes)\n", n.GetContentSize())
-	case ranke.ContentInline:
-		fmt.Printf("content_size: %d\n", n.GetContentSize())
-		if b, err := n.GetInlineContent(); err == nil && b != nil {
-			fmt.Printf("content:      %s\n", previewBytes(b))
-		}
+	fmt.Printf("created_at:   %s\n", n.CreatedAt().Format(stampFormat))
+	printContent(n, "")
+	if enc := n.Encoding(); enc != "" {
+		fmt.Printf("encoding:     %s\n", enc)
 	}
 	if c.Contributor() != nil {
 		fmt.Printf("contributor:  %s\n", c.Contributor().ID().String())
 	}
+
 	edges := c.Edges()
-	if len(edges) > 0 {
-		fmt.Printf("edges (%d):\n", len(edges))
-		for i, e := range edges {
-			fmt.Printf("  [%d] %s\n", i, e.Type())
-			fmt.Printf("      reference: %s\n", e.ID().String())
-			fmt.Printf("      → %s\n", e.Reference().String())
-			if eb, err := e.GetInlineContent(); err == nil && len(eb) > 0 {
-				fmt.Printf("      content:   %s\n", previewBytes(eb))
+	if len(edges) == 0 {
+		return
+	}
+	// Edges carry no created_at of their own; the arrow is the claim they reference.
+	fmt.Printf("edges (%d):\n", len(edges))
+	for i, e := range edges {
+		fmt.Printf("  [%d] id:         %s\n", i, e.ID().String())
+		fmt.Printf("      type:       %s\n", e.Type())
+		fmt.Printf("      → %s\n", e.Reference().String())
+		printContent(e, "      ")
+		if enc := e.Encoding(); enc != "" {
+			fmt.Printf("      encoding:   %s\n", enc)
+		}
+		if e.RelationDirection() != 0 {
+			dir := "from"
+			if e.RelationDirection() == ranke.RelationTo {
+				dir = "to"
 			}
-			if e.RelationDirection() != 0 {
-				dir := "from"
-				if e.RelationDirection() == ranke.RelationTo {
-					dir = "to"
-				}
-				fmt.Printf("      direction: %s\n", dir)
-			}
+			fmt.Printf("      direction:  %s\n", dir)
+		}
+	}
+}
+
+// stampFormat renders created_at at the nanosecond precision the record holds.
+const stampFormat = "2006-01-02T15:04:05.000000000Z"
+
+// contentBearer is what nodes and edges share: content either inline or addressed.
+type contentBearer interface {
+	ContentKind() ranke.ContentKind
+	GetContentHash() ranke.Id
+	GetContentSize() uint64
+	GetInlineContent() ([]byte, error)
+}
+
+// printContent lists the content fields of a node or an edge under one indent, so
+// both read the same.
+func printContent(b contentBearer, indent string) {
+	switch b.ContentKind() {
+	case ranke.ContentExternal:
+		fmt.Printf("%scontent_hash: %s\n", indent, b.GetContentHash().String())
+		fmt.Printf("%scontent_size: %d\n", indent, b.GetContentSize())
+		fmt.Printf("%scontent:      (external, fetch by hash)\n", indent)
+	case ranke.ContentInline:
+		fmt.Printf("%scontent_size: %d\n", indent, b.GetContentSize())
+		if raw, err := b.GetInlineContent(); err == nil && raw != nil {
+			fmt.Printf("%scontent:      %s\n", indent, previewBytes(raw))
 		}
 	}
 }
