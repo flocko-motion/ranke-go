@@ -161,11 +161,10 @@ fmt-check:
 tidy:
 	go mod tidy
 
-# Cut a release: clean tree → merge to the default branch via PR → tag the
-# merged tip → push the tag → return to your branch. The merged-PR CI is the
-# test gate (no local e2e). Usage: make release <major|minor|patch>
-# (aliases: breaking|feature|fix).
-release:
+# Cut a release: verify → rebase onto the default branch → merge via PR → tag the
+# merged tip → push the tag → watch the release workflow, failing here if it fails.
+# Usage: make release <major|minor|patch> (aliases: breaking|feature|fix).
+release: verify
 	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
