@@ -9,24 +9,16 @@ permissions:
   contents: write
 
 jobs:
-  conformance-bundle:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # need tags for `git describe`
+          fetch-depth: 0
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-          check-latest: true
-
-      - name: Build conformance bundle
-        run: make conformance-bundle VERSION=${GITHUB_REF_NAME}
-
-      - name: Attach bundle to release
+      # No build assets: consumers take the library with `go get`, and the
+      # cross-implementation artifacts live with the spec in ranke-graph.
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ranke-conformance-${{ github.ref_name }}.tar.gz
-          fail_on_unmatched_files: true
           generate_release_notes: true
