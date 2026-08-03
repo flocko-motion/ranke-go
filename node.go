@@ -233,4 +233,8 @@ const (
 	NodeContributor = string(NodeClassContribution) + "/contributor"
 	NodeHead        = string(NodeClassContribution) + "/head"
 	NodeBranches    = string(NodeClassContribution) + "/branches"
+	// NodeDelete and NodeExpiry are limiting claims: each names a target claim it
+	// restricts (paper 2 §Deletion, §Key rotation).
+	NodeDelete = string(NodeClassContribution) + "/delete"
+	NodeExpiry = string(NodeClassContribution) + "/expiry"
 )

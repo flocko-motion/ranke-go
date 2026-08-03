@@ -23,7 +23,6 @@ var (
 	errNilGraph          = errors.New("concurrent.Contribution.AddGraph: nil graph")
 	errEmptyContribution = errors.New("concurrent.Contribution.CompleteAndVerify: nothing was added")
 	errFutureDated       = errors.New("concurrent.Contribution: claim is dated after the contribution base")
-	errReservedType      = errors.New("concurrent.Contribution: node type is reserved to the Sequencer")
 	errContribution      = errors.New("concurrent.Contribution")
 )
 
@@ -37,9 +36,10 @@ var (
 // base (k, t) of step 1, staged per branch, off the sequencing thread. A bulk
 // contribution may name several branches; CompleteAndVerify seals them all.
 type contribution struct {
-	s        *Sequencer
-	baseHead ranke.Id
-	baseTime time.Time
+	s           *Sequencer
+	baseHead    ranke.Id
+	baseTime    time.Time
+	constraints ranke.Constraints
 
 	mu       sync.Mutex
 	sealed   bool
@@ -111,14 +111,14 @@ func (c *contribution) note(branch string) {
 }
 
 // admissible applies the two step-2 rules: a claim is dated at or before the base
-// time t (§Timestamping), and its type is one the Sequencer leaves to clients.
+// time t (§Timestamping), and its type is not one the constraints withhold.
 func (c *contribution) admissible(cl ranke.Claim) error {
 	if t := cl.Node().CreatedAt(); t.After(c.baseTime) {
 		return fmt.Errorf("%w: %s is dated %s, base is %s", errFutureDated,
 			cl.ID(), t.Format(time.RFC3339Nano), c.baseTime.Format(time.RFC3339Nano))
 	}
-	if cl.Node().Type() == ranke.NodeBranches {
-		return fmt.Errorf("%w: %s is a %s claim", errReservedType, cl.ID(), ranke.NodeBranches)
+	if err := c.constraints.AdmitType(cl.Node().Type()); err != nil {
+		return fmt.Errorf("%w: %s", err, cl.ID())
 	}
 	return nil
 }

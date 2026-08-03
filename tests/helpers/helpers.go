@@ -12,8 +12,10 @@ import (
 
 // Contribute drives one contribution through the Sequencer contract's six steps —
 // open, fill, verify, persist, merge — returning the archive head it advanced to.
-func Contribute(ctx context.Context, seq ranke.Sequencer, branch string, claims []ranke.Claim) (ranke.Id, error) {
-	c, err := seq.NewContribution(ctx)
+// opts carry the constraints the contribution opens under.
+func Contribute(ctx context.Context, seq ranke.Sequencer, branch string, claims []ranke.Claim,
+	opts ...ranke.ContributionOption) (ranke.Id, error) {
+	c, err := seq.NewContribution(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}

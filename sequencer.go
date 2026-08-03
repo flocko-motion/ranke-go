@@ -18,8 +18,9 @@ type Sequencer interface {
 	// GetContributor returns the contributor the Sequencer attests branch
 	// advances with.
 	GetContributor() Contributor
-	// NewContribution opens a contribution against the current archive.
-	NewContribution(ctx context.Context) (Contribution, error)
+	// NewContribution opens a contribution against the current archive, under the
+	// constraints opts declare (step 1).
+	NewContribution(ctx context.Context, opts ...ContributionOption) (Contribution, error)
 	// Merge commits a persisted contribution, advancing the head (step 6),
 	// and returns a Receipt.
 	Merge(ctx context.Context, c MergableContribution) (Receipt, error)
