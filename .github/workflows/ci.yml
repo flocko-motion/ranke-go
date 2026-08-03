@@ -1,0 +1,42 @@
+name: CI
+
+# The test gate the Makefile's `release` target assumes exists. Every push and
+# every PR, so a tag is only ever cut from a tested main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.mod is the single source of truth for the toolchain.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Gofmt
+        run: make fmt-check
+
+      # -p 1 because every neo4j-touching test flushes the database at open, so
+      # parallel packages wipe each other. Backend rows whose service is not up
+      # skip themselves, which is why this is green on a bare runner.
+      - name: Test
+        run: go test -p 1 -count=1 ./...
+
+      # The scenarios' checked-in references must still reproduce byte for byte.
+      - name: Scenario determinism
+        run: make verify-scenarios
+
+      # scenario.md files are generated from main.go comments.
+      - name: Scenario docs in sync
+        run: make verify-docs
