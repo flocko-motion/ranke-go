@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/internal/vectors"
 )
 
 // externalBlob is the content the external-content claim addresses.
@@ -97,7 +98,7 @@ func (g *gen) external(who ranke.Contributor) error {
 		"content_hash + content_size in the record, bytes alongside (§Content)"); err != nil {
 		return err
 	}
-	return g.addContent("external-blob", externalBlob, hash, true, reasonOK,
+	return g.addContent("external-blob", externalBlob, hash, true, vectors.ReasonOK,
 		"the bytes external-content addresses; hashes to the content_hash it declares")
 }
 
