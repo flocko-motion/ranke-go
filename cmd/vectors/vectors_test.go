@@ -61,65 +61,20 @@ func TestVectorsAreReproducible(t *testing.T) {
 	require.Equal(t, walk(a), walk(b), "two runs of the generator must agree byte for byte")
 }
 
-// TestClaimCasesHoldAsDescribed verifies every claim case through the library: the
-// ones marked verify must pass the closure verifier, the rest must be refused.
+// TestClaimCasesHoldAsDescribed verifies every claim case through the library, using
+// the same checker the conformance gate runs, so the two cannot disagree.
 func TestClaimCasesHoldAsDescribed(t *testing.T) {
-	ctx := context.Background()
 	dir, m := generate(t)
 
-	// The universe holds what the set says is valid, so a case's contributor
-	// resolves exactly when the set actually carries it.
-	u := ranke.NewMemoryUniverse()
-	for _, c := range m.Claims {
-		if !c.Verify {
-			continue
-		}
-		cl := load(t, dir, c)
-		require.NoError(t, u.PutClaims(ctx, []ranke.Claim{cl}))
-	}
-
-	for _, c := range m.Claims {
-		t.Run(filepath.Base(c.File), func(t *testing.T) {
-			ok := accepts(ctx, t, dir, u, c)
-			require.Equal(t, c.Verify, ok, "case %q: %s", c.File, c.Why)
+	outcomes, err := vectors.CheckClaims(context.Background(), dir, &m)
+	require.NoError(t, err)
+	require.Len(t, outcomes, len(m.Claims))
+	for _, o := range outcomes {
+		t.Run(filepath.Base(o.File), func(t *testing.T) {
+			require.Truef(t, o.Holds(), "expected verify=%v, got %v (%s) — %s",
+				o.Expected, o.Accepted, o.Reason, o.Why)
 		})
 	}
-}
-
-// accepts reports whether the library takes the case's bytes under the case's id.
-func accepts(ctx context.Context, t *testing.T, dir string, u ranke.Universe, c vectors.ClaimCase) bool {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, c.File))
-	require.NoError(t, err)
-
-	id, err := ranke.ParseId(c.Id)
-	if err != nil {
-		return false // a malformed id is refused before any hashing
-	}
-	cl, err := ranke.DecodeClaim(id, raw)
-	if err != nil {
-		return false
-	}
-	g, err := ranke.NewGraph(ctx, u)
-	require.NoError(t, err)
-	if err := g.AddClaims(ctx, cl); err != nil {
-		return false
-	}
-	run := g.Verify()
-	run.Wait()
-	return run.Err() == nil && len(run.Failures()) == 0
-}
-
-// load decodes a case's record under the id it is offered as.
-func load(t *testing.T, dir string, c vectors.ClaimCase) ranke.Claim {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, c.File))
-	require.NoError(t, err)
-	id, err := ranke.ParseId(c.Id)
-	require.NoError(t, err)
-	cl, err := ranke.DecodeClaim(id, raw)
-	require.NoError(t, err)
-	return cl
 }
 
 // TestRejectionIsNotMereAbsence is the control the rejected cases need: only the
@@ -133,14 +88,16 @@ func TestRejectionIsNotMereAbsence(t *testing.T) {
 	root := filepath.Join("claims", "root-contributor.cbor")
 	for _, c := range m.Claims {
 		if c.File == root {
-			require.NoError(t, u.PutClaims(ctx, []ranke.Claim{load(t, dir, c)}))
+			cl, err := vectors.Decode(dir, c)
+			require.NoError(t, err)
+			require.NoError(t, u.PutClaims(ctx, []ranke.Claim{cl}))
 		}
 	}
 
 	note := filepath.Join("claims", "source-note.cbor")
 	for _, c := range m.Claims {
 		if c.File == note {
-			require.True(t, accepts(ctx, t, dir, u, c),
+			require.True(t, vectors.Accepts(ctx, u, dir, c),
 				"an unstored claim verifies once its contributor resolves")
 		}
 	}
@@ -152,15 +109,12 @@ func TestContentCasesHoldAsDescribed(t *testing.T) {
 	dir, m := generate(t)
 	require.NotEmpty(t, m.Content)
 
-	for _, c := range m.Content {
-		t.Run(filepath.Base(c.File), func(t *testing.T) {
-			blob, err := os.ReadFile(filepath.Join(dir, c.File))
-			require.NoError(t, err)
-			hash, err := ranke.ParseId(c.Hash)
-			require.NoError(t, err)
-
-			err = ranke.VerifyContent(hash, uint64(len(blob)), blob)
-			require.Equal(t, c.Verify, err == nil, "case %q: %s", c.File, c.Why)
+	outcomes, err := vectors.CheckContent(dir, &m)
+	require.NoError(t, err)
+	for _, o := range outcomes {
+		t.Run(filepath.Base(o.File), func(t *testing.T) {
+			require.Truef(t, o.Holds(), "expected verify=%v, got %v (%s) — %s",
+				o.Expected, o.Accepted, o.Reason, o.Why)
 		})
 	}
 }

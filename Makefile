@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -112,10 +112,20 @@ test/matrix:
 test/performance/%:
 	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
 
-# test — the layers in order of foundation: the datatype, then the feature
-# suite, then cross-backend agreement (which skips the rows whose services
-# aren't up).
-test: test/core test/integration test/matrix
+# test/vectors — the spec's own conformance artifacts, fetched from the latest
+# ranke-graph release. The gate that catches an encoder change: verification hashes
+# stored bytes, so existing claims keep verifying while newly built ones drift, and
+# nothing else here would notice. Point RANKE_TESTDATA_DIR at an extracted set to
+# run it offline. Unreachable, it warns and skips here but fails in CI ($CI set).
+# Verbose deliberately: go test discards a passing package's output, so that warning
+# would otherwise be invisible.
+test/vectors:
+	go test ./tests/ -run TestPublished -v -count=1
+
+# test — the layers in order of foundation: the datatype, then the spec's artifacts,
+# then the feature suite, then cross-backend agreement (which skips the rows whose
+# services aren't up).
+test: test/core test/vectors test/integration test/matrix
 
 test-verbose:
 	go test -v ./tests/...
