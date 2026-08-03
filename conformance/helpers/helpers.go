@@ -63,9 +63,11 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 // so scenario claims and minted branch tables share one monotone timeline.
 func (s *Scenario) Tick() time.Time { return s.NextTimestamp(time.Second) }
 
-// ReloadAndVerify reopens the persisted bundle at its latest head, validates
-// every branch closure, asserts expectBranch → expectHead, and writes ids.txt.
-func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead string) {
+// ReloadAndVerify reopens the persisted bundle at its latest head, validates every
+// branch closure, requires expectBranch among them, and writes ids.txt. What the head
+// ids are is the reference bundle's business, so nothing here pins one: a value in
+// code could only be corrected by hand on every intentional change.
+func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch string) {
 	u := Must(fs.New(UniverseDir))
 	hist := Must(histfile.New(BranchTableHeadPath))
 	head := Must(hist.Latest(ctx)).GetId() // the archive head k the timeline advanced to
@@ -96,10 +98,6 @@ func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch, expectHead
 
 		if b.Name() == expectBranch {
 			found = true
-			if branchHead.String() != expectHead {
-				log.Fatalf("scenario.ReloadAndVerify: branch %q head mismatch\n  expected: %s\n  got:      %s",
-					expectBranch, expectHead, branchHead.String())
-			}
 		}
 		for _, id := range CollectIds(ctx, g) {
 			allIds[id] = struct{}{}

@@ -186,18 +186,29 @@ major minor patch breaking feature fix:
 scenarios:
 	@conformance/run.sh
 
-# Run each scenario fresh, diff the produced archive + ids.txt
-# against the committed archive_reference/ + ids_reference.txt.
-# Fails on any drift — the cross-implementation conformance promise.
-# To update the references after an intentional change:
-# `make update-references`.
+# Run each scenario fresh and diff the produced bundle against the committed
+# reference: same claims under the same ids, same branch heads at the same heights.
+#
+# B_h is compared on its id and height columns only. Its third column is the wall
+# clock at which a head was committed, so a byte diff of it can never pass — the
+# timeline records when, which is exactly the part that does not reproduce.
+#
+# Update after an intentional change: `make update-references`.
 verify-scenarios:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
 		(cd "$$d" && rm -rf data && go run . > /dev/null); \
-		diff -r "$$d/data_reference" "$$d/data" > /dev/null \
-			&& echo "$$d: matches reference ✓" \
-			|| { echo "$$d: DRIFT — differs from checked-in reference"; exit 1; }; \
+		want=$$(mktemp); got=$$(mktemp); \
+		awk '{print $$1, $$2}' "$$d/data_reference/branches/B_h" > "$$want"; \
+		awk '{print $$1, $$2}' "$$d/data/branches/B_h" > "$$got"; \
+		if diff -r --exclude=B_h "$$d/data_reference" "$$d/data" > /dev/null \
+			&& diff "$$want" "$$got" > /dev/null; then \
+			echo "$$d: matches reference ✓"; \
+		else \
+			echo "$$d: DRIFT — differs from checked-in reference"; \
+			rm -f "$$want" "$$got"; exit 1; \
+		fi; \
+		rm -f "$$want" "$$got"; \
 	done
 
 # Replace each scenario's archive_reference/ + ids_reference.txt

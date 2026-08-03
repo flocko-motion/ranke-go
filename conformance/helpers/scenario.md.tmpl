@@ -10,8 +10,10 @@
 {{end}}{{end}}{{end}}
 ## Output bundle
 
-`data_reference/` is the committed bundle the scenario emits.
-A conformant implementation must reproduce it byte-for-byte:
+`data_reference/` is the committed bundle the scenario emits. A conformant
+implementation reproduces every claim and content blob byte-for-byte, and reaches the
+same branch heads at the same heights. B_h's third column is the wall clock at which
+each head was committed, so it is the one thing that does not reproduce.
 
 ```
 data_reference/

@@ -10,7 +10,9 @@ reproduce the same bundle byte-for-byte.
 
 Every claim is built inline so the reader sees the exact
 ClaimBuilder + Sign call for each one — no local helpers hiding
-the pattern.
+the pattern. A claim that references others declares its Height
+(§4.1): 1 + the max height of everything it points at (the
+contributor included).
 
 Run from anywhere:
 
@@ -18,7 +20,7 @@ Run from anywhere:
 
 ## Steps
 
-### 1. Alice as initial node, signed by her Ed25519 key.
+### 1. Alice as initial node, signed by her Ed25519 key. Her content is her multikey-encoded public key (§5.7). She is the Sequencer's self, stored at bootstrap, so she does not join the contribution batch.
 
 ### 2. Ingest the two source emails.
 
@@ -26,23 +28,20 @@ Run from anywhere:
 
 ### 4. "Alice likes apples" — entities + their relation, made together.
 
-### 5. "Alice knows Bob" — Alice already in the graph; add Bob and the relation.
+### 5. "Alice knows Bob" — Alice already built; add Bob and the relation.
 
-### 6. "Bob and Bob Jr are family" (symmetric) — Bob already in the graph.
+### 6. "Bob and Bob Jr are family" (symmetric) — Bob already built.
 
-### 7. Consolidate, then compose an Archive from its parts
+### 7. Compose the bundle (filesystem Universe under data/universe/, head-id timeline under data/branches/B_h) and merge one contribution carrying every claim. The dev Sequencer runs the paper's six steps — verify, auto-consolidate the open heads, seed, and mint the branch table — advancing branch "main". Real deployments would stack a mem cache on top, or swap S3 in below; this keeps it flat so the bundle is just a directory.
 
-(filesystem Universe under data/universe/, B_h file under
-data/branches/) and persist as branch "main". Real deployments
-would stack a MemUniverse on top, or swap S3Universe in below —
-this scenario keeps it flat so the bundle is just a directory.
-
-### 8. Reload, verify every branch, dump ids, assert head.
+### 8. Reload, verify every branch closure, dump ids.
 
 ## Output bundle
 
-`data_reference/` is the committed bundle the scenario emits.
-A conformant implementation must reproduce it byte-for-byte:
+`data_reference/` is the committed bundle the scenario emits. A conformant
+implementation reproduces every claim and content blob byte-for-byte, and reaches the
+same branch heads at the same heights. B_h's third column is the wall clock at which
+each head was committed, so it is the one thing that does not reproduce.
 
 ```
 data_reference/

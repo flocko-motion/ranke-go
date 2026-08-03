@@ -128,7 +128,10 @@ func extractScenario(dir, mainGo string) (Scenario, error) {
 	}
 	scn.Intro = strings.Join(intro, "\n\n")
 
-	// Sections: comment groups whose first line is "--- N. Title ---".
+	// Sections: comment groups opening "--- N. Title ---". A title long enough to
+	// wrap closes on a later line, so the marker is matched over the joined group
+	// rather than its first line — otherwise a wrapped step vanishes from the docs
+	// with nothing to say it did.
 	for _, cg := range file.Comments {
 		if cg.End() < file.Package {
 			continue
@@ -137,18 +140,33 @@ func extractScenario(dir, mainGo string) (Scenario, error) {
 		if len(lines) == 0 {
 			continue
 		}
-		sm := sectionRe.FindStringSubmatch(lines[0])
-		if sm == nil {
+		title, rest := splitSection(lines)
+		if title == nil {
 			continue
 		}
 		scn.Sections = append(scn.Sections, Section{
-			Num:   sm[1],
-			Title: sm[2],
-			Body:  commentText(strings.Join(lines[1:], "\n")),
+			Num:   title[1],
+			Title: collapse(title[2]),
+			Body:  commentText(strings.Join(rest, "\n")),
 		})
 	}
 	return scn, nil
 }
+
+// splitSection matches the "--- N. Title ---" marker across as many leading lines as
+// it spans, returning the submatches and the lines after it.
+func splitSection(lines []string) ([]string, []string) {
+	for n := 1; n <= len(lines); n++ {
+		joined := strings.Join(lines[:n], " ")
+		if sm := sectionRe.FindStringSubmatch(joined); sm != nil {
+			return sm, lines[n:]
+		}
+	}
+	return nil, nil
+}
+
+// collapse squeezes the runs of whitespace that joining wrapped lines leaves behind.
+func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // commentText cleans up text extracted from a go/ast CommentGroup:
 // trims trailing whitespace per line, collapses runs of blank lines,
