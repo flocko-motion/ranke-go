@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 
@@ -24,8 +23,9 @@ const (
 )
 
 // artifacts resolves the set: the directory testdataEnv names, else the published
-// bundle. Unreachable, that is a warning here and a failure in CI — a developer on a
-// train should not be blocked, but the gate has to hold where it counts.
+// bundle. Unreachable is a failure — silently not checking conformance is the one
+// outcome worse than a red run. Fetch caches, so this costs one conditional request
+// per run rather than a download.
 func artifacts(t *testing.T) (string, *vectors.Manifest) {
 	t.Helper()
 	root := os.Getenv(testdataEnv)
@@ -35,19 +35,8 @@ func artifacts(t *testing.T) (string, *vectors.Manifest) {
 			url = vectors.LatestURL
 		}
 		fetched, err := vectors.Fetch(context.Background(), url, t.TempDir())
-		if err != nil {
-			if os.Getenv("CI") != "" {
-				require.NoErrorf(t, err, "fetch %s in CI, where the vectors must be checked", url)
-			}
-			// Straight to stderr: a skip reason is invisible without -v, and silently
-			// not checking conformance is the outcome to avoid.
-			fmt.Fprintf(os.Stderr,
-				"\nWARNING: %s unreachable (%v)\n"+
-					"  the spec's conformance vectors were NOT checked.\n"+
-					"  Set %s to an extracted set to run offline.\n\n",
-				url, err, testdataEnv)
-			t.Skip("artifact set unreachable")
-		}
+		require.NoErrorf(t, err, "fetch %s — point %s at an extracted set to work offline",
+			url, testdataEnv)
 		root = fetched
 	}
 	m, err := vectors.Load(root)

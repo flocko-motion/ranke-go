@@ -116,9 +116,9 @@ test/performance/%:
 # ranke-graph release. The gate that catches an encoder change: verification hashes
 # stored bytes, so existing claims keep verifying while newly built ones drift, and
 # nothing else here would notice. Point RANKE_TESTDATA_DIR at an extracted set to
-# run it offline. Unreachable, it warns and skips here but fails in CI ($CI set).
-# Verbose deliberately: go test discards a passing package's output, so that warning
-# would otherwise be invisible.
+# run it offline. Unreachable is a failure, here as in CI: not checking conformance
+# is worse than a red run. The bundle is cached and revalidated, so a run that finds
+# the release unchanged transfers nothing.
 test/vectors:
 	go test ./tests/ -run TestPublished -v -count=1
 
