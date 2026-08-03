@@ -19,53 +19,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
-)
-
-// manifest names every artifact and the outcome an implementation must reach for it.
-type manifest struct {
-	Note       string        `json:"note"`
-	Provenance provenance    `json:"provenance"`
-	Claims     []claimCase   `json:"claims"`
-	Content    []contentCase `json:"content"`
-}
-
-// provenance records what produced the set, so a reader can reproduce it. Version
-// is "(devel)" unless the generator ran as a released module.
-type provenance struct {
-	Generator   string `json:"generator"`
-	Version     string `json:"version"`
-	GeneratedAt string `json:"generated_at"`
-}
-
-// claimCase is one claim record under the id it is offered as. The id is not part
-// of the record, so the pairing is what a case asserts.
-type claimCase struct {
-	File   string `json:"file"`
-	Id     string `json:"id"`
-	Verify bool   `json:"verify"`
-	Reason string `json:"reason"`
-	Why    string `json:"why"`
-}
-
-// contentCase is one content blob under the hash it is offered as.
-type contentCase struct {
-	File   string `json:"file"`
-	Hash   string `json:"hash"`
-	Verify bool   `json:"verify"`
-	Reason string `json:"reason"`
-	Why    string `json:"why"`
-}
-
-// Reason codes, so a test asserts the rejection it expected rather than any.
-const (
-	reasonOK              = "ok"
-	reasonIDMismatch      = "id_mismatch"
-	reasonWrongMessage    = "wrong_message"
-	reasonMalformedID     = "malformed_id"
-	reasonIdentitySign    = "identity_sign_mismatch"
-	reasonNoContributor   = "unresolvable_contributor"
-	reasonHeightWrong     = "height_wrong"
-	reasonContentMismatch = "content_hash_mismatch"
+	"github.com/flocko-motion/ranke-go/internal/vectors"
 )
 
 // epoch fixes every timestamp, so a regenerated set is byte-identical.
@@ -82,7 +36,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	p := provenance{
+	p := vectors.Provenance{
 		Generator:   generatorPath,
 		Version:     generatorVersion(),
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
@@ -104,7 +58,7 @@ func generatorVersion() string {
 }
 
 // run builds the artifacts and writes them under dir.
-func run(ctx context.Context, dir string, p provenance) error {
+func run(ctx context.Context, dir string, p vectors.Provenance) error {
 	g := &gen{dir: dir, prov: p, ids: map[string]ranke.Id{}, raw: map[string][]byte{}}
 	for _, sub := range []string{"claims", "content"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -123,9 +77,9 @@ func run(ctx context.Context, dir string, p provenance) error {
 // gen accumulates artifacts and the cases describing them.
 type gen struct {
 	dir     string
-	prov    provenance
-	claims  []claimCase
-	content []contentCase
+	prov    vectors.Provenance
+	claims  []vectors.ClaimCase
+	content []vectors.ContentCase
 	ids     map[string]ranke.Id
 	raw     map[string][]byte
 	who     ranke.Contributor // the root identity, which the rejected cases reuse
@@ -133,7 +87,7 @@ type gen struct {
 
 // writeManifest renders the manifest last, when every case is known.
 func (g *gen) writeManifest() error {
-	m := manifest{
+	m := vectors.Manifest{
 		Note: "Reference artifacts for the Ranke-Graph ADT. A claim record is {1: S(node)}; " +
 			"its id is not in the record, so each case pairs bytes with the id they are offered " +
 			"under. Verification hashes the record as received, never a re-encode.",
@@ -145,7 +99,7 @@ func (g *gen) writeManifest() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(g.dir, "manifest.json"), append(b, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(g.dir, vectors.Name), append(b, '\n'), 0o644)
 }
 
 // addClaim writes a claim that must verify, remembering it for the broken cases.
@@ -159,8 +113,8 @@ func (g *gen) addClaim(name string, c ranke.Claim, why string) error {
 		return err
 	}
 	g.ids[name], g.raw[name] = c.ID(), raw
-	g.claims = append(g.claims, claimCase{
-		File: file, Id: c.ID().String(), Verify: true, Reason: reasonOK, Why: why,
+	g.claims = append(g.claims, vectors.ClaimCase{
+		File: file, Id: c.ID().String(), Verify: true, Reason: vectors.ReasonOK, Why: why,
 	})
 	return nil
 }
@@ -171,7 +125,7 @@ func (g *gen) addBroken(name string, raw []byte, id, reason, why string) error {
 	if err := os.WriteFile(filepath.Join(g.dir, file), raw, 0o644); err != nil {
 		return err
 	}
-	g.claims = append(g.claims, claimCase{
+	g.claims = append(g.claims, vectors.ClaimCase{
 		File: file, Id: id, Verify: false, Reason: reason, Why: why,
 	})
 	return nil
@@ -183,7 +137,7 @@ func (g *gen) addContent(name string, blob []byte, hash ranke.Id, ok bool, reaso
 	if err := os.WriteFile(filepath.Join(g.dir, file), blob, 0o644); err != nil {
 		return err
 	}
-	g.content = append(g.content, contentCase{
+	g.content = append(g.content, vectors.ContentCase{
 		File: file, Hash: hash.String(), Verify: ok, Reason: reason, Why: why,
 	})
 	return nil

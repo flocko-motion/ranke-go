@@ -2,12 +2,14 @@
 
 Conformance scenario 02 — agent analyses two emails.
 
-An operator (identity-Sign contributor) ingests two emails as
-source/email claims. An extraction agent (signed by its own
-Ed25519 key) is itself contributed by the operator; the agent
-then derives entities and relations from the emails — a summary,
-four entities (Alice, apples, Bob Sr, Bob Jr), and four relations
-(likes, knows, ignores, family).
+An operator (the Sequencer's self, an Ed25519-keyed contributor)
+ingests two emails as source/email claims. An extraction agent
+(its own Ed25519 key) is itself contributed by the operator — the
+operator's key signs the agent's contributor claim, whose content
+is the agent's public key (§5.7). The agent then derives entities
+and relations from the emails: a summary, four entities (Alice,
+apples, Bob Sr, Bob Jr), and four relations (likes, knows, ignores,
+family).
 
 Two Bobs from two emails get distinct ids by content-addressing
 (different derivation/source edges → different node hashes). The
@@ -15,16 +17,14 @@ Two Bobs from two emails get distinct ids by content-addressing
 
 Demonstrates the multi-contributor pattern (operator + agent) and
 the §3.5 derivation chain (every derived claim cites its source
-via a derivation/source edge).
+via a derivation/source edge). A referencing claim declares its
+Height (§4.1): 1 + the max height of everything it points at.
 
 ## Steps
 
-### 1. Operator: identity-Sign root contributor.
+### 1. Operator: an Ed25519-keyed root contributor (the Sequencer's self, stored at bootstrap, so it does not join the batch). Its key is derived deterministically from its identity so the bundle reproduces.
 
-### 2. Extraction agent — Ed25519-signed contributor under operator.
-
-The agent claim itself is signed by operator (identity-Sign);
-agentAKey is bound to the agent for the agent's OWN contributions.
+### 2. Extraction agent — an Ed25519 contributor vouched for by the operator: the operator's key signs it, its content is the agent's public key. agentAKey is then bound to the agent for its OWN claims.
 
 ### 3. Ingest two source emails, attributed to the operator.
 
@@ -43,14 +43,16 @@ neutral. Values are decimal-encoded strings since edge Fields
 is map[string]string. They participate in the canonical
 encoding — variant impls must match byte-for-byte.
 
-### 7. AddGraph — archive auto-consolidates the open heads and persists.
+### 7. Merge one contribution carrying every claim; the dev Sequencer verifies, auto-consolidates the open heads, seeds, and mints the branch table, advancing branch "main".
 
-### 8. Reload, verify every branch, dump ids, assert head.
+### 8. Reload, verify every branch closure, dump ids.
 
 ## Output bundle
 
-`data_reference/` is the committed bundle the scenario emits.
-A conformant implementation must reproduce it byte-for-byte:
+`data_reference/` is the committed bundle the scenario emits. A conformant
+implementation reproduces every claim and content blob byte-for-byte, and reaches the
+same branch heads at the same heights. B_h's third column is the wall clock at which
+each head was committed, so it is the one thing that does not reproduce.
 
 ```
 data_reference/

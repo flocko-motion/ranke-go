@@ -38,10 +38,6 @@ import (
 // single word at every site.
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-// Expected final head of branch "main" — hardcoded so the
-// scenario itself fails loud if anything in the chain changes.
-const expectedMainHead = "b5uavhycqdpbnxuxx5q7qxhyhdsjr4pv7sprleu2ka764ptlnbwndqe5bgjbddqn5wwlj77yevmtfatwivrfn7bhuycxcx6z6iiv5ibcxai"
-
 func main() {
 	ctx := context.Background()
 	s := helpers.New("01 - personal knowledge graph",
@@ -236,6 +232,6 @@ func main() {
 	}))
 	_ = head
 
-	// --- 8. Reload, verify every branch, dump ids, assert head. ---
-	s.ReloadAndVerify(ctx, "main", expectedMainHead)
+	// --- 8. Reload, verify every branch closure, dump ids. ---
+	s.ReloadAndVerify(ctx, "main")
 }

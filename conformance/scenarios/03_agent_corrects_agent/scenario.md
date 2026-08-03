@@ -21,11 +21,12 @@ based on contributor trust + recency + their own policy. The
 graph documents the disagreement, it does not decide.
 
 Maps to spec §2.2 ("contradictions in the evidence base are
-themselves evidence") and §3.5 (conviction values).
+themselves evidence") and §3.5 (conviction values). A referencing
+claim declares its Height (§4.1): 1 + the max reference height.
 
 ## Steps
 
-### 1. Operator + two extraction agents.
+### 1. Operator (the Sequencer's Ed25519-keyed self, stored at bootstrap) plus two extraction agents, each vouched for by the operator with the agent's public key as content (§5.7).
 
 ### 2. Source email — ambiguous reference to "brother".
 
@@ -38,14 +39,16 @@ themselves evidence") and §3.5 (conviction values).
 First a NEGATION — identical relation shape but conviction=-1.0,
 attributed to agentB. Says: "agentA's claim is wrong."
 
-### 6. AddGraph — archive auto-consolidates the open heads.
+### 6. Merge one contribution carrying every claim; the dev Sequencer verifies, auto-consolidates the open heads, seeds, and mints the branch table, advancing branch "main".
 
-### 7. Reload, verify every branch, dump ids, assert head.
+### 7. Reload, verify every branch closure, dump ids.
 
 ## Output bundle
 
-`data_reference/` is the committed bundle the scenario emits.
-A conformant implementation must reproduce it byte-for-byte:
+`data_reference/` is the committed bundle the scenario emits. A conformant
+implementation reproduces every claim and content blob byte-for-byte, and reaches the
+same branch heads at the same heights. B_h's third column is the wall clock at which
+each head was committed, so it is the one thing that does not reproduce.
 
 ```
 data_reference/

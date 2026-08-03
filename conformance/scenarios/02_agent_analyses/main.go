@@ -40,8 +40,6 @@ import (
 
 func must[T any](v T, rest ...any) T { return helpers.Must(v, rest...) }
 
-const expectedMainHead = "b5uatgv3kb65wevvasulzfvyrqpkaicrcjlnspedy373bpbb23mdh7aasfroxcvf6lg3jujsul2lzpc77exrmfd2e6euji67airsuoz44by"
-
 func main() {
 	ctx := context.Background()
 	s := helpers.New("02 - agent analyses",
@@ -237,6 +235,6 @@ func main() {
 		likes, knows, ignores, family,
 	}))
 
-	// --- 8. Reload, verify every branch, dump ids, assert head. ---
-	s.ReloadAndVerify(ctx, "main", expectedMainHead)
+	// --- 8. Reload, verify every branch closure, dump ids. ---
+	s.ReloadAndVerify(ctx, "main")
 }

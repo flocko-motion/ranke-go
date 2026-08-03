@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -112,10 +112,20 @@ test/matrix:
 test/performance/%:
 	@RANKE_PERF_SIZE=$* go test ./tests/performance/ -run TestPerformanceMatrix -v -count=1 -timeout 30m
 
-# test — the layers in order of foundation: the datatype, then the feature
-# suite, then cross-backend agreement (which skips the rows whose services
-# aren't up).
-test: test/core test/integration test/matrix
+# test/vectors — the spec's own conformance artifacts, fetched from the latest
+# ranke-graph release. The gate that catches an encoder change: verification hashes
+# stored bytes, so existing claims keep verifying while newly built ones drift, and
+# nothing else here would notice. Point RANKE_TESTDATA_DIR at an extracted set to
+# run it offline. Unreachable is a failure, here as in CI: not checking conformance
+# is worse than a red run. The bundle is cached and revalidated, so a run that finds
+# the release unchanged transfers nothing.
+test/vectors:
+	go test ./tests/ -run TestPublished -v -count=1
+
+# test — the layers in order of foundation: the datatype, then the spec's artifacts,
+# then the feature suite, then cross-backend agreement (which skips the rows whose
+# services aren't up).
+test: test/core test/vectors test/integration test/matrix
 
 test-verbose:
 	go test -v ./tests/...
@@ -161,11 +171,10 @@ fmt-check:
 tidy:
 	go mod tidy
 
-# Cut a release: clean tree → merge to the default branch via PR → tag the
-# merged tip → push the tag → return to your branch. The merged-PR CI is the
-# test gate (no local e2e). Usage: make release <major|minor|patch>
-# (aliases: breaking|feature|fix).
-release:
+# Cut a release: verify → rebase onto the default branch → merge via PR → tag the
+# merged tip → push the tag → watch the release workflow, failing here if it fails.
+# Usage: make release <major|minor|patch> (aliases: breaking|feature|fix).
+release: verify
 	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
@@ -177,18 +186,29 @@ major minor patch breaking feature fix:
 scenarios:
 	@conformance/run.sh
 
-# Run each scenario fresh, diff the produced archive + ids.txt
-# against the committed archive_reference/ + ids_reference.txt.
-# Fails on any drift — the cross-implementation conformance promise.
-# To update the references after an intentional change:
-# `make update-references`.
+# Run each scenario fresh and diff the produced bundle against the committed
+# reference: same claims under the same ids, same branch heads at the same heights.
+#
+# B_h is compared on its id and height columns only. Its third column is the wall
+# clock at which a head was committed, so a byte diff of it can never pass — the
+# timeline records when, which is exactly the part that does not reproduce.
+#
+# Update after an intentional change: `make update-references`.
 verify-scenarios:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
 		(cd "$$d" && rm -rf data && go run . > /dev/null); \
-		diff -r "$$d/data_reference" "$$d/data" > /dev/null \
-			&& echo "$$d: matches reference ✓" \
-			|| { echo "$$d: DRIFT — differs from checked-in reference"; exit 1; }; \
+		want=$$(mktemp); got=$$(mktemp); \
+		awk '{print $$1, $$2}' "$$d/data_reference/branches/B_h" > "$$want"; \
+		awk '{print $$1, $$2}' "$$d/data/branches/B_h" > "$$got"; \
+		if diff -r --exclude=B_h "$$d/data_reference" "$$d/data" > /dev/null \
+			&& diff "$$want" "$$got" > /dev/null; then \
+			echo "$$d: matches reference ✓"; \
+		else \
+			echo "$$d: DRIFT — differs from checked-in reference"; \
+			rm -f "$$want" "$$got"; exit 1; \
+		fi; \
+		rm -f "$$want" "$$got"; \
 	done
 
 # Replace each scenario's archive_reference/ + ids_reference.txt
