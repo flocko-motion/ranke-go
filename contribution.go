@@ -11,6 +11,57 @@ import (
 	"time"
 )
 
+// Constraints are what a contribution may do, which the Sequencer then guarantees.
+// They are the tools an access system is built from: the caller declares, the
+// Sequencer enforces, and nothing here knows who is asking.
+type Constraints struct {
+	lifted map[string]bool // reserved node types this contribution may carry
+}
+
+// ContributionOption sets one constraint.
+type ContributionOption func(*Constraints)
+
+// NewConstraints applies opts. The zero value is the strictest reading: every
+// reserved type refused.
+func NewConstraints(opts ...ContributionOption) Constraints {
+	var c Constraints
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return c
+}
+
+// WithLiftedTypes admits node types otherwise reserved to the Sequencer. Only a
+// caller holding the Sequencer can widen this far — over the wire it is a request
+// the receiver decides on, never a declaration it honours.
+func WithLiftedTypes(types ...string) ContributionOption {
+	return func(c *Constraints) {
+		if c.lifted == nil {
+			c.lifted = make(map[string]bool, len(types))
+		}
+		for _, t := range types {
+			c.lifted[t] = true
+		}
+	}
+}
+
+// reservedTypes are the Sequencer's alone (paper 2 §Sequencer step 2): the branch
+// table it mints, and the limiting claims that restrict another claim.
+var reservedTypes = map[string]bool{
+	NodeBranches: true,
+	NodeDelete:   true,
+	NodeExpiry:   true,
+}
+
+// AdmitType reports whether a claim of nodeType may be added under these
+// constraints.
+func (c Constraints) AdmitType(nodeType string) error {
+	if reservedTypes[nodeType] && !c.lifted[nodeType] {
+		return WithDetail(ErrReservedType, nodeType)
+	}
+	return nil
+}
+
 // Contribution is an in-progress advance of a Ranke-Archive: open it against a
 // base RA_k, fill it, then CompleteAndVerify seals and verifies it.
 type Contribution interface {

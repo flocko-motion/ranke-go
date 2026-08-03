@@ -91,13 +91,14 @@ func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
 
 // NewContribution is step 1: it captures the base (k, t) and returns a
 // contribution to fill, whose claims name the branches they join.
-func (s *Sequencer) NewContribution(_ context.Context) (ranke.Contribution, error) {
+func (s *Sequencer) NewContribution(_ context.Context, opts ...ranke.ContributionOption) (ranke.Contribution, error) {
 	return &contribution{
-		s:        s,
-		baseHead: s.head,
-		baseTime: s.clock.Tick(),
-		staged:   map[string][]ranke.Claim{},
-		adopted:  map[string][]ranke.Id{},
+		s:           s,
+		baseHead:    s.head,
+		baseTime:    s.clock.Tick(),
+		constraints: ranke.NewConstraints(opts...),
+		staged:      map[string][]ranke.Claim{},
+		adopted:     map[string][]ranke.Id{},
 	}, nil
 }
 

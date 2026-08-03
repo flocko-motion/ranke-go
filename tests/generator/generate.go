@@ -23,6 +23,11 @@ import (
 
 var errGenerate = errors.New("generator")
 
+// liftLimiting admits the limiting types into the generator's contributions. Only a
+// Sequencer mints these in production, so a fixture builder standing in for one has
+// to say so — the archives it emits must contain them to be worth testing against.
+var liftLimiting = ranke.WithLiftedTypes(ranke.NodeDelete, ranke.NodeExpiry)
+
 // Manifest is the map of a generated archive: the head to open it at, plus the
 // ids of the notable claims, so a test can target one corner directly.
 type Manifest struct {
@@ -85,7 +90,7 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	for i, chunk := range contributionChunks(b.batch, spec.Seed, len(branches)) {
 		// Round-robin contributions across the branches (main takes the first,
 		// so the shared base lands there);
-		head, err = helpers.Contribute(ctx, seq, branches[i%len(branches)], chunk)
+		head, err = helpers.Contribute(ctx, seq, branches[i%len(branches)], chunk, liftLimiting)
 		if err != nil {
 			return nil, fmt.Errorf("%w: merge: %w", errGenerate, err)
 		}
@@ -423,7 +428,7 @@ func (b *builder) expiries() {
 			b.fail(fmt.Errorf("%w: expiry edge %d: %w", errGenerate, i, err))
 			return
 		}
-		c := b.add(ranke.NewClaim("contribution/expiry", b.contribs[0]).
+		c := b.add(ranke.NewClaim(ranke.NodeExpiry, b.contribs[0]).
 			WithEdges(e).
 			WithField("pubkey_expires_after", expiresAt).
 			WithCreatedAt(b.clock.Tick()).
@@ -446,7 +451,7 @@ func (b *builder) deletes() {
 			b.fail(fmt.Errorf("%w: delete edge %d: %w", errGenerate, i, err))
 			return
 		}
-		c := b.add(ranke.NewClaim("contribution/delete", b.contribs[0]).
+		c := b.add(ranke.NewClaim(ranke.NodeDelete, b.contribs[0]).
 			WithEdges(e).
 			WithCreatedAt(b.clock.Tick()).
 			WithHeight(ranke.HeightOf(b.contribs[0], target)).

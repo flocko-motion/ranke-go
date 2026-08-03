@@ -132,15 +132,16 @@ func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
 
 // NewContribution is step 1 and the only work the sequencing thread does per
 // writer: it captures (k, t) for a contribution whose claims name their branches.
-func (s *Sequencer) NewContribution(ctx context.Context) (ranke.Contribution, error) {
+func (s *Sequencer) NewContribution(ctx context.Context, opts ...ranke.ContributionOption) (ranke.Contribution, error) {
 	s.seq.Lock()
 	defer s.seq.Unlock()
 	return &contribution{
-		s:        s,
-		baseHead: s.head,
-		baseTime: s.clock.Tick(),
-		staged:   map[string][]ranke.Claim{},
-		adopted:  map[string][]ranke.Id{},
+		s:           s,
+		baseHead:    s.head,
+		baseTime:    s.clock.Tick(),
+		constraints: ranke.NewConstraints(opts...),
+		staged:      map[string][]ranke.Claim{},
+		adopted:     map[string][]ranke.Id{},
 	}, nil
 }
 

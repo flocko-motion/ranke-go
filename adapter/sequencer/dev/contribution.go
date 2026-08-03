@@ -23,9 +23,10 @@ var (
 // contribution is an in-progress advance of the archive against the base (k, t)
 // of step 1, staged per branch. CompleteAndVerify seals it.
 type contribution struct {
-	s        *Sequencer
-	baseHead ranke.Id
-	baseTime time.Time
+	s           *Sequencer
+	baseHead    ranke.Id
+	baseTime    time.Time
+	constraints ranke.Constraints
 
 	sealed   bool
 	staged   map[string][]ranke.Claim
@@ -48,6 +49,9 @@ func (c *contribution) AddClaims(branch string, claims []ranke.Claim) error {
 	for _, cl := range claims {
 		if cl == nil {
 			return errNilClaim
+		}
+		if err := c.constraints.AdmitType(cl.Node().Type()); err != nil {
+			return err
 		}
 	}
 	c.note(branch)

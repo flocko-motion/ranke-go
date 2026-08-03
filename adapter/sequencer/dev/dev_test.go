@@ -118,6 +118,81 @@ func TestValidContributionAccepted(t *testing.T) {
 	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
 }
 
+// limiting builds a claim of a type reserved to the Sequencer: it names the target it
+// restricts, which is what makes it limiting (paper 2 §Deletion).
+func limiting(t *testing.T, op ranke.Contributor, target ranke.Claim, at time.Time) ranke.Claim {
+	t.Helper()
+	e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: ranke.NodeDelete})
+	require.NoError(t, err)
+	c, err := ranke.NewClaim(ranke.NodeDelete, op).
+		WithEdges(e).
+		WithHeight(2).
+		WithCreatedAt(at).
+		Sign()
+	require.NoError(t, err)
+	return c
+}
+
+// TestReservedTypeDenied: limiting and branch-table claims are the Sequencer's alone
+// (step 2), so a contribution carrying one is refused however well-formed it is.
+func TestReservedTypeDenied(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	note, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("the claim a delete would name")).
+		WithEncoding(ranke.EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+	headBefore := head(t, ctx, seq)
+
+	_, err = helpers.Contribute(ctx, seq, "main",
+		[]ranke.Claim{note, limiting(t, op, note, clk.Tick())})
+	require.ErrorIs(t, err, ranke.ErrReservedType, "a client may not create a limiting claim")
+	require.True(t, headBefore.Equal(head(t, ctx, seq)), "a denied contribution must not advance the head")
+}
+
+// TestReservedTypeLifted is the control: the rule is a constraint, not a prohibition,
+// so a caller holding the Sequencer can admit the type — which is how a fixture
+// builder stands in for the Sequencer that would mint it.
+func TestReservedTypeLifted(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	note, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("the claim the delete names")).
+		WithEncoding(ranke.EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+
+	merged, err := helpers.Contribute(ctx, seq, "main",
+		[]ranke.Claim{note, limiting(t, op, note, clk.Tick())},
+		ranke.WithLiftedTypes(ranke.NodeDelete))
+	require.NoError(t, err, "the lifted type is admitted")
+	require.True(t, merged.Equal(head(t, ctx, seq)), "the contribution merged")
+}
+
+// TestLiftIsPerType: lifting one reserved type says nothing about the others, so a
+// contribution cannot smuggle a branch table in behind a delete.
+func TestLiftIsPerType(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	table, err := ranke.NewClaim(ranke.NodeBranches, op).
+		WithHeight(1).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+
+	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{table},
+		ranke.WithLiftedTypes(ranke.NodeDelete))
+	require.ErrorIs(t, err, ranke.ErrReservedType, "the branch table is still the Sequencer's")
+}
+
 // TestAddWireAdvancesDeclaredBranches drives a contribution the way a server does:
 // read the declaration, check it, then hand the same reader on for one advance.
 func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
