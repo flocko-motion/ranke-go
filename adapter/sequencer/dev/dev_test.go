@@ -193,6 +193,65 @@ func TestLiftIsPerType(t *testing.T) {
 	require.ErrorIs(t, err, ranke.ErrReservedType, "the branch table is still the Sequencer's")
 }
 
+// TestReferenceOutsideDeclaredBranchesDenied: a claim on another branch may be cited
+// only where the contribution declared that branch readable (step 3).
+func TestReferenceOutsideDeclaredBranchesDenied(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	note := func(body string) ranke.Claim {
+		c, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+			WithInlineContent([]byte(body)).
+			WithEncoding(ranke.EncodingPlain).
+			WithHeight(1).
+			WithCreatedAt(clk.Tick()).
+			Sign()
+		require.NoError(t, err)
+		return c
+	}
+
+	// A claim lands on "private", and "public" gets one of its own — so it exists at
+	// the base and its closure reaches the operator, leaving the cited claim as the
+	// only thing a refusal can be about.
+	secret := note("on the private branch")
+	_, err := helpers.Contribute(ctx, seq, "private", []ranke.Claim{secret})
+	require.NoError(t, err)
+	_, err = helpers.Contribute(ctx, seq, "public", []ranke.Claim{note("on the public branch")})
+	require.NoError(t, err)
+
+	cite := func(t *testing.T, readable ...string) error {
+		t.Helper()
+		e, err := ranke.NewEdge(ranke.EdgeConfig{
+			Reference: secret.ID(),
+			Type:      ranke.TypeDerivation("note"),
+		})
+		require.NoError(t, err)
+		derived, err := ranke.NewClaim(ranke.TypeDerivation("note"), op).
+			WithInlineContent([]byte("cites the private note")).
+			WithEncoding(ranke.EncodingPlain).
+			WithEdges(e).
+			WithHeight(2).
+			WithCreatedAt(clk.Tick()).
+			Sign()
+		require.NoError(t, err)
+
+		c, err := seq.NewContribution(ctx, ranke.WithReferencableBranches(readable...))
+		require.NoError(t, err)
+		if err := c.AddClaims("public", []ranke.Claim{derived}); err != nil {
+			return err
+		}
+		_, err = c.CompleteAndVerify(ctx)
+		return err
+	}
+
+	// "private" undeclared: the reference is refused.
+	require.ErrorIs(t, cite(t), ranke.ErrUnreadableReference,
+		"an undeclared branch's claim may not be cited")
+
+	// Declared: the same reference is admitted.
+	require.NoError(t, cite(t, "private"), "the declared branch's claim may be cited")
+}
+
 // TestAddWireAdvancesDeclaredBranches drives a contribution the way a server does:
 // read the declaration, check it, then hand the same reader on for one advance.
 func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
@@ -223,7 +282,7 @@ func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"alpha", "beta"}, branches)
 
-	c, err := seq.NewContribution(ctx)
+	c, err := seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.NoError(t, c.AddWire(ctx, wr), "the reader goes on from where the check left it")
 
@@ -260,7 +319,7 @@ func TestAddWireAbortsOnViolation(t *testing.T) {
 	w := ranke.NewWireWriter(&buf, "alpha")
 	require.NoError(t, w.WriteContent(ranke.ContentBlob{Hash: hash, Content: []byte("tampered")}))
 
-	c, err := seq.NewContribution(ctx)
+	c, err := seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.ErrorIs(t, c.AddWire(ctx, ranke.NewWireReader(&buf)), ranke.ErrIntegrity,
 		"AddWire surfaces the stream's own violation")

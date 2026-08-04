@@ -117,6 +117,11 @@ func (u *memoryUniverse) GetClaimHeights(ctx context.Context, ids []Id) ([]uint6
 	return DefaultGetClaimHeights(ctx, u, ids)
 }
 
+// ClaimsInBranches walks, this store keeping no branch index of its own.
+func (u *memoryUniverse) ClaimsInBranches(ctx context.Context, branches map[string]Id, ids []Id) ([]bool, error) {
+	return DefaultClaimsInBranches(ctx, u, branches, ids)
+}
+
 // GetClaimTags returns each claim's tags positionally (nil when a claim has
 // none). Each entry is a copy, so callers can't mutate the store.
 func (u *memoryUniverse) GetClaimTags(_ context.Context, claims []Id) ([]map[string]string, error) {

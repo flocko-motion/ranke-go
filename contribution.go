@@ -8,14 +8,15 @@ package ranke
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
-// Constraints are what a contribution may do, which the Sequencer then guarantees.
-// They are the tools an access system is built from: the caller declares, the
-// Sequencer enforces, and nothing here knows who is asking.
+// Constraints are what a contribution may do: the caller declares them and the
+// Sequencer guarantees them, so an access system is built by composing them.
 type Constraints struct {
-	lifted map[string]bool // reserved node types this contribution may carry
+	lifted       map[string]bool // reserved node types this contribution may carry
+	referencable []string        // branches it may reference claims from
 }
 
 // ContributionOption sets one constraint.
@@ -31,9 +32,8 @@ func NewConstraints(opts ...ContributionOption) Constraints {
 	return c
 }
 
-// WithLiftedTypes admits node types otherwise reserved to the Sequencer. Only a
-// caller holding the Sequencer can widen this far — over the wire it is a request
-// the receiver decides on, never a declaration it honours.
+// WithLiftedTypes admits node types otherwise reserved to the Sequencer, so a caller
+// holding it can create what it would mint.
 func WithLiftedTypes(types ...string) ContributionOption {
 	return func(c *Constraints) {
 		if c.lifted == nil {
@@ -43,6 +43,79 @@ func WithLiftedTypes(types ...string) ContributionOption {
 			c.lifted[t] = true
 		}
 	}
+}
+
+// WithReferencableBranches names the branches a contribution may reference claims
+// from (step 3). BranchArchive admits every branch, BranchUniverse the whole 𝒰.
+func WithReferencableBranches(branches ...string) ContributionOption {
+	return func(c *Constraints) { c.referencable = append(c.referencable, branches...) }
+}
+
+// AdmitReferences enforces step 3's read requirement: every claim the contribution's
+// own reference, other than each other, must lie in a scope it may read.
+func (c Constraints) AdmitReferences(ctx context.Context, u Universe, base Archive, branch string, own []Claim) error {
+	if c.unconfined() {
+		return nil
+	}
+	mine := make(map[string]bool, len(own))
+	for _, cl := range own {
+		mine[cl.ID().String()] = true
+	}
+	var refs []Id
+	outside := map[string]bool{}
+	for _, cl := range own {
+		for _, e := range cl.Edges() {
+			k := e.Reference().String()
+			if mine[k] || outside[k] {
+				continue
+			}
+			outside[k] = true
+			refs = append(refs, e.Reference())
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+
+	allowed, err := c.allowedHeads(ctx, base, branch)
+	if err != nil {
+		return err
+	}
+	held, err := u.ClaimsInBranches(ctx, allowed, refs)
+	if err != nil {
+		return Wrap(errContributionRefs, err)
+	}
+	for i, ok := range held {
+		if !ok {
+			return WithDetail(ErrUnreadableReference, refs[i].String())
+		}
+	}
+	return nil
+}
+
+// allowedHeads resolves each readable scope to the head whose closure it is, the
+// branch being written included: a claim already on it needs no read grant.
+func (c Constraints) allowedHeads(ctx context.Context, base Archive, branch string) (map[string]Id, error) {
+	names := append([]string{branch}, c.referencable...)
+	// The archive is every branch's superset, so it answers for all of them at once.
+	if slices.Contains(names, BranchArchive) {
+		return map[string]Id{BranchArchive: base.Head()}, nil
+	}
+	heads := make(map[string]Id, len(names))
+	for _, name := range names {
+		b, err := base.GetBranch(ctx, name)
+		if err != nil {
+			continue
+		}
+		heads[name] = b.Head()
+	}
+	return heads, nil
+}
+
+// unconfined reports BranchUniverse among the referencable branches, where every
+// claim in 𝒰 is readable.
+func (c Constraints) unconfined() bool {
+	return slices.Contains(c.referencable, BranchUniverse)
 }
 
 // reservedTypes are the Sequencer's alone (paper 2 §Sequencer step 2): the branch
@@ -67,9 +140,9 @@ func (c Constraints) AdmitType(nodeType string) error {
 type Contribution interface {
 	// Base is the (k, t) the contribution was opened against.
 	Base() (head Id, t time.Time)
-	// AddGraph / AddClaims fill the contribution (step 2), naming the branch the
-	// claims join. Several may be named, and an empty one is an error.
-	AddGraph(branch string, g Graph) error
+	// AddClaims fills the contribution (step 2), naming the branch the claims join.
+	// Several may be named, and an empty one is an error. Passing the claims is what
+	// lets step 2's rules reach every one of them.
 	AddClaims(branch string, claims []Claim) error
 	// AddWire fills from a WireMediaType stream, which declares its own branches.
 	// It takes the reader, so a caller that checked Branches hands on the same one.

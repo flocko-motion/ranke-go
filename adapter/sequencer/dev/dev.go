@@ -26,7 +26,6 @@ var (
 	errSealed            = errors.New("dev.Contribution: already sealed")
 	errNoBranch          = errors.New("dev.Contribution: claims must name the branch they join")
 	errNilClaim          = errors.New("dev.Contribution.AddClaims: nil claim")
-	errNilGraph          = errors.New("dev.Contribution.AddGraph: nil graph")
 	errEmptyContribution = errors.New("dev.Contribution.CompleteAndVerify: nothing was added")
 	errForeign           = errors.New("dev.Sequencer.Merge: contribution came from another Sequencer")
 )
@@ -78,6 +77,11 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
+	// Index k₀, so a layer answering membership from its own index holds the operator,
+	// which sits on the spine.
+	if err := s.u.Tag(ctx, s.head); err != nil {
+		return nil, fmt.Errorf("%w: tag: %w", errNewSequencer, err)
+	}
 	return s, nil
 }
 
@@ -98,7 +102,6 @@ func (s *Sequencer) NewContribution(_ context.Context, opts ...ranke.Contributio
 		baseTime:    s.clock.Tick(),
 		constraints: ranke.NewConstraints(opts...),
 		staged:      map[string][]ranke.Claim{},
-		adopted:     map[string][]ranke.Id{},
 	}, nil
 }
 

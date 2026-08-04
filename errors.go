@@ -107,6 +107,8 @@ var (
 	ErrQueryScanClaim        = errors.New("ranke.Query: a scan (no Select.Path) has no traversal to start, so Select.Claim is meaningless")
 	ErrQueryEncoding         = errors.New("ranke.Query: unknown Output.Encoding (native | json | cbor)")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
+	ErrUnreadableReference   = errors.New("ranke.Contribution: reference reaches a claim outside the branches this contribution may read")
+	errContributionRefs      = errors.New("ranke.AdmitReferences")
 	ErrWire                  = errors.New("ranke.Wire")
 	ErrWireKind              = errors.New("ranke.Wire: unknown record kind (0 claim | 1 content | 2 header)")
 	ErrWireNoBranch          = errors.New("ranke.Wire: a claim record must name the branch it joins")

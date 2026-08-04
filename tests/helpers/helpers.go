@@ -15,6 +15,11 @@ import (
 // opts carry the constraints the contribution opens under.
 func Contribute(ctx context.Context, seq ranke.Sequencer, branch string, claims []ranke.Claim,
 	opts ...ranke.ContributionOption) (ranke.Id, error) {
+	// Tests contribute as a fully-privileged account, so the whole archive is
+	// referencable; a test exercising the constraint opens its own contribution.
+	opts = append([]ranke.ContributionOption{
+		ranke.WithReferencableBranches(ranke.BranchArchive),
+	}, opts...)
 	c, err := seq.NewContribution(ctx, opts...)
 	if err != nil {
 		return nil, err

@@ -111,6 +111,11 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 	}
 	s.head = bt0.ID()
 	s.markCommitted(self.ID(), bt0.ID())
+	// Index k₀, so a layer answering membership from its own index holds the operator,
+	// which sits on the spine.
+	if err := s.u.Tag(ctx, s.head); err != nil {
+		return nil, fmt.Errorf("%w: tag: %w", errNewSequencer, err)
+	}
 	return s, nil
 }
 
@@ -141,7 +146,6 @@ func (s *Sequencer) NewContribution(ctx context.Context, opts ...ranke.Contribut
 		baseTime:    s.clock.Tick(),
 		constraints: ranke.NewConstraints(opts...),
 		staged:      map[string][]ranke.Claim{},
-		adopted:     map[string][]ranke.Id{},
 	}, nil
 }
 

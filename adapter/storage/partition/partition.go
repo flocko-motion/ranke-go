@@ -213,6 +213,12 @@ func (p *partition) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint
 	return ranke.DefaultGetClaimHeights(ctx, p, ids)
 }
 
+// ClaimsInBranches walks through the partition's own routed reads: a shard holds only
+// part of the closure, so no single one can answer for a branch.
+func (p *partition) ClaimsInBranches(ctx context.Context, branches map[string]ranke.Id, ids []ranke.Id) ([]bool, error) {
+	return ranke.DefaultClaimsInBranches(ctx, p, branches, ids)
+}
+
 // Query resolves an RQL read through the partition's own routed read path.
 func (p *partition) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
 	return ranke.DefaultQuery(ctx, p, q, scope)

@@ -207,7 +207,7 @@ func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	onAlpha, onBeta := f.note(t, "for alpha"), f.note(t, "for beta")
-	c, err := f.seq.NewContribution(ctx)
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("alpha", []ranke.Claim{onAlpha}))
 	require.NoError(t, c.AddClaims("beta", []ranke.Claim{onBeta}))
@@ -242,15 +242,9 @@ func TestUnnamedBranchRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
 
-	orphan, adopted := f.note(t, "nowhere"), f.note(t, "also nowhere")
-	g, err := ranke.NewGraph(ctx, f.u)
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
-	require.NoError(t, g.AddClaims(ctx, adopted))
-
-	c, err := f.seq.NewContribution(ctx)
-	require.NoError(t, err)
-	require.Error(t, c.AddClaims("", []ranke.Claim{orphan}))
-	require.Error(t, c.AddGraph("", g))
+	require.Error(t, c.AddClaims("", []ranke.Claim{f.note(t, "nowhere")}))
 
 	_, err = c.CompleteAndVerify(ctx)
 	require.Error(t, err, "nothing was admitted, so there is nothing to verify")
@@ -322,7 +316,7 @@ func TestFutureDatedClaimRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
 
-	c, err := f.seq.NewContribution(ctx)
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	_, base := c.Base()
 
@@ -350,7 +344,7 @@ func TestBaseIsTheSnapshotItOpenedAt(t *testing.T) {
 	// build this one first — it is contributed last, after the head has moved.
 	late := f.note(t, "late but not lost")
 
-	c, err := f.seq.NewContribution(ctx)
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	baseHead, _ := c.Base()
 
@@ -381,7 +375,7 @@ func TestSealedContributionRefusesMoreClaims(t *testing.T) {
 
 	first, second := f.note(t, "sealed"), f.note(t, "too late")
 
-	c, err := f.seq.NewContribution(ctx)
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("main", []ranke.Claim{first}))
 	_, err = c.CompleteAndVerify(ctx)
@@ -401,7 +395,7 @@ func TestForeignContributionRefused(t *testing.T) {
 	a, b := newFixture(t, ctx), newFixture(t, ctx)
 
 	mine := a.note(t, "belongs to a")
-	c, err := a.seq.NewContribution(ctx)
+	c, err := a.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("main", []ranke.Claim{mine}))
 	v, err := c.CompleteAndVerify(ctx)
@@ -415,22 +409,16 @@ func TestForeignContributionRefused(t *testing.T) {
 	require.True(t, before.Equal(b.head(t, ctx)))
 }
 
-// TestAddGraphAdoptsOpenHeads: a caller that already staged its claims in a Graph
-// hands the whole thing over, and the graph's open heads become the
-// contribution's roots — both of a two-headed graph, so nothing is dropped.
-func TestAddGraphAdoptsOpenHeads(t *testing.T) {
+// TestMultiHeadContributionKeepsBoth: two unrelated claims leave the contribution
+// two-headed, and consolidation must gather both.
+func TestMultiHeadContributionKeepsBoth(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
 
-	g, err := ranke.NewGraph(ctx, f.u)
+	one, two := f.note(t, "note one"), f.note(t, "note two")
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
-	one, two := f.note(t, "graph note one"), f.note(t, "graph note two")
-	require.NoError(t, g.AddClaims(ctx, one, two))
-	require.Len(t, g.Heads(), 2, "two unrelated notes leave the graph two-headed")
-
-	c, err := f.seq.NewContribution(ctx)
-	require.NoError(t, err)
-	require.NoError(t, c.AddGraph("main", g))
+	require.NoError(t, c.AddClaims("main", []ranke.Claim{one, two}))
 	v, err := c.CompleteAndVerify(ctx)
 	require.NoError(t, err)
 	m, err := v.Persist(ctx)

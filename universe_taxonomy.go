@@ -18,11 +18,17 @@ const (
 	// SpineRevKey records the spine revision a branch-table claim sits at — the
 	// commit marker written last per revision.
 	SpineRevKey = "_br"
+	// ArchiveTagKey marks a claim as a member of the archive's closure, which covers
+	// the branches and the spine — where the operator signing the tables sits.
+	ArchiveTagKey = "_ba"
 )
+
+// branchTagPrefix opens every branch-membership key.
+const branchTagPrefix = "_b_"
 
 // BranchTagKey marks a claim as a member of branch b's closure, valued with the
 // branch table's height at the revision it entered.
-func BranchTagKey(branch string) string { return "_b_" + branch }
+func BranchTagKey(branch string) string { return branchTagPrefix + branch }
 
 // Content location is not a tag or a flag: content_hash present ⟺ external,
 // inline content lives in the record (§Content — mutually exclusive), so the
