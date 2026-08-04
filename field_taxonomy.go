@@ -39,9 +39,23 @@ const (
 	FieldHeightAlias      = "H"
 	// FieldEdgesDiffOmit lists, on a diff claim, ids of inherited edges to drop
 	// when materialising, one per line. Overwrite/add is re-stating the edge.
-	FieldEdgesDiffOmit = "edges_diff_omit"
+	FieldEdgesDiffOmit      = "edges_diff_omit"
+	FieldEdgesDiffOmitAlias = "E"
 	// FieldFieldsDiffOmit is the node-field analogue: newline-separated names.
-	FieldFieldsDiffOmit = "fields_diff_omit"
+	FieldFieldsDiffOmit      = "fields_diff_omit"
+	FieldFieldsDiffOmitAlias = "F"
+	// FieldPubkeyValidFrom and FieldPubkeyExpiresAfter bound a contributor key's
+	// validity (RFC 3339, paper 2 §Contributor Keys): a claim it signed is dated
+	// within the closed window they describe. Either may stand alone.
+	FieldPubkeyValidFrom         = "pubkey_valid_from"
+	FieldPubkeyValidFromAlias    = "v"
+	FieldPubkeyExpiresAfter      = "pubkey_expires_after"
+	FieldPubkeyExpiresAfterAlias = "x"
+	// FieldDeleteBy schedules a claim's bytes for removal (RFC 3339, paper 2
+	// §Deletion). Every edge referencing such a claim carries the date too, so the
+	// schedule travels with the reference and explains the gap the deletion leaves.
+	FieldDeleteBy      = "delete_by"
+	FieldDeleteByAlias = "d"
 )
 
 // splitLines parses a newline-separated list (a *_diff_omit field) into a set.
@@ -158,6 +172,16 @@ func fieldNameToAlias(n Field) Field {
 		return FieldContentHashAlias
 	case FieldHeight:
 		return FieldHeightAlias
+	case FieldEdgesDiffOmit:
+		return FieldEdgesDiffOmitAlias
+	case FieldFieldsDiffOmit:
+		return FieldFieldsDiffOmitAlias
+	case FieldDeleteBy:
+		return FieldDeleteByAlias
+	case FieldPubkeyValidFrom:
+		return FieldPubkeyValidFromAlias
+	case FieldPubkeyExpiresAfter:
+		return FieldPubkeyExpiresAfterAlias
 	default:
 		return n
 	}
@@ -178,6 +202,16 @@ func fieldNameFromAlias(c Field) Field {
 		return FieldContentHash
 	case FieldHeightAlias:
 		return FieldHeight
+	case FieldEdgesDiffOmitAlias:
+		return FieldEdgesDiffOmit
+	case FieldFieldsDiffOmitAlias:
+		return FieldFieldsDiffOmit
+	case FieldDeleteByAlias:
+		return FieldDeleteBy
+	case FieldPubkeyValidFromAlias:
+		return FieldPubkeyValidFrom
+	case FieldPubkeyExpiresAfterAlias:
+		return FieldPubkeyExpiresAfter
 	default:
 		return c
 	}

@@ -94,8 +94,7 @@ func (b ClaimBuilder) WithHeight(h uint64) ClaimBuilder { b.Height = h; return b
 // WithAutoHeight makes Sign read each referenced claim's committed height from
 // u and set 1 + max (0 with no references), exclusive with WithHeight.
 func (b ClaimBuilder) WithAutoHeight(ctx context.Context, u Universe) ClaimBuilder {
-	b.autoHeightCtx = ctx
-	b.autoHeightU = u
+	b.autoHeightCtx, b.autoHeightU = ctx, u
 	return b
 }
 
@@ -147,8 +146,10 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if err := checkFields(cfg.Fields); err != nil {
+		return nil, err
+	}
+	if err := CheckDeletable(cfg.TypeClass, cfg.Fields); err != nil {
 		return nil, err
 	}
 

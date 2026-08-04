@@ -156,6 +156,14 @@ func (c *contribution) CompleteAndVerify(ctx context.Context) (ranke.VerifiedCon
 				errContribution, branch, len(fs), fs[0])
 		}
 
+		// Deletion leaves an explained gap where a claim's bytes were, and its edges with
+		// them, so the head cites whatever a walk could then no longer reach.
+		stranded, err := ranke.StrandedByDeletion(ctx, c.s.u, g.Heads(), c.staged[branch])
+		if err != nil {
+			return nil, fmt.Errorf("%w: reachability past a deleted claim: %w", errContribution, err)
+		}
+		g.Cite(stranded...)
+
 		head, err := c.consolidate(ctx, g)
 		if err != nil {
 			return nil, err

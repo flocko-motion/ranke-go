@@ -287,11 +287,15 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 // verifyClaim runs every verifyRules entry against one claim (§5.10). A new
 // invariant is one rule function plus one registry entry.
 func verifyClaim(ctx context.Context, c Claim, raw []byte, cfg *verifyConfig, u Universe) error {
-	pubkey, err := resolveClaimPubkey(ctx, c, u)
+	signer, err := resolveSigner(ctx, c, u)
+	if err != nil {
+		return WrapDetail(errVerify, "resolve signer", err)
+	}
+	pubkey, err := resolveClaimPubkey(ctx, signer, signer == c, u)
 	if err != nil {
 		return WrapDetail(errVerify, "resolve pubkey", err)
 	}
-	t := &claimUnderVerification{claim: c, raw: raw, pubkey: pubkey, cfg: cfg, u: u}
+	t := &claimUnderVerification{claim: c, raw: raw, pubkey: pubkey, signer: signer, cfg: cfg, u: u}
 	fail := func(r verifyRule, err error) error {
 		return WrapDetail(errVerify, r.name+" — "+r.rule, err) // name the rule + its statement
 	}
@@ -348,11 +352,13 @@ func verifyArchiveHead(ctx context.Context, head Claim, u Universe, cfg *verifyC
 }
 
 // claimUnderVerification is the read-only surface a rule inspects: the decoded
-// claim, its stored raw CBOR, the signing pubkey, the config, the Universe.
+// claim, its stored raw CBOR, the signing pubkey and the claim carrying it, the
+// config, the Universe.
 type claimUnderVerification struct {
 	claim  Claim
 	raw    []byte
 	pubkey []byte
+	signer Claim // the contributor whose key signed, or the claim itself when initial
 	cfg    *verifyConfig
 	u      Universe
 }
@@ -382,11 +388,56 @@ var verifyRules = []verifyRule{
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim", edge: ruleBranchTableReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
+	{name: "key validity", rule: "a claim is dated within its contributor key's validity window", claim: ruleKeyWindow},
+	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares", edge: ruleDeleteByCopied},
+	{name: "structure not deletable", rule: "a contribution/* claim takes no delete_by", claim: ruleStructureNotDeletable},
 }
 
 // ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey.
 func ruleSignature(_ context.Context, t *claimUnderVerification) error {
 	return t.claim.verifyID(t.pubkey, t.raw)
+}
+
+// ruleKeyWindow: a signature proves who signed, and the window proves they still could.
+func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
+	return verifyKeyWindow(t.claim, t.signer)
+}
+
+// verifyKeyWindow checks c's created_at against the closed window its signer declares.
+// Either bound may stand alone, and a signer declaring neither never expires.
+//
+// A contributor claim declares the window rather than sitting in it: a key valid from
+// next year is introduced by a claim written today, and one already rotated out
+// declares an expiry behind its own date.
+func verifyKeyWindow(c, signer Claim) error {
+	if signer == nil || signer.ID().Equal(c.ID()) {
+		return nil
+	}
+	at := c.Node().CreatedAt()
+	if from, err := keyBound(signer, FieldPubkeyValidFrom); err != nil {
+		return err
+	} else if from != nil && at.Before(*from) {
+		return WithDetail(ErrKeyNotYetValid, c.ID().String()+" dated "+at.Format(iso8601Nano))
+	}
+	if until, err := keyBound(signer, FieldPubkeyExpiresAfter); err != nil {
+		return err
+	} else if until != nil && at.After(*until) {
+		return WithDetail(ErrKeyExpired, c.ID().String()+" dated "+at.Format(iso8601Nano))
+	}
+	return nil
+}
+
+// keyBound reads one RFC 3339 bound off a signer, absent reported as nil.
+func keyBound(signer Claim, field string) (*time.Time, error) {
+	v, err := signer.Node().GetField(field)
+	if err != nil {
+		return nil, nil // the field is unset, so it bounds nothing
+	}
+	t, err := parseRFC3339Nano(v)
+	if err != nil {
+		return nil, WrapDetail(errKeyWindowField, field+"="+v, err)
+	}
+	return &t, nil
 }
 
 // ruleHeight: §4.1 committed height matches the reference structure.
@@ -429,6 +480,48 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 		return WithDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
 	}
 	return nil
+}
+
+// ruleDeleteByCopied (per edge) is `R-DELBY`: every edge referencing a claim that
+// carries delete_by copies that date, so once the bytes are deleted the gap stays
+// explained wherever the claim is reached. The contributor signs the copy; this is where
+// it is held to it, while the referenced bytes are still there to compare against.
+func ruleDeleteByCopied(ctx context.Context, e Edge, t *claimUnderVerification) error {
+	ref, err := GetClaim(ctx, t.u, e.Reference())
+	if errors.Is(err, ErrNotFound) {
+		return nil // already deleted, so the edge's own copy is the only record left
+	}
+	if err != nil {
+		return err
+	}
+	due, _ := ref.Node().GetField(FieldDeleteBy)
+	carried, _ := e.GetField(FieldDeleteBy)
+	// Exactly what the claim says: omitting a schedule leaves a gap unexplained, and
+	// asserting one the claim never made announces a gap that will not come.
+	if carried != due {
+		return WithDetail(ErrDeleteByNotCopied,
+			e.Reference().String()+" declares "+quoteOrNone(due)+", edge carries "+quoteOrNone(carried))
+	}
+	return nil
+}
+
+// quoteOrNone renders a schedule for an error, an absent one as a word.
+func quoteOrNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+// ruleStructureNotDeletable: the contribution/* family is what a read walks and what
+// signatures are checked against, so none of it schedules its own removal.
+func ruleStructureNotDeletable(_ context.Context, t *claimUnderVerification) error {
+	n := t.claim.Node()
+	fields := map[string]string{}
+	if due, err := n.GetField(FieldDeleteBy); err == nil {
+		fields[FieldDeleteBy] = due
+	}
+	return CheckDeletable(NodeClass(n.TypeClass()), fields)
 }
 
 // ruleArchiveHead (per archive): an archive's head is a contribution/branches claim.
@@ -484,32 +577,36 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	return nil
 }
 
-// resolveClaimPubkey returns the pubkey whose private key signed this claim's id
-// (§5.7): own content for an initial node, else the contributor's content.
-func resolveClaimPubkey(ctx context.Context, c Claim, u Universe) ([]byte, error) {
-	// Initial node → own content, else the contribution/contributor edge's target.
-	src, viaEdge := c, false
-	if edges := c.Edges(); len(edges) > 0 {
-		var target Id
-		for _, e := range edges {
-			if e.TypeClass() == EdgeClassContribution && e.TypeSub() == "contributor" {
-				target = e.Reference()
-				break
-			}
-		}
-		if target == nil {
-			return nil, errNoContributorEdge
-		}
-		cc, err := GetClaim(ctx, u, target)
-		if err != nil {
-			return nil, WrapDetail(errContributorUnresolved, target.String(), err)
-		}
-		src, viaEdge = cc, true
+// resolveSigner returns the claim whose content is the key that signed c's id (§5.7):
+// c itself for an initial node, else the contributor its contribution/contributor edge
+// names. The claim comes back, since its fields bound the key's validity too.
+func resolveSigner(ctx context.Context, c Claim, u Universe) (Claim, error) {
+	if len(c.Edges()) == 0 {
+		return c, nil // an initial node carries its own key
 	}
-	rdr, err := src.GetContent(ctx, u)
+	var target Id
+	for _, e := range c.Edges() {
+		if e.TypeClass() == EdgeClassContribution && e.TypeSub() == "contributor" {
+			target = e.Reference()
+			break
+		}
+	}
+	if target == nil {
+		return nil, errNoContributorEdge
+	}
+	cc, err := GetClaim(ctx, u, target)
 	if err != nil {
-		if viaEdge {
-			return nil, WrapDetail(errContributorUnresolved, src.ID().String(), err)
+		return nil, WrapDetail(errContributorUnresolved, target.String(), err)
+	}
+	return cc, nil
+}
+
+// resolveClaimPubkey reads the signing key off the claim that carries it.
+func resolveClaimPubkey(ctx context.Context, signer Claim, own bool, u Universe) ([]byte, error) {
+	rdr, err := signer.GetContent(ctx, u)
+	if err != nil {
+		if !own {
+			return nil, WrapDetail(errContributorUnresolved, signer.ID().String(), err)
 		}
 		return nil, err
 	}

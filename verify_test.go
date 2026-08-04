@@ -2,6 +2,8 @@ package ranke
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 	"time"
 
@@ -32,6 +34,207 @@ func corruptNode(t *testing.T, g Graph, c Claim) {
 	mu.mu.Lock()
 	mu.claims[c.ID().String()] = bad
 	mu.mu.Unlock()
+}
+
+// windowedContributor builds a signed contributor whose key is valid over the closed
+// window the fields describe, an empty bound being left unset.
+func windowedContributor(t *testing.T, from, until string) (Contributor, ed25519.PrivateKey) {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	pubkey, err := EncodePublicKey(priv.Public())
+	require.NoError(t, err)
+
+	b := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream)
+	if from != "" {
+		b = b.WithField(FieldPubkeyValidFrom, from)
+	}
+	if until != "" {
+		b = b.WithField(FieldPubkeyExpiresAfter, until)
+	}
+	c, err := b.Sign(priv)
+	require.NoError(t, err)
+	view, err := c.AsContributor(context.Background(), nil, priv)
+	require.NoError(t, err)
+	return view, priv
+}
+
+// signedAt builds a claim attributed to who and dated at.
+func signedAt(t *testing.T, who Contributor, at time.Time) Claim {
+	t.Helper()
+	c, err := NewClaim(TypeSource("note"), who).
+		WithInlineContent([]byte("a note")).
+		WithEncoding(EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(at).
+		Sign()
+	require.NoError(t, err)
+	return c
+}
+
+// TestVerifyKeyWindow: a signature proves who signed, and the window proves they still
+// could — so a claim dated outside its contributor key's validity fails verification
+// however sound its signature is.
+func TestVerifyKeyWindow(t *testing.T) {
+	const from, until = "2026-01-01T00:00:00.000000000Z", "2026-06-30T00:00:00.000000000Z"
+	stamp := func(s string) time.Time {
+		at, err := parseRFC3339Nano(s)
+		require.NoError(t, err)
+		return at
+	}
+
+	for name, tc := range map[string]struct {
+		from, until string
+		at          time.Time
+		wantErr     error
+	}{
+		"inside the window":    {from, until, stamp("2026-03-01T00:00:00.000000000Z"), nil},
+		"on the lower bound":   {from, until, stamp(from), nil},
+		"on the upper bound":   {from, until, stamp(until), nil},
+		"before it opens":      {from, until, stamp("2025-12-31T23:59:59.000000000Z"), ErrKeyNotYetValid},
+		"after it closes":      {from, until, stamp("2026-07-01T00:00:00.000000000Z"), ErrKeyExpired},
+		"open-ended upward":    {from, "", stamp("2030-01-01T00:00:00.000000000Z"), nil},
+		"open-ended downward":  {"", until, stamp("2000-01-01T00:00:00.000000000Z"), nil},
+		"expired, no lower":    {"", until, stamp("2026-07-01T00:00:00.000000000Z"), ErrKeyExpired},
+		"no window ever fails": {"", "", stamp("2099-01-01T00:00:00.000000000Z"), nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			who, _ := windowedContributor(t, tc.from, tc.until)
+			g := newGraph(t, who)
+			require.NoError(t, g.AddClaims(context.Background(), signedAt(t, who, tc.at)))
+
+			run := g.Verify()
+			run.Wait()
+			require.NoError(t, run.Err())
+			if tc.wantErr == nil {
+				require.Empty(t, run.Failures(), "a claim inside the window verifies")
+				return
+			}
+			require.Len(t, run.Failures(), 1)
+			require.ErrorIs(t, run.Failures()[0].Err, tc.wantErr)
+		})
+	}
+}
+
+// TestVerifyKeyWindowRejectsUnparsableBound: a bound that is not RFC 3339 states no
+// window, so it fails rather than being read as absent.
+func TestVerifyKeyWindowRejectsUnparsableBound(t *testing.T) {
+	who, _ := windowedContributor(t, "", "whenever")
+	g := newGraph(t, who)
+	require.NoError(t, g.AddClaims(context.Background(), signedAt(t, who, time.Now().UTC())))
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Len(t, run.Failures(), 1, "an unreadable bound is a failure, not a free pass")
+}
+
+// deletableSource stages a source claim scheduled for deletion, so a later claim has
+// something whose schedule it must carry.
+func deletableSource(t *testing.T, g Graph, who Contributor, due string) Claim {
+	t.Helper()
+	c, err := NewClaim(TypeSource("note"), who).
+		WithInlineContent([]byte("bytes with a shelf life")).
+		WithEncoding(EncodingPlain).
+		WithField(FieldDeleteBy, due).
+		WithHeight(1).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(context.Background(), c))
+	return c
+}
+
+// TestVerifyDeleteByMustBeCarried: deletion removes a claim's bytes, so the schedule has
+// to live on the edges referencing it — a citing claim that omits it would leave an
+// unexplained gap, and verification refuses it.
+func TestVerifyDeleteByMustBeCarried(t *testing.T) {
+	const due = "2030-01-01T00:00:00.000000000Z"
+	ctx := context.Background()
+	root := contributor(t)
+	g := newGraph(t, root)
+	src := deletableSource(t, g, root, due)
+
+	// Cited without the copy: refused.
+	bare, err := NewEdge(EdgeConfig{Reference: src.ID(), Type: TypeDerivation("note")})
+	require.NoError(t, err)
+	silent, err := NewClaim(TypeDerivation("note"), root).
+		WithInlineContent([]byte("cites it, says nothing")).
+		WithEncoding(EncodingPlain).
+		WithEdges(bare).
+		WithHeight(2).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(ctx, silent))
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Len(t, run.Failures(), 1)
+	require.ErrorIs(t, run.Failures()[0].Err, ErrDeleteByNotCopied)
+}
+
+// TestVerifyDeleteByCarriedPasses: the same citation carrying the date verifies, so the
+// rule refuses omission rather than citation.
+func TestVerifyDeleteByCarriedPasses(t *testing.T) {
+	const due = "2030-01-01T00:00:00.000000000Z"
+	ctx := context.Background()
+	root := contributor(t)
+	g := newGraph(t, root)
+	src := deletableSource(t, g, root, due)
+
+	carried, err := NewEdge(EdgeConfig{
+		Reference: src.ID(),
+		Type:      TypeDerivation("note"),
+		Fields:    map[string]string{FieldDeleteBy: due},
+	})
+	require.NoError(t, err)
+	honest, err := NewClaim(TypeDerivation("note"), root).
+		WithInlineContent([]byte("cites it and says so")).
+		WithEncoding(EncodingPlain).
+		WithEdges(carried).
+		WithHeight(2).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(ctx, honest))
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Empty(t, run.Failures(), "the schedule travels with the reference")
+}
+
+// TestEdgeCarriesTargetDeleteBy: naming the target claim in the config is enough — the
+// edge is built carrying its schedule, so a contributor need not track it by hand.
+func TestEdgeCarriesTargetDeleteBy(t *testing.T) {
+	const due = "2030-01-01T00:00:00.000000000Z"
+	ctx := context.Background()
+	root := contributor(t)
+	g := newGraph(t, root)
+	src := deletableSource(t, g, root, due)
+
+	e, err := NewEdge(EdgeConfig{
+		Reference:  src.ID(),
+		Referenced: src,
+		Type:       TypeDerivation("note"),
+	})
+	require.NoError(t, err)
+	got, err := e.GetField(FieldDeleteBy)
+	require.NoError(t, err, "the edge carries its target's schedule")
+	require.Equal(t, due, got)
+
+	built, err := NewClaim(TypeDerivation("note"), root).
+		WithInlineContent([]byte("cites a claim with a shelf life")).
+		WithEncoding(EncodingPlain).
+		WithEdges(e).
+		WithHeight(2).
+		Sign()
+	require.NoError(t, err)
+
+	require.NoError(t, g.AddClaims(ctx, built))
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Empty(t, run.Failures(), "what the builder produces is what the rule accepts")
 }
 
 // --- honest graphs verify ----------------------------------------------

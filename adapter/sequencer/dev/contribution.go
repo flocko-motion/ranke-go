@@ -135,6 +135,14 @@ func (c *contribution) CompleteAndVerify(ctx context.Context) (ranke.VerifiedCon
 			return nil, fmt.Errorf("%w: verify: %d failure(s), first: %v", errSequencer, len(fs), fs[0])
 		}
 
+		// Deletion leaves an explained gap where a claim's bytes were, and its edges with
+		// them, so the head cites whatever a walk could then no longer reach.
+		stranded, err := ranke.StrandedByDeletion(ctx, c.s.u, g.Heads(), c.staged[branch])
+		if err != nil {
+			return nil, fmt.Errorf("%w: reachability past a deleted claim: %w", errSequencer, err)
+		}
+		g.Cite(stranded...)
+
 		// Fold this branch's open heads into one, so it takes a single root.
 		head, err := c.s.consolidateGraph(ctx, g)
 		if err != nil {

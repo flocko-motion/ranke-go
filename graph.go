@@ -7,7 +7,9 @@
 package ranke
 
 import (
+	"bytes"
 	"context"
+	"sort"
 	"time"
 )
 
@@ -24,8 +26,13 @@ type Graph interface {
 	// Heads returns the open heads — the frontier claims (§4.5). A single
 	// head makes the graph a closure RG_h.
 	Heads() []Id
-	// IsConsolidated reports len(Heads()) == 1.
+	// IsConsolidated reports whether one claim already reaches everything the graph
+	// needs reached — the open frontier and whatever Cite named.
 	IsConsolidated() bool
+	// Cite makes ids roots the next Consolidate wraps alongside the open heads, for a
+	// claim that must be reachable from the head in its own right — one sitting behind
+	// a claim scheduled for deletion (§Deletion).
+	Cite(ids ...Id)
 	// Consolidate wraps every open head in one head claim, adds it, returns it.
 	// createdAt defaults to now and must satisfy monotonicity (§4.3).
 	Consolidate(ctx context.Context, contributor Contributor, createdAt ...time.Time) (Claim, error)
@@ -34,10 +41,38 @@ type Graph interface {
 	Verify(opts ...VerifyOption) VerificationRun
 }
 
-// graph is the concrete Graph: a Universe plus the open-head frontier.
+// graph is the concrete Graph: a Universe plus the open-head frontier, and whatever
+// Cite named as needing a head reference of its own.
 type graph struct {
 	u     Universe
 	heads map[string]Id
+	cited map[string]Id
+}
+
+func (g *graph) Cite(ids ...Id) {
+	if g.cited == nil {
+		g.cited = map[string]Id{}
+	}
+	for _, id := range ids {
+		if id != nil {
+			g.cited[id.String()] = id
+		}
+	}
+}
+
+// roots are the claims a head claim must reach: the open frontier, plus what Cite
+// named, in a stable order so consolidation reproduces.
+func (g *graph) roots() []Id {
+	out := g.Heads()
+	for _, id := range g.cited {
+		if _, open := g.heads[id.String()]; !open {
+			out = append(out, id)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return bytes.Compare(idBytes(out[i]), idBytes(out[j])) < 0
+	})
+	return out
 }
 
 // NewGraph opens an empty graph over u; nil u gets an ephemeral memory Universe.
@@ -100,11 +135,11 @@ func (g *graph) Heads() []Id {
 }
 
 func (g *graph) IsConsolidated() bool {
-	return len(g.Heads()) == 1
+	return len(g.roots()) == 1
 }
 
 func (g *graph) Consolidate(ctx context.Context, contributor Contributor, createdAt ...time.Time) (Claim, error) {
-	heads := g.Heads()
+	heads := g.roots()
 	if len(heads) == 0 {
 		return nil, errEmptyGraph
 	}
@@ -117,16 +152,17 @@ func (g *graph) Consolidate(ctx context.Context, contributor Contributor, create
 	refs := make([]Claim, 0, len(heads)+1)
 	refs = append(refs, contributor)
 	for _, h := range heads {
-		e, err := NewEdge(EdgeConfig{Reference: h, Type: EdgeTypeHead})
+		hc, err := GetClaim(ctx, g.u, h)
+		if err != nil {
+			return nil, WrapDetail(errConsolidate, "load head", err)
+		}
+		refs = append(refs, hc)
+		// The head is in hand, so its edge is built carrying whatever the head declares.
+		e, err := NewEdge(EdgeConfig{Reference: h, Referenced: hc, Type: EdgeTypeHead})
 		if err != nil {
 			return nil, WrapDetail(errConsolidate, "build head edge", err)
 		}
 		edges = append(edges, e)
-		hc, err := GetClaim(ctx, g.u, h)
-		if err != nil {
-			return nil, WrapDetail(errConsolidate, "load head for height", err)
-		}
-		refs = append(refs, hc)
 	}
 	head, err := ClaimBuilder{
 		Type:        NodeHead,
