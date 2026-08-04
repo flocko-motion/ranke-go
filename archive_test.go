@@ -242,6 +242,27 @@ func TestArchiveQueryResolvesBranch(t *testing.T) {
 	require.Equal(t, idsOf(bth, em, root), idSet(drain(t, rs)))
 }
 
+// A cap no engine applies must be refused, since uncapped content answers a
+// different query. ErrUnsupported is what a caller gates a capability on.
+func TestArchiveQueryRefusesContentCap(t *testing.T) {
+	ctx := context.Background()
+	u := NewMemoryUniverse()
+	root := contributor(t)
+	em := srcClaim(t, root, "seed")
+	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
+	putClaims(t, u, root, em, bth)
+
+	arc, err := NewArchive(ctx, u, bth.ID())
+	require.NoError(t, err)
+
+	q := Query{Select: Select{Branch: "main"},
+		Output: Output{Content: &OutputContent{Max: 4096, Overflow: OverflowCutoff}}}
+	require.NoError(t, ValidateQuery(q), "the cap is well-formed; only unserved")
+
+	_, err = arc.Query(ctx, q)
+	require.ErrorIs(t, err, ErrUnsupported)
+}
+
 // TestQueryClaimDoesNotScope: Select.Claim starts a traversal and scopes nothing,
 // so it cannot stand in for the Select.Head that $universe requires.
 func TestQueryClaimDoesNotScope(t *testing.T) {
