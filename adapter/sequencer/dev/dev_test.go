@@ -271,18 +271,23 @@ func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
 	onAlpha, onBeta := note("for alpha"), note("for beta")
 
 	var buf bytes.Buffer
-	w := ranke.NewWireWriter(&buf, "alpha", "beta")
+	w := ranke.NewWireWriter(&buf, ranke.WireConstraints{
+		Branches:     []string{"alpha", "beta"},
+		Referencable: []string{ranke.BranchArchive},
+	})
 	require.NoError(t, w.WriteClaim("alpha", onAlpha))
 	require.NoError(t, w.WriteClaim("beta", onBeta))
 
-	// What a server does before accepting: learn the branches from the header alone,
-	// check them against the caller's grants, then drain with the same reader.
+	// What a server does before accepting: read the declarations from the head of the
+	// stream, check them against the caller's grants, open under them, then drain with
+	// the same reader.
 	wr := ranke.NewWireReader(bytes.NewReader(buf.Bytes()))
-	branches, err := wr.Branches()
+	cons, err := wr.Constraints()
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"alpha", "beta"}, branches)
+	require.ElementsMatch(t, []string{"alpha", "beta"}, cons.Branches)
+	require.Empty(t, cons.Lifted, "a stream asking for no lift says so")
 
-	c, err := seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := seq.NewContribution(ctx, cons.Options()...)
 	require.NoError(t, err)
 	require.NoError(t, c.AddWire(ctx, wr), "the reader goes on from where the check left it")
 
@@ -316,7 +321,7 @@ func TestAddWireAbortsOnViolation(t *testing.T) {
 	hash, err := ranke.HashContent([]byte("the real bytes"))
 	require.NoError(t, err)
 	var buf bytes.Buffer
-	w := ranke.NewWireWriter(&buf, "alpha")
+	w := ranke.NewWireWriter(&buf, ranke.WireConstraints{Branches: []string{"alpha"}})
 	require.NoError(t, w.WriteContent(ranke.ContentBlob{Hash: hash, Content: []byte("tampered")}))
 
 	c, err := seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))

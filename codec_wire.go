@@ -9,6 +9,7 @@ package ranke
 import (
 	"io"
 	"slices"
+	"strconv"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -27,10 +28,77 @@ const (
 	// WireContent is [1, hash, blob bytes]. Content is addressed by its hash and
 	// lives in the Universe unbranched, so it names no branch.
 	WireContent WireKind = 1
-	// WireHeader is [2, [branch, ...]] — the branches this contribution touches,
-	// first in the stream so a reader learns them without draining it.
-	WireHeader WireKind = 2
+	// WireBranches is [2, [branch, ...]] — the branches this contribution writes to.
+	WireBranches WireKind = 2
+	// WireReferencable is [3, [branch, ...]] — the branches, $archive or $universe it
+	// may reference claims from.
+	WireReferencable WireKind = 3
+	// WireLifted is [4, [type, ...]] — the reserved node types it asks to create.
+	WireLifted WireKind = 4
 )
+
+// WireConstraints are the constraints a stream declares, one record each, all of them
+// ahead of the payload so a receiver reads them before taking anything.
+//
+// Branches and Referencable narrow: declaring them can only reduce what the
+// contribution does. Lifted widens, so a receiver relaying a stream from a party it
+// does not trust checks that record against what that party may ask for.
+type WireConstraints struct {
+	Branches     []string // record 2, required
+	Referencable []string // record 3, required
+	Lifted       []string // record 4, empty asks for nothing
+}
+
+// Narrow returns the constraints both w and o permit. Declaring restricts, so two
+// declarations compose to their overlap and a relay adds its own limits by merging
+// rather than by appending a second record.
+func (w WireConstraints) Narrow(o WireConstraints) WireConstraints {
+	return WireConstraints{
+		Branches:     intersect(w.Branches, o.Branches),
+		Referencable: narrowScopes(w.Referencable, o.Referencable),
+		Lifted:       intersect(w.Lifted, o.Lifted),
+	}
+}
+
+// narrowScopes intersects read scopes under the containment $universe ⊇ $archive ⊇ any
+// branch, so naming a branch alongside a wider scope leaves the branch.
+func narrowScopes(a, b []string) []string {
+	// Widest first, so naming $archive opposite $universe leaves $archive.
+	for _, wide := range []string{BranchUniverse, BranchArchive} {
+		switch {
+		case slices.Contains(a, wide):
+			return slices.Clone(b)
+		case slices.Contains(b, wide):
+			return slices.Clone(a)
+		}
+	}
+	return intersect(a, b)
+}
+
+// intersect returns the entries both lists carry, in a's order.
+func intersect(a, b []string) []string {
+	out := make([]string, 0, min(len(a), len(b)))
+	for _, s := range a {
+		if slices.Contains(b, s) && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Options renders the declarations as the options the contribution opens under.
+func (w WireConstraints) Options() []ContributionOption {
+	opts := []ContributionOption{WithReferencableBranches(w.Referencable...)}
+	if len(w.Lifted) > 0 {
+		opts = append(opts, WithLiftedTypes(w.Lifted...))
+	}
+	return opts
+}
+
+// constraintKind reports whether kind carries a constraint rather than payload.
+func constraintKind(kind WireKind) bool {
+	return kind == WireBranches || kind == WireReferencable || kind == WireLifted
+}
 
 // WireRecord is one decoded record: Kind names which fields carry the payload.
 type WireRecord struct {
@@ -43,15 +111,15 @@ type WireRecord struct {
 // WireWriter writes a contribution stream. Records concatenate, so a contribution
 // of any size streams without being buffered.
 type WireWriter struct {
-	w        io.Writer
-	branches []string
-	headed   bool
+	w      io.Writer
+	cons   WireConstraints
+	headed bool
 }
 
-// NewWireWriter writes a contribution touching branches. They head the stream, so
-// a reader can check them before taking the rest.
-func NewWireWriter(w io.Writer, branches ...string) *WireWriter {
-	return &WireWriter{w: w, branches: branches}
+// NewWireWriter writes a contribution under cons, which heads the stream so a reader
+// checks it before taking the rest.
+func NewWireWriter(w io.Writer, cons WireConstraints) *WireWriter {
+	return &WireWriter{w: w, cons: cons}
 }
 
 // WriteClaim appends a claim joining branch, as the canonical record under its id —
@@ -63,7 +131,7 @@ func (ww *WireWriter) WriteClaim(branch string, c Claim) error {
 	if branch == "" {
 		return ErrWireNoBranch
 	}
-	if !slices.Contains(ww.branches, branch) {
+	if !slices.Contains(ww.cons.Branches, branch) {
 		return WithDetail(ErrWireUndeclared, branch)
 	}
 	raw, err := c.EncodeCBOR(FormOriginal)
@@ -81,19 +149,33 @@ func (ww *WireWriter) WriteContent(b ContentBlob) error {
 	return ww.write([]any{uint64(WireContent), idBytes(b.Hash), b.Content})
 }
 
-// write emits the header once, then marshals the record onto the stream.
+// write emits the constraint records once, then marshals the record onto the stream.
 func (ww *WireWriter) write(rec []any) error {
 	if !ww.headed {
 		ww.headed = true
-		branches := ww.branches
-		if branches == nil {
-			branches = []string{} // content alone touches no branch, and still says so
-		}
-		if err := ww.marshal([]any{uint64(WireHeader), branches}); err != nil {
+		// Both required records are written even when empty: content alone touches no
+		// branch and reads from none, and says so.
+		if err := ww.marshal([]any{uint64(WireBranches), list(ww.cons.Branches)}); err != nil {
 			return err
+		}
+		if err := ww.marshal([]any{uint64(WireReferencable), list(ww.cons.Referencable)}); err != nil {
+			return err
+		}
+		if len(ww.cons.Lifted) > 0 {
+			if err := ww.marshal([]any{uint64(WireLifted), ww.cons.Lifted}); err != nil {
+				return err
+			}
 		}
 	}
 	return ww.marshal(rec)
+}
+
+// list renders a declaration, an absent one as the empty list it means.
+func list(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // marshal writes one record's canonical bytes.
@@ -110,11 +192,12 @@ func (ww *WireWriter) marshal(rec []any) error {
 
 // WireReader streams a contribution, decoding one record at a time.
 type WireReader struct {
-	dec      *cbor.Decoder
-	rec      WireRecord
-	err      error
-	branches []string
-	headed   bool
+	dec     *cbor.Decoder
+	rec     WireRecord
+	err     error
+	cons    WireConstraints
+	pending []cbor.RawMessage // the payload record that ended the constraint block
+	headed  bool
 }
 
 // NewWireReader reads a contribution stream from r.
@@ -122,60 +205,120 @@ func NewWireReader(r io.Reader) *WireReader {
 	return &WireReader{dec: cbor.NewDecoder(r)}
 }
 
-// Branches are the branches the stream declares, read from its first record alone —
-// so a caller decides whether to take the contribution before reading it.
-func (wr *WireReader) Branches() ([]string, error) {
-	if err := wr.readHeader(); err != nil {
-		return nil, err
+// Constraints are what the stream declares, read from its leading records alone — so a
+// caller inspects them, and refuses what it will not grant, before taking the payload.
+func (wr *WireReader) Constraints() (WireConstraints, error) {
+	if err := wr.readConstraints(); err != nil {
+		return WireConstraints{}, err
 	}
-	return slices.Clone(wr.branches), nil
+	return wr.cons, nil
 }
 
-// readHeader consumes the leading header record, once.
-func (wr *WireReader) readHeader() error {
+// readConstraints consumes the leading constraint records, once. The first payload
+// record closes the block and waits for Next.
+func (wr *WireReader) readConstraints() error {
 	if wr.headed {
 		return wr.err
 	}
 	wr.headed = true
-	raw, ok, err := wr.decode()
-	switch {
-	case err != nil:
-		wr.err = err
-		return err
-	case !ok:
-		return nil // an empty stream carries nothing and declares nothing
+	seen := map[WireKind]bool{}
+	for {
+		raw, ok, err := wr.decode()
+		if err != nil {
+			wr.err = err
+			return err
+		}
+		if !ok {
+			break
+		}
+		kind, err := wireKind(raw)
+		if err != nil {
+			wr.err = err
+			return err
+		}
+		if !constraintKind(kind) {
+			wr.pending = raw
+			break
+		}
+		if err := wr.readConstraint(kind, raw, seen); err != nil {
+			wr.err = err
+			return err
+		}
 	}
-	kind, err := wireKind(raw)
-	if err != nil {
-		wr.err = err
-		return err
+	// An empty stream declares nothing and admits nothing, so it needs no records.
+	if len(seen) == 0 && wr.pending == nil {
+		return nil
 	}
-	if kind != WireHeader || len(raw) < 2 {
+	if !seen[WireBranches] || !seen[WireReferencable] {
 		wr.err = ErrWireNoHeader
-		return wr.err
-	}
-	if err := cbor.Unmarshal(raw[1], &wr.branches); err != nil {
-		wr.err = Wrap(ErrWire, err)
 	}
 	return wr.err
+}
+
+// readConstraint records one declaration, narrowing against any earlier one of its
+// kind so repeats compose rather than replace.
+func (wr *WireReader) readConstraint(kind WireKind, raw []cbor.RawMessage, seen map[WireKind]bool) error {
+	if len(raw) < 2 {
+		return WithDetail(ErrWire, "constraint record carries no list")
+	}
+	var list []string
+	if err := cbor.Unmarshal(raw[1], &list); err != nil {
+		return Wrap(ErrWire, err)
+	}
+	slot, merge := wr.slot(kind)
+	if seen[kind] {
+		*slot = merge(*slot, list)
+		return nil
+	}
+	seen[kind] = true
+	*slot = list
+	return nil
+}
+
+// slot returns where a kind's declaration is held, and how a repeat of it merges.
+func (wr *WireReader) slot(kind WireKind) (*[]string, func(a, b []string) []string) {
+	switch kind {
+	case WireBranches:
+		return &wr.cons.Branches, intersect
+	case WireReferencable:
+		return &wr.cons.Referencable, narrowScopes
+	default:
+		return &wr.cons.Lifted, intersect
+	}
 }
 
 // Next decodes the next record, returning false at end of stream or on error.
 // The kinds differ in arity, so the elements are taken raw and read per kind.
 func (wr *WireReader) Next() bool {
-	if wr.readHeader() != nil {
+	if wr.readConstraints() != nil {
 		return false
 	}
-	raw, ok, err := wr.decode()
-	switch {
-	case err != nil:
-		return wr.fail(err)
-	case !ok:
-		return false
+	raw := wr.pending
+	wr.pending = nil
+	if raw == nil {
+		var ok bool
+		var err error
+		raw, ok, err = wr.decode()
+		switch {
+		case err != nil:
+			return wr.fail(err)
+		case !ok:
+			return false
+		}
 	}
 	kind, err := wireKind(raw)
 	if err != nil {
 		return wr.fail(err)
+	}
+	// The block is closed, so a declaration arriving here would bind records already
+	// applied.
+	if constraintKind(kind) {
+		return wr.fail(ErrWireLateConstraint)
+	}
+	// The kind decides before the shape does, so an unrecognised record is reported as
+	// one rather than as a payload of the wrong arity.
+	if kind != WireClaim && kind != WireContent {
+		return wr.fail(WithDetail(ErrWireKind, strconv.FormatUint(uint64(kind), 10)))
 	}
 	if len(raw) < 3 {
 		return wr.fail(WithDetail(ErrWire, "record has fewer than three elements"))
@@ -184,14 +327,10 @@ func (wr *WireReader) Next() bool {
 	if !ok {
 		return false
 	}
-	switch kind {
-	case WireClaim:
+	if kind == WireClaim {
 		return wr.readClaim(raw, key, payload)
-	case WireContent:
-		return wr.readContent(key, payload)
-	default:
-		return wr.fail(WithDetail(ErrWireKind, key.String()))
 	}
+	return wr.readContent(key, payload)
 }
 
 // decode reads the next record's raw elements; ok is false at end of stream.
@@ -246,7 +385,7 @@ func (wr *WireReader) readClaim(raw []cbor.RawMessage, key Id, payload []byte) b
 	if branch == "" {
 		return wr.fail(WithDetail(ErrWireNoBranch, key.String()))
 	}
-	if !slices.Contains(wr.branches, branch) {
+	if !slices.Contains(wr.cons.Branches, branch) {
 		return wr.fail(WithDetail(ErrWireUndeclared, branch))
 	}
 	c, err := DecodeClaim(key, payload)
