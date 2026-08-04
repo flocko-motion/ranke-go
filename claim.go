@@ -39,7 +39,8 @@ type Claim interface {
 	// external streamed from u, as is a dropped inline body.
 	GetContent(ctx context.Context, u Universe) (io.Reader, error)
 
-	// EncodeJSON is EncodeCBOR's information as text, content base64.
+	// EncodeJSON renders every record slot as text, content base64. It reports a
+	// claim; the id is verified against the CBOR form's bytes.
 	EncodeJSON(form Form) ([]byte, error)
 	// EncodeCBOR returns the claim as canonical CBOR: FormOriginal the record as
 	// written, which persistence stores; FormMaterialized its overlay resolved.

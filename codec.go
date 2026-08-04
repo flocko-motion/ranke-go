@@ -230,9 +230,57 @@ func (c *claim) EncodeCBOR(form Form) ([]byte, error) {
 	return data, nil
 }
 
+// jsonFields is the key the projection nests a record's fields under. They need a
+// namespace of their own: a field name is [a-z0-9_], so "type" or "height" is a
+// legal one, and flattening would let it overwrite the structural key.
+const jsonFields = "fields"
+
+// jsonCarrier is the part of the projection a node and an edge share, so the two
+// render alike and neither drifts.
+type jsonCarrier interface {
+	Encoding() string
+	ContentKind() ContentKind
+	GetContentHash() Id
+	GetContentSize() uint64
+	GetInlineContent() ([]byte, error)
+	Fields() []string
+	GetField(name string) (string, error)
+}
+
+// jsonCarry writes cc's content declaration and fields into m.
+func jsonCarry(m map[string]any, cc jsonCarrier) {
+	if enc := cc.Encoding(); enc != "" {
+		m["encoding"] = enc
+	}
+	if cc.ContentKind() != ContentNone {
+		m[FieldContentSize] = cc.GetContentSize()
+	}
+	if h := cc.GetContentHash(); h != nil {
+		m[FieldContentHash] = h.String()
+	}
+	if b, err := cc.GetInlineContent(); err == nil && len(b) > 0 {
+		m[FieldContent] = b
+	}
+	names := cc.Fields()
+	if len(names) == 0 {
+		return
+	}
+	f := make(map[string]string, len(names))
+	for _, k := range names {
+		if v, err := cc.GetField(k); err == nil {
+			f[k] = v
+		}
+	}
+	m[jsonFields] = f
+}
+
 // EncodeJSON renders the claim's ADT fields, named as the taxonomy names them, in
-// the form asked for — so JSON and CBOR carry the same information. Content is
-// base64, as JSON renders bytes.
+// the form asked for. Every record slot appears, so an edge renders its fields, its
+// relation direction and its own content as a node does. Content is base64.
+//
+// The projection reports a claim; verification needs the CBOR form, whose bytes are
+// the ones the id was signed over. A read may also cap the content JSON inlines
+// (§Output `content`).
 func (c *claim) EncodeJSON(form Form) ([]byte, error) {
 	n, edges := c.node, c.edges
 	if form == FormMaterialized {
@@ -244,27 +292,16 @@ func (c *claim) EncodeJSON(form Form) ([]byte, error) {
 		"created_at": n.CreatedAt().UTC().Format(iso8601Nano),
 		"height":     n.Height(),
 	}
-	if enc := n.Encoding(); enc != "" {
-		m["encoding"] = enc
-	}
-	if n.ContentKind() != ContentNone {
-		m[FieldContentSize] = n.GetContentSize()
-	}
-	if h := n.GetContentHash(); h != nil {
-		m[FieldContentHash] = h.String()
-	}
-	if b, err := n.GetInlineContent(); err == nil && len(b) > 0 {
-		m[FieldContent] = b
-	}
-	for _, k := range n.Fields() {
-		if v, err := n.GetField(k); err == nil {
-			m[k] = v
-		}
-	}
+	jsonCarry(m, n)
 	if len(edges) > 0 {
 		list := make([]map[string]any, 0, len(edges))
 		for _, e := range edges {
-			list = append(list, map[string]any{"type": e.Type(), "reference": e.Reference().String()})
+			em := map[string]any{"type": e.Type(), "reference": e.Reference().String()}
+			if d := e.RelationDirection(); d != 0 {
+				em["relation_direction"] = int8(d)
+			}
+			jsonCarry(em, e)
+			list = append(list, em)
 		}
 		m["edges"] = list
 	}
