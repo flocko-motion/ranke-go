@@ -108,6 +108,11 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
+	// No engine applies the cap yet, and uncapped content answers a different query
+	// than the one asked. Delete this once an executor honours it.
+	if q.Output.Content != nil {
+		return nil, WithDetail(ErrUnsupported, "Output.Content")
+	}
 	scope, err := a.resolveScope(ctx, q)
 	if err != nil {
 		return nil, err
