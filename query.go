@@ -27,6 +27,9 @@ const (
 	// BranchArchive confines to the whole Ranke-Archive: the closure of the
 	// branch-table header. Select.Claim defaults to the current archive head.
 	BranchArchive = "$archive"
+	// TargetBranches names the branch table itself (§Access), the surface a grant over
+	// branch creation is held against. It scopes no read, so Select.Branch rejects it.
+	TargetBranches = "$branches"
 )
 
 // Select is a generator: Branch is the scope, Head narrows it to one claim's

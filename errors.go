@@ -107,6 +107,8 @@ var (
 	ErrQueryScanClaim        = errors.New("ranke.Query: a scan (no Select.Path) has no traversal to start, so Select.Claim is meaningless")
 	ErrQueryEncoding         = errors.New("ranke.Query: unknown Output.Encoding (native | json | cbor)")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
+	ErrFutureDated           = errors.New("ranke.Contribution: claim is dated after the base the contribution opened against")
+	ErrBranchNotCreatable    = errors.New("ranke.Contribution: branch is absent from the base, and creating one is a right of its own")
 	ErrUnreadableReference   = errors.New("ranke.Contribution: reference reaches a claim outside the branches this contribution may read")
 	errContributionRefs      = errors.New("ranke.AdmitReferences")
 	ErrWire                  = errors.New("ranke.Wire")

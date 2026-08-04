@@ -37,7 +37,7 @@ type contribution struct {
 func (c *contribution) Base() (ranke.Id, time.Time) { return c.baseHead, c.baseTime }
 
 // AddClaims is step 2: it stages a batch for branch in dependency order
-// (references first).
+// (references first), each claim checked against the base.
 func (c *contribution) AddClaims(branch string, claims []ranke.Claim) error {
 	if c.sealed {
 		return errSealed
@@ -49,7 +49,7 @@ func (c *contribution) AddClaims(branch string, claims []ranke.Claim) error {
 		if cl == nil {
 			return errNilClaim
 		}
-		if err := c.constraints.AdmitType(cl.Node().Type()); err != nil {
+		if err := c.admissible(cl); err != nil {
 			return err
 		}
 	}
@@ -63,12 +63,24 @@ func (c *contribution) AddWire(ctx context.Context, wr *ranke.WireReader) error 
 	return ranke.DrainWire(ctx, c, c.s.u, wr)
 }
 
+// admissible applies the two step-2 rules: a claim is dated at or before the base time
+// t (§Timestamping), and its type is one the constraints admit.
+func (c *contribution) admissible(cl ranke.Claim) error {
+	if err := ranke.AdmitCreatedAt(cl, c.baseTime); err != nil {
+		return err
+	}
+	return c.constraints.AdmitType(cl.Node().Type())
+}
+
 // admitReferences checks the branch's staged claims against what the contribution may
 // read, resolved at its base so the permitted set holds still while it is open.
 func (c *contribution) admitReferences(ctx context.Context, branch string) error {
 	base, err := ranke.NewArchive(ctx, c.s.u, c.baseHead)
 	if err != nil {
 		return fmt.Errorf("%w: open base: %w", errSequencer, err)
+	}
+	if err := c.constraints.AdmitBranch(ctx, base, branch); err != nil {
+		return err
 	}
 	return c.constraints.AdmitReferences(ctx, c.s.u, base, branch, c.staged[branch])
 }

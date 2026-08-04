@@ -21,7 +21,6 @@ var (
 	errNoBranch          = errors.New("concurrent.Contribution: claims must name the branch they join")
 	errNilClaim          = errors.New("concurrent.Contribution.AddClaims: nil claim")
 	errEmptyContribution = errors.New("concurrent.Contribution.CompleteAndVerify: nothing was added")
-	errFutureDated       = errors.New("concurrent.Contribution: claim is dated after the contribution base")
 	errContribution      = errors.New("concurrent.Contribution")
 )
 
@@ -93,15 +92,17 @@ func (c *contribution) admitReferences(ctx context.Context, branch string) error
 	if err != nil {
 		return fmt.Errorf("%w: open base: %w", errContribution, err)
 	}
+	if err := c.constraints.AdmitBranch(ctx, base, branch); err != nil {
+		return err
+	}
 	return c.constraints.AdmitReferences(ctx, c.s.u, base, branch, c.staged[branch])
 }
 
 // admissible applies the two step-2 rules: a claim is dated at or before the base
 // time t (§Timestamping), and its type is not one the constraints withhold.
 func (c *contribution) admissible(cl ranke.Claim) error {
-	if t := cl.Node().CreatedAt(); t.After(c.baseTime) {
-		return fmt.Errorf("%w: %s is dated %s, base is %s", errFutureDated,
-			cl.ID(), t.Format(time.RFC3339Nano), c.baseTime.Format(time.RFC3339Nano))
+	if err := ranke.AdmitCreatedAt(cl, c.baseTime); err != nil {
+		return err
 	}
 	if err := c.constraints.AdmitType(cl.Node().Type()); err != nil {
 		return fmt.Errorf("%w: %s", err, cl.ID())

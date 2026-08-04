@@ -161,12 +161,41 @@ func TestWireConstraintsBecomeOptions(t *testing.T) {
 		Branches:     []string{"main"},
 		Referencable: []string{"main", "research"},
 		Lifted:       []string{NodeDelete},
+		Creatable:    []string{"main"},
 	}
 	got := NewConstraints(cons.Options()...)
 
 	require.NoError(t, got.AdmitType(NodeDelete), "the lifted type is admitted")
 	require.ErrorIs(t, got.AdmitType(NodeBranches), ErrReservedType, "and only that one")
 	require.Equal(t, []string{"main", "research"}, got.referencable)
+	require.Equal(t, []string{"main"}, got.creatable)
+}
+
+// TestWireCarriesCreatable: a new constraint is a new record kind, so the branches a
+// contribution may bring into being cross the wire alongside the rest.
+func TestWireCarriesCreatable(t *testing.T) {
+	root := contributor(t)
+	want := WireConstraints{
+		Branches:     []string{"fresh"},
+		Referencable: []string{BranchArchive},
+		Creatable:    []string{"fresh"},
+	}
+
+	var buf bytes.Buffer
+	w := NewWireWriter(&buf, want)
+	require.NoError(t, w.WriteClaim("fresh", srcClaim(t, root, "a note")))
+
+	got, err := NewWireReader(bytes.NewReader(buf.Bytes())).Constraints()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+
+	// It narrows like the others, so a relay adds its own limits by merging.
+	narrowed := want.Narrow(WireConstraints{
+		Branches:     []string{"fresh"},
+		Referencable: []string{BranchArchive},
+		Creatable:    nil,
+	})
+	require.Empty(t, narrowed.Creatable, "a relay granting no creation leaves none")
 }
 
 // TestWireRepeatedConstraintsNarrow: a second declaration of a kind composes with the

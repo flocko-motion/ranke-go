@@ -35,6 +35,9 @@ const (
 	WireReferencable WireKind = 3
 	// WireLifted is [4, [type, ...]] — the reserved node types it asks to create.
 	WireLifted WireKind = 4
+	// WireCreatable is [5, [branch, ...]] — the branches it may bring into being, a
+	// branch the base does not carry being created by the merge that names it.
+	WireCreatable WireKind = 5
 )
 
 // WireConstraints are the constraints a stream declares, one record each, all of them
@@ -47,6 +50,7 @@ type WireConstraints struct {
 	Branches     []string // record 2, required
 	Referencable []string // record 3, required
 	Lifted       []string // record 4, empty asks for nothing
+	Creatable    []string // record 5, empty asks for nothing
 }
 
 // Narrow returns the constraints both w and o permit. Declaring restricts, so two
@@ -57,6 +61,7 @@ func (w WireConstraints) Narrow(o WireConstraints) WireConstraints {
 		Branches:     intersect(w.Branches, o.Branches),
 		Referencable: narrowScopes(w.Referencable, o.Referencable),
 		Lifted:       intersect(w.Lifted, o.Lifted),
+		Creatable:    intersect(w.Creatable, o.Creatable),
 	}
 }
 
@@ -92,12 +97,19 @@ func (w WireConstraints) Options() []ContributionOption {
 	if len(w.Lifted) > 0 {
 		opts = append(opts, WithLiftedTypes(w.Lifted...))
 	}
+	if len(w.Creatable) > 0 {
+		opts = append(opts, WithCreatableBranches(w.Creatable...))
+	}
 	return opts
 }
 
 // constraintKind reports whether kind carries a constraint rather than payload.
 func constraintKind(kind WireKind) bool {
-	return kind == WireBranches || kind == WireReferencable || kind == WireLifted
+	switch kind {
+	case WireBranches, WireReferencable, WireLifted, WireCreatable:
+		return true
+	}
+	return false
 }
 
 // WireRecord is one decoded record: Kind names which fields carry the payload.
@@ -161,8 +173,14 @@ func (ww *WireWriter) write(rec []any) error {
 		if err := ww.marshal([]any{uint64(WireReferencable), list(ww.cons.Referencable)}); err != nil {
 			return err
 		}
-		if len(ww.cons.Lifted) > 0 {
-			if err := ww.marshal([]any{uint64(WireLifted), ww.cons.Lifted}); err != nil {
+		for _, opt := range [2]struct {
+			kind WireKind
+			list []string
+		}{{WireLifted, ww.cons.Lifted}, {WireCreatable, ww.cons.Creatable}} {
+			if len(opt.list) == 0 {
+				continue
+			}
+			if err := ww.marshal([]any{uint64(opt.kind), opt.list}); err != nil {
 				return err
 			}
 		}
@@ -282,6 +300,8 @@ func (wr *WireReader) slot(kind WireKind) (*[]string, func(a, b []string) []stri
 		return &wr.cons.Branches, intersect
 	case WireReferencable:
 		return &wr.cons.Referencable, narrowScopes
+	case WireCreatable:
+		return &wr.cons.Creatable, intersect
 	default:
 		return &wr.cons.Lifted, intersect
 	}

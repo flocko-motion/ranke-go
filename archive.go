@@ -9,6 +9,7 @@ package ranke
 import (
 	"context"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -27,6 +28,9 @@ type Archive interface {
 	HasBranch(ctx context.Context, name string) (bool, error)
 	GetBranch(ctx context.Context, name string) (Branch, error)
 	GetBranches(ctx context.Context) ([]Branch, error)
+	// MissingBranches are those of names this archive does not carry — the branches a
+	// contribution would create, so a caller knows whether it needs the right to.
+	MissingBranches(ctx context.Context, names []string) ([]string, error)
 
 	// Query answers an RQL read: resolve q.Select.Branch to a Scope, delegate to 𝒰.
 	Query(ctx context.Context, q Query) (ResultStream, error)
@@ -182,6 +186,17 @@ func (a *archive) GetBranch(_ context.Context, name string) (Branch, error) {
 		return nil, errBranchNotFound
 	}
 	return newBranch(a.u, e), nil
+}
+
+func (a *archive) MissingBranches(_ context.Context, names []string) ([]string, error) {
+	entries := a.loadBranches()
+	var missing []string
+	for _, n := range names {
+		if _, ok := entries[n]; !ok && !slices.Contains(missing, n) {
+			missing = append(missing, n)
+		}
+	}
+	return missing, nil
 }
 
 func (a *archive) GetBranches(_ context.Context) ([]Branch, error) {
