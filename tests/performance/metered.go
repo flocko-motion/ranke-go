@@ -182,6 +182,13 @@ func (m *metered) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64
 	return hs, err
 }
 
+func (m *metered) ClaimsInBranches(ctx context.Context, branches map[string]ranke.Id, ids []ranke.Id) ([]bool, error) {
+	t := time.Now()
+	held, err := m.inner.ClaimsInBranches(ctx, branches, ids)
+	m.rec("ClaimsInBranches", kindRead, len(ids), time.Since(t))
+	return held, err
+}
+
 func (m *metered) GetClaimTags(ctx context.Context, claims []ranke.Id) ([]map[string]string, error) {
 	t := time.Now()
 	tags, err := m.inner.GetClaimTags(ctx, claims)

@@ -317,6 +317,13 @@ func (u *blobUniverse) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]u
 	return u.heights.GetClaimHeights(ctx, u, ids)
 }
 
+// ClaimsInBranches walks, a byte store keeping no branch index of its own.
+//
+//deadcode:keep
+func (u *blobUniverse) ClaimsInBranches(ctx context.Context, branches map[string]ranke.Id, ids []ranke.Id) ([]bool, error) {
+	return ranke.DefaultClaimsInBranches(ctx, u, branches, ids)
+}
+
 // Query answers an RQL read via the reference executor over this byte store;
 // uses/connections work via closure inversion (no native reverse index).
 func (u *blobUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {

@@ -360,6 +360,17 @@ func (s *stack) GetClaimHeights(ctx context.Context, ids []ranke.Id) ([]uint64, 
 	return ranke.DefaultGetClaimHeights(ctx, s, ids)
 }
 
+// ClaimsInBranches asks the topmost layer that indexes branch membership, so a
+// graph-native cache answers it in one query.
+func (s *stack) ClaimsInBranches(ctx context.Context, branches map[string]ranke.Id, ids []ranke.Id) ([]bool, error) {
+	for _, l := range s.layers {
+		if l.u.Capabilities().Tags {
+			return l.u.ClaimsInBranches(ctx, branches, ids)
+		}
+	}
+	return ranke.DefaultClaimsInBranches(ctx, s, branches, ids)
+}
+
 // GetClaimsRaw returns the stored CBOR from the topmost layer holding the bytes.
 // Verification and replication use it, off the hot path, so it only fetches.
 func (s *stack) GetClaimsRaw(ctx context.Context, ids []ranke.Id) ([][]byte, error) {

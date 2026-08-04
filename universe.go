@@ -133,6 +133,11 @@ type Universe interface {
 	// recomputing it over a large closure is expensive.
 	GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error)
 
+	// ClaimsInBranches reports, per id, whether any of branches holds it. Names map to
+	// heads, so a walker resolves by head and a graph-native backend by the name it
+	// indexes; BranchArchive names the archive entire.
+	ClaimsInBranches(ctx context.Context, branches map[string]Id, ids []Id) ([]bool, error)
+
 	// Query answers a declarative RQL read (the paper's §Filtered Reads) with
 	// scope as the resolved branch context, so head/height/revision are known. A
 	// byte store delegates to DefaultQuery, a graph-native backend lowers to its

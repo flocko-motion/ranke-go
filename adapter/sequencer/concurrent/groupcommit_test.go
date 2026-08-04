@@ -65,7 +65,7 @@ func persisted(t *testing.T, ctx context.Context, s *Sequencer, op ranke.Contrib
 		Sign()
 	require.NoError(t, err)
 
-	contrib, err := s.NewContribution(ctx)
+	contrib, err := s.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
 	require.NoError(t, err)
 	require.NoError(t, contrib.AddClaims(branch, []ranke.Claim{c}))
 	v, err := contrib.CompleteAndVerify(ctx)

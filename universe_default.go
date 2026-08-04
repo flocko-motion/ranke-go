@@ -91,6 +91,60 @@ func DefaultGetClaimHeights(ctx context.Context, u Universe, ids []Id) ([]uint64
 	return out, nil
 }
 
+// DefaultClaimsInBranches walks each closure once, marking what it reaches — slow, and
+// correct wherever a layer indexes nothing of its own.
+func DefaultClaimsInBranches(ctx context.Context, u Universe, branches map[string]Id, ids []Id) ([]bool, error) {
+	out := make([]bool, len(ids))
+	want := make(map[string]int, len(ids))
+	for i, id := range ids {
+		if id != nil {
+			want[id.String()] = i
+		}
+	}
+	for _, head := range branches {
+		if len(want) == 0 {
+			break // every id is accounted for
+		}
+		if err := markClosure(ctx, u, head, want, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// markClosure walks head's closure, dropping each id it finds from want so a later
+// branch skips it.
+func markClosure(ctx context.Context, u Universe, head Id, want map[string]int, out []bool) error {
+	seen := map[string]bool{}
+	queue := []Id{head}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == nil || seen[cur.String()] {
+			continue
+		}
+		seen[cur.String()] = true
+		if i, ok := want[cur.String()]; ok {
+			out[i] = true
+			delete(want, cur.String())
+			if len(want) == 0 {
+				return nil // all located; the rest of the closure cannot matter
+			}
+		}
+		c, err := GetClaim(ctx, u, cur, WithNotDiffMaterialized())
+		if err != nil {
+			continue
+		}
+		for _, e := range c.Edges() {
+			queue = append(queue, e.Reference())
+		}
+	}
+	return nil
+}
+
 // HeightCache memoises claim heights. A height is bound into the id (§4.1), so an
 // entry holds forever. Construct with NewHeightCache; a nil cache simply misses.
 type HeightCache struct {

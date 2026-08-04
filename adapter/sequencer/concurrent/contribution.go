@@ -20,7 +20,6 @@ var (
 	errSealed            = errors.New("concurrent.Contribution: already sealed")
 	errNoBranch          = errors.New("concurrent.Contribution: claims must name the branch they join")
 	errNilClaim          = errors.New("concurrent.Contribution.AddClaims: nil claim")
-	errNilGraph          = errors.New("concurrent.Contribution.AddGraph: nil graph")
 	errEmptyContribution = errors.New("concurrent.Contribution.CompleteAndVerify: nothing was added")
 	errFutureDated       = errors.New("concurrent.Contribution: claim is dated after the contribution base")
 	errContribution      = errors.New("concurrent.Contribution")
@@ -44,7 +43,6 @@ type contribution struct {
 	mu       sync.Mutex
 	sealed   bool
 	staged   map[string][]ranke.Claim // per branch, in dependency order
-	adopted  map[string][]ranke.Id    // per branch, open heads from AddGraph (already in 𝒰)
 	branches []string                 // first-named order, so a merge is deterministic
 }
 
@@ -75,25 +73,6 @@ func (c *contribution) AddClaims(branch string, claims []ranke.Claim) error {
 	return nil
 }
 
-// AddGraph is step 2 for a Graph the caller filled: it adopts the graph's open
-// heads as roots for branch, which CompleteAndVerify loads and checks.
-func (c *contribution) AddGraph(branch string, g ranke.Graph) error {
-	if g == nil {
-		return errNilGraph
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.sealed {
-		return errSealed
-	}
-	if branch == "" {
-		return errNoBranch
-	}
-	c.note(branch)
-	c.adopted[branch] = append(c.adopted[branch], g.Heads()...)
-	return nil
-}
-
 // AddWire is step 2 from a wire stream, whose records name their own branches.
 func (c *contribution) AddWire(ctx context.Context, wr *ranke.WireReader) error {
 	return ranke.DrainWire(ctx, c, c.s.u, wr)
@@ -104,10 +83,17 @@ func (c *contribution) note(branch string) {
 	if _, seen := c.staged[branch]; seen {
 		return
 	}
-	if _, seen := c.adopted[branch]; seen {
-		return
-	}
 	c.branches = append(c.branches, branch)
+}
+
+// admitReferences checks the branch's staged claims against what the contribution may
+// read, resolved at its base so the permitted set holds still while it is open.
+func (c *contribution) admitReferences(ctx context.Context, branch string) error {
+	base, err := ranke.NewArchive(ctx, c.s.u, c.baseHead)
+	if err != nil {
+		return fmt.Errorf("%w: open base: %w", errContribution, err)
+	}
+	return c.constraints.AdmitReferences(ctx, c.s.u, base, branch, c.staged[branch])
 }
 
 // admissible applies the two step-2 rules: a claim is dated at or before the base
@@ -144,19 +130,6 @@ func (c *contribution) CompleteAndVerify(ctx context.Context) (ranke.VerifiedCon
 		if err != nil {
 			return nil, fmt.Errorf("%w: new graph: %w", errContribution, err)
 		}
-		for _, id := range c.adopted[branch] { // first, so a staged claim citing one pushes it interior
-			cl, err := ranke.GetClaim(ctx, c.s.u, id)
-			if err != nil {
-				return nil, fmt.Errorf("%w: load adopted head %s: %w", errContribution, id, err)
-			}
-			if err := c.admissible(cl); err != nil {
-				return nil, err
-			}
-			if err := g.AddClaims(ctx, cl); err != nil {
-				return nil, fmt.Errorf("%w: adopt %s: %w", errContribution, id, err)
-			}
-			ids = append(ids, id)
-		}
 		// The verifier reads the closure out of 𝒰, so staging happens here. 𝒰 is
 		// add-only, leaving a failed contribution's claims unreachable from any head.
 		if err := g.AddClaims(ctx, c.staged[branch]...); err != nil {
@@ -164,6 +137,11 @@ func (c *contribution) CompleteAndVerify(ctx context.Context) (ranke.VerifiedCon
 		}
 		for _, cl := range c.staged[branch] {
 			ids = append(ids, cl.ID())
+		}
+
+		// Step 3's read requirement, over the base.
+		if err := c.admitReferences(ctx, branch); err != nil {
+			return nil, err
 		}
 
 		// Pruning at merged claims costs a contribution its own closure, not the archive's.
@@ -210,8 +188,7 @@ type verified struct {
 	heads map[string][]ranke.Id
 }
 
-// Ids are the claim ids the contribution adds: everything handed to it, staged
-// or adopted.
+// Ids are the claim ids the contribution adds.
 func (v *verified) Ids() []ranke.Id {
 	out := make([]ranke.Id, len(v.ids))
 	copy(out, v.ids)
