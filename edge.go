@@ -56,7 +56,11 @@ type Edge interface {
 // EdgeConfig is the data-only input to NewEdge. Reference and a type (Type, or
 // TypeClass+TypeSub) are required; NewEdge enforces the per-field rules below.
 type EdgeConfig struct {
-	Reference         Id
+	Reference Id
+	// Referenced is the claim Reference names, for the fields an edge derives from its
+	// target: today the delete_by every edge must carry (`R-DELBY`). Supply it wherever
+	// the target is in hand, since an edge cannot learn this after it is built.
+	Referenced        Claim
 	Type              string
 	TypeClass         EdgeClass
 	TypeSub           string
@@ -133,6 +137,20 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 	} else {
 		if cfg.RelationDirection != 0 {
 			return nil, WithDetail(errRelationDirNonRel, string(cfg.TypeClass)+"/*")
+		}
+	}
+
+	// The target's schedule travels with the reference (`R-DELBY`), so it is part of
+	// the edge from the start; an edge stating one keeps what it states.
+	if cfg.Referenced != nil {
+		if due, err := cfg.Referenced.Node().GetField(FieldDeleteBy); err == nil {
+			if _, stated := cfg.Fields[FieldDeleteBy]; !stated {
+				cfg.Fields = cloneFields(cfg.Fields)
+				if cfg.Fields == nil {
+					cfg.Fields = map[string]string{}
+				}
+				cfg.Fields[FieldDeleteBy] = due
+			}
 		}
 	}
 

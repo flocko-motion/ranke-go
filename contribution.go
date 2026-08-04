@@ -154,6 +154,69 @@ var reservedTypes = map[string]bool{
 	NodeExpiry:   true,
 }
 
+// StrandedByDeletion reports which of own a walk from heads reaches only through a
+// claim carrying delete_by (`R-DELBY`): deleting one removes the record its edges lived
+// in, so a walk stops at the gap while what lay behind stays present.
+//
+// The search stays inside own — a claim is referenced only by claims made after it, so
+// nothing already in the archive leads to one this contribution brings.
+func StrandedByDeletion(ctx context.Context, u Universe, heads []Id, own []Claim) ([]Id, error) {
+	mine := make(map[string]Claim, len(own))
+	for _, c := range own {
+		mine[c.ID().String()] = c
+	}
+	reached := map[string]bool{}
+	queue := append([]Id{}, heads...)
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		id := queue[0]
+		queue = queue[1:]
+		if id == nil || reached[id.String()] {
+			continue
+		}
+		c, ok := mine[id.String()]
+		if !ok {
+			continue // already in the archive, and no path from there back into own
+		}
+		if scheduledForDeletion(c) {
+			continue // its edges go with its bytes, so a walk stops here
+		}
+		reached[id.String()] = true
+		for _, e := range c.Edges() {
+			queue = append(queue, e.Reference())
+		}
+	}
+
+	var orphaned []Id
+	for _, c := range own {
+		if !reached[c.ID().String()] && !scheduledForDeletion(c) {
+			orphaned = append(orphaned, c.ID())
+		}
+	}
+	return orphaned, nil
+}
+
+func scheduledForDeletion(c Claim) bool {
+	_, err := c.Node().GetField(FieldDeleteBy)
+	return err == nil
+}
+
+// CheckDeletable reports whether a claim of this class may schedule its own removal.
+// The contribution/* family may not: the branch tables and head claims are the
+// structure a read walks, a contributor claim is the key its signatures are checked
+// against, and a limiting claim is the restriction that must outlast its target.
+func CheckDeletable(class NodeClass, fields map[string]string) error {
+	if class != NodeClassContribution {
+		return nil
+	}
+	if _, ok := fields[FieldDeleteBy]; ok {
+		return WithDetail(ErrStructureNotDeletable, string(class))
+	}
+	return nil
+}
+
 // AdmitCreatedAt applies step 2's timestamp rule: a claim is dated at or before the
 // base time t (§Timestamping). Both Sequencers call it, so the rule reads one way.
 func AdmitCreatedAt(c Claim, base time.Time) error {

@@ -176,3 +176,34 @@ func TestEncodingNamespace_Rejected(t *testing.T) {
 	require.Error(t, buildWithEncoding(t, "text/.x"),
 		"an encoding subtype in the reserved \".\" namespace must be rejected")
 }
+
+// TestFieldNameAliases pins the whole field-alias table (§5.1). The table is
+// normative — a second implementation encoding the same claim differently would
+// disagree on the bytes — so every entry is stated here explicitly.
+func TestFieldNameAliases(t *testing.T) {
+	checkAliasRoundTrip(t, map[Field]Field{
+		FieldName:               FieldNameAlias,
+		FieldEdges:              FieldEdgesAlias,
+		FieldContent:            FieldContentAlias,
+		FieldContentSize:        FieldContentSizeAlias,
+		FieldContentHash:        FieldContentHashAlias,
+		FieldHeight:             FieldHeightAlias,
+		FieldEdgesDiffOmit:      FieldEdgesDiffOmitAlias,
+		FieldFieldsDiffOmit:     FieldFieldsDiffOmitAlias,
+		FieldDeleteBy:           FieldDeleteByAlias,
+		FieldPubkeyValidFrom:    FieldPubkeyValidFromAlias,
+		FieldPubkeyExpiresAfter: FieldPubkeyExpiresAfterAlias,
+	}, fieldNameToAlias, fieldNameFromAlias, Field("topic")) // open vocabulary
+}
+
+// TestFieldAliasesAreSingleCharacter: an alias is "the dot and one character"
+// (§5.1), so a longer one silently costs the bytes it was added to save.
+func TestFieldAliasesAreSingleCharacter(t *testing.T) {
+	for _, long := range []Field{
+		FieldName, FieldEdges, FieldContent, FieldContentSize, FieldContentHash,
+		FieldHeight, FieldEdgesDiffOmit, FieldFieldsDiffOmit, FieldDeleteBy,
+		FieldPubkeyValidFrom, FieldPubkeyExpiresAfter,
+	} {
+		require.Len(t, string(fieldNameToAlias(long)), 1, "alias for %q", long)
+	}
+}

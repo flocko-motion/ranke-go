@@ -118,6 +118,96 @@ func TestValidContributionAccepted(t *testing.T) {
 	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
 }
 
+// TestDeletionCannotStrandAClaim: deleting a claim removes the record its edges live in,
+// so a claim reachable only through one scheduled for deletion would stop being
+// reachable while remaining present. The head cites it directly, so the branch still
+// reaches it once the scheduled claim is gone.
+func TestDeletionCannotStrandAClaim(t *testing.T) {
+	const due = "2030-01-01T00:00:00.000000000Z"
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	// keeper is cited only by doomed, which is due for deletion.
+	keeper, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("outlives the claim that cites it")).
+		WithEncoding(ranke.EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+
+	// The edge carries nothing: keeper is not scheduled, so claiming a date for it
+	// would announce a gap that never comes.
+	e, err := ranke.NewEdge(ranke.EdgeConfig{
+		Reference: keeper.ID(),
+		Type:      ranke.TypeDerivation("note"),
+	})
+	require.NoError(t, err)
+	doomed, err := ranke.NewClaim(ranke.TypeDerivation("note"), op).
+		WithInlineContent([]byte("bytes with a shelf life")).
+		WithEncoding(ranke.EncodingPlain).
+		WithEdges(e).
+		WithField(ranke.FieldDeleteBy, due).
+		WithHeight(2).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+
+	head, err := helpers.Contribute(ctx, seq, "main", []ranke.Claim{keeper, doomed})
+	require.NoError(t, err)
+
+	// Walking the branch while everything is present reaches both.
+	arc, err := seq.GetArchive(ctx)
+	require.NoError(t, err)
+	br, err := arc.GetBranch(ctx, "main")
+	require.NoError(t, err)
+	for _, c := range []ranke.Claim{keeper, doomed} {
+		ok, err := br.HasClaim(ctx, c.ID())
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+
+	// The property that matters: a walk from the branch head reaches keeper without
+	// passing through anything scheduled for deletion. Asserting only that the head
+	// cites keeper would hold even unprotected, since the head would then be doomed
+	// itself, whose own edge cites keeper.
+	require.True(t, reachableAfterDeletion(t, ctx, arc, br.Head(), keeper.ID()),
+		"keeper survives the deletion of the only claim that cited it")
+	require.False(t, reachableAfterDeletion(t, ctx, arc, br.Head(), doomed.ID()),
+		"the deleted claim itself goes, which is what leaves the gap to explain")
+	require.NotNil(t, head)
+}
+
+// reachableAfterDeletion walks from head as a reader would once every claim carrying
+// delete_by has had its bytes removed: such a claim is a gap, and the record its edges
+// lived in is gone, so the walk stops there.
+func reachableAfterDeletion(t *testing.T, ctx context.Context, arc ranke.Archive, head, want ranke.Id) bool {
+	t.Helper()
+	seen := map[string]bool{}
+	queue := []ranke.Id{head}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if id == nil || seen[id.String()] {
+			continue
+		}
+		seen[id.String()] = true
+
+		c, err := arc.GetClaim(ctx, id)
+		require.NoError(t, err)
+		if _, err := c.Node().GetField(ranke.FieldDeleteBy); err == nil {
+			continue // deleted: a gap, its edges gone with its bytes
+		}
+		if id.Equal(want) {
+			return true
+		}
+		for _, e := range c.Edges() {
+			queue = append(queue, e.Reference())
+		}
+	}
+	return false
+}
+
 // TestNewBranchNeedsTheRight: a branch the base does not carry is brought into being by
 // the merge naming it, so creating one is a right of its own (§Access, C over
 // $branches) rather than a side effect of writing.
