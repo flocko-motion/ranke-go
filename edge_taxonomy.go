@@ -42,6 +42,13 @@ const (
 	EdgeSubtypePruneAlias       EdgeSubtype = "p"
 	EdgeSubtypeDiff             EdgeSubtype = "diff"
 	EdgeSubtypeDiffAlias        EdgeSubtype = "d"
+	// A limiting claim points at its target through an edge of its own class
+	// (paper 1 §Type Vocabulary): delete documents a gap where bytes were, expiry
+	// names the last time a contributor's key is valid.
+	EdgeSubtypeDelete      EdgeSubtype = "delete"
+	EdgeSubtypeDeleteAlias EdgeSubtype = "x"
+	EdgeSubtypeExpiry      EdgeSubtype = "expiry"
+	EdgeSubtypeExpiryAlias EdgeSubtype = "e"
 )
 
 // edgeClassToAlias / edgeClassFromAlias convert the closed edge classes;
@@ -89,6 +96,10 @@ func edgeSubtypeToAlias(s EdgeSubtype) EdgeSubtype {
 		return EdgeSubtypePruneAlias
 	case EdgeSubtypeDiff:
 		return EdgeSubtypeDiffAlias
+	case EdgeSubtypeDelete:
+		return EdgeSubtypeDeleteAlias
+	case EdgeSubtypeExpiry:
+		return EdgeSubtypeExpiryAlias
 	default:
 		return s
 	}
@@ -108,6 +119,10 @@ func edgeSubtypeFromAlias(s EdgeSubtype) EdgeSubtype {
 		return EdgeSubtypePrune
 	case EdgeSubtypeDiffAlias:
 		return EdgeSubtypeDiff
+	case EdgeSubtypeDeleteAlias:
+		return EdgeSubtypeDelete
+	case EdgeSubtypeExpiryAlias:
+		return EdgeSubtypeExpiry
 	default:
 		return s
 	}
@@ -123,6 +138,8 @@ const (
 	EdgeTypeBranch      = string(EdgeClassContribution) + "/" + string(EdgeSubtypeBranch)
 	EdgeTypePrune       = string(EdgeClassContribution) + "/" + string(EdgeSubtypePrune)
 	EdgeTypeDiff        = string(EdgeClassContribution) + "/" + string(EdgeSubtypeDiff)
+	EdgeTypeDelete      = string(EdgeClassContribution) + "/" + string(EdgeSubtypeDelete)
+	EdgeTypeExpiry      = string(EdgeClassContribution) + "/" + string(EdgeSubtypeExpiry)
 )
 
 // RelationDirection tags an entity's role on a relation/* edge (§4.7):

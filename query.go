@@ -96,13 +96,30 @@ type Comparison struct {
 	Glob string // shell-style wildcard (path.Match)
 }
 
-// Output shapes each result along orthogonal axes: Shape, Detail, Form, Encoding.
+// Output shapes each result along orthogonal axes: Shape, Detail, Form, Content, Encoding.
 type Output struct {
 	Shape    Shape          // single | path
 	Detail   Detail         // id | graph | claims
 	Form     Form           // original | materialized
+	Content  *OutputContent // content inlined per claim; nil inlines none
 	Encoding ResultEncoding // serialized form of each claim (json | cbor)
 }
+
+// OutputContent caps the content inlined per claim and fixes what becomes of the
+// bytes past that cap.
+type OutputContent struct {
+	Max      int      // cap in bytes
+	Overflow Overflow // handling for anything past Max
+}
+
+// Overflow is what becomes of the content past OutputContent.Max.
+type Overflow string
+
+const (
+	OverflowCutoff    Overflow = "cutoff"    // truncate at the cap
+	OverflowOmit      Overflow = "omit"      // drop the content
+	OverflowReference Overflow = "reference" // leave a content_hash stub in its place
+)
 
 // Form is whether a claim is returned as written (the id-defining bytes) or
 // resolved via its diff chain.

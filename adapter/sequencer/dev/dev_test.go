@@ -304,7 +304,7 @@ func TestFutureDatedClaimRefused(t *testing.T) {
 // restricts, which is what makes it limiting (paper 2 §Deletion).
 func limiting(t *testing.T, op ranke.Contributor, target ranke.Claim, at time.Time) ranke.Claim {
 	t.Helper()
-	e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: ranke.NodeDelete})
+	e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: ranke.EdgeTypeDelete})
 	require.NoError(t, err)
 	c, err := ranke.NewClaim(ranke.NodeDelete, op).
 		WithEdges(e).
