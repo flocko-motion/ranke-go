@@ -1,6 +1,7 @@
 package ranke
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,4 +92,110 @@ func TestClaimHeightRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), src.Node().Height())
 	require.Equal(t, uint64(1), roundTrip(t, src).Node().Height(), "height survives the codec")
+}
+
+// --- EncodeJSON: the same information as CBOR --------------------------
+
+// TestEncodeJSONCarriesEveryEdgeSlot: spec §Output says JSON and CBOR carry the
+// same information, so an edge renders every slot its record holds — its fields,
+// its relation direction, and its own content. Dropping any of them makes the
+// projection a summary rather than the claim.
+func TestEncodeJSONCarriesEveryEdgeSlot(t *testing.T) {
+	alice := contributor(t)
+	target, err := NewClaim(TypeSource("register"), alice).
+		WithInlineContent([]byte("a parish register")).
+		WithEncoding(EncodingPlain).
+		WithHeight(HeightOf(alice)).
+		Sign()
+	require.NoError(t, err)
+
+	// A relation claim rests on its provenance (§3.5), so it cites the source it
+	// was read from as well as the entity it relates.
+	prov, err := NewEdge(EdgeConfig{Reference: target.ID(), Type: TypeDerivation("register")})
+	require.NoError(t, err)
+	person, err := NewClaim(TypeEntity("person"), alice).
+		WithEdges(prov).
+		WithHeight(HeightOf(alice, target)).
+		Sign()
+	require.NoError(t, err)
+
+	e, err := NewEdge(EdgeConfig{
+		Reference:         person.ID(),
+		TypeClass:         EdgeClassRelation,
+		TypeSub:           "family",
+		RelationDirection: RelationFrom,
+		Fields:            map[string]string{FieldName: "mother", "certainty": "high"},
+		InlineContent:     []byte("why"),
+		Encoding:          EncodingPlain,
+	})
+	require.NoError(t, err)
+
+	c, err := NewClaim(TypeRelation("family"), alice).
+		WithEdges(prov, e).
+		WithField("topic", "kinship").
+		WithHeight(HeightOf(alice, target, person)).
+		Sign()
+	require.NoError(t, err)
+
+	raw, err := c.EncodeJSON(FormOriginal)
+	require.NoError(t, err)
+	var got struct {
+		Type   string            `json:"type"`
+		Fields map[string]string `json:"fields"`
+		Edges  []struct {
+			Type              string            `json:"type"`
+			Reference         string            `json:"reference"`
+			RelationDirection int8              `json:"relation_direction"`
+			Encoding          string            `json:"encoding"`
+			ContentSize       uint64            `json:"content_size"`
+			Content           []byte            `json:"content"`
+			Fields            map[string]string `json:"fields"`
+		} `json:"edges"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &got))
+
+	require.Equal(t, "relation/family", got.Type)
+	require.Equal(t, map[string]string{"topic": "kinship"}, got.Fields, "node fields nest")
+
+	var rel int
+	for _, je := range got.Edges {
+		if je.Type != "relation/family" {
+			continue
+		}
+		rel++
+		require.Equal(t, person.ID().String(), je.Reference)
+		require.Equal(t, int8(RelationFrom), je.RelationDirection, "direction survives")
+		require.Equal(t, "mother", je.Fields[FieldName], "an edge's name survives")
+		require.Equal(t, "high", je.Fields["certainty"], "every edge field survives")
+		require.Equal(t, EncodingPlain, je.Encoding, "an edge's own content is declared")
+		require.Equal(t, uint64(3), je.ContentSize)
+		require.Equal(t, []byte("why"), je.Content, "content is base64 in JSON")
+	}
+	require.Equal(t, 1, rel, "the relation edge is in the projection")
+}
+
+// TestEncodeJSONFieldCannotMaskAStructuralKey: a field name is [a-z0-9_], so
+// "type" is a legal one. Nesting the fields keeps it from overwriting the
+// structural key, which would lose both values.
+func TestEncodeJSONFieldCannotMaskAStructuralKey(t *testing.T) {
+	alice := contributor(t)
+	c, err := NewClaim(TypeSource("note"), alice).
+		WithField("type", "not the claim type").
+		WithField("height", "not the height").
+		WithHeight(HeightOf(alice)).
+		Sign()
+	require.NoError(t, err)
+
+	raw, err := c.EncodeJSON(FormOriginal)
+	require.NoError(t, err)
+	var got struct {
+		Type   string            `json:"type"`
+		Height uint64            `json:"height"`
+		Fields map[string]string `json:"fields"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Equal(t, "source/note", got.Type, "the structural type is the claim's")
+	require.Equal(t, uint64(1), got.Height)
+	require.Equal(t, "not the claim type", got.Fields["type"], "and the field is still readable")
+	require.Equal(t, "not the height", got.Fields["height"])
 }
