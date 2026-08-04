@@ -118,6 +118,98 @@ func TestValidContributionAccepted(t *testing.T) {
 	require.True(t, merged.Equal(head(t, ctx, seq)), "the receipt names the snapshot's k")
 }
 
+// TestNewBranchNeedsTheRight: a branch the base does not carry is brought into being by
+// the merge naming it, so creating one is a right of its own (§Access, C over
+// $branches) rather than a side effect of writing.
+func TestNewBranchNeedsTheRight(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	note := func() ranke.Claim {
+		c, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+			WithInlineContent([]byte("on a branch that does not exist yet")).
+			WithEncoding(ranke.EncodingPlain).
+			WithHeight(1).
+			WithCreatedAt(clk.Tick()).
+			Sign()
+		require.NoError(t, err)
+		return c
+	}
+
+	write := func(t *testing.T, branch string, opts ...ranke.ContributionOption) error {
+		t.Helper()
+		// The clock ticks for the claim before the contribution takes its base, so the
+		// claim is dated at or before it.
+		n := note()
+		c, err := seq.NewContribution(ctx, append(opts,
+			ranke.WithReferencableBranches(ranke.BranchArchive))...)
+		require.NoError(t, err)
+		require.NoError(t, c.AddClaims(branch, []ranke.Claim{n}))
+		_, err = c.CompleteAndVerify(ctx)
+		return err
+	}
+
+	require.ErrorIs(t, write(t, "fresh"), ranke.ErrBranchNotCreatable,
+		"writing to an absent branch would create it")
+	require.NoError(t, write(t, "fresh", ranke.WithCreatableBranches("fresh")),
+		"naming it creatable admits exactly that branch")
+	require.ErrorIs(t, write(t, "other", ranke.WithCreatableBranches("fresh")),
+		ranke.ErrBranchNotCreatable, "and only that branch")
+	require.NoError(t, write(t, "any", ranke.WithCreatableBranches(ranke.TargetBranches)),
+		"$branches admits any, the surface a creation grant is held against")
+}
+
+// TestMissingBranchesTellsWhatWouldBeCreated: a caller weighs whether a contribution
+// needs creation rights before opening it, so the archive answers which are absent.
+func TestMissingBranchesTellsWhatWouldBeCreated(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+
+	good, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("on main")).
+		WithEncoding(ranke.EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(clk.Tick()).
+		Sign()
+	require.NoError(t, err)
+	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{good})
+	require.NoError(t, err)
+
+	arc, err := seq.GetArchive(ctx)
+	require.NoError(t, err)
+
+	missing, err := arc.MissingBranches(ctx, []string{"main", "fresh", "other", "fresh"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"fresh", "other"}, missing, "absent once each, in the order asked")
+
+	missing, err = arc.MissingBranches(ctx, []string{"main"})
+	require.NoError(t, err)
+	require.Empty(t, missing, "nothing to create, so no right is needed")
+}
+
+// TestFutureDatedClaimRefused: a contribution is stamped with the Sequencer's time t at
+// step 1, and step 2 admits a claim only if it is dated at or before that.
+func TestFutureDatedClaimRefused(t *testing.T) {
+	ctx := context.Background()
+	seq, op, clk := newSequencer(t, ctx)
+	headBefore := head(t, ctx, seq)
+
+	// The clock is monotone, so a later tick is ahead of any base a contribution
+	// opened against.
+	ahead := clk.Tick().Add(time.Hour)
+	future, err := ranke.NewClaim(ranke.TypeSource("note"), op).
+		WithInlineContent([]byte("dated after the base")).
+		WithEncoding(ranke.EncodingPlain).
+		WithHeight(1).
+		WithCreatedAt(ahead).
+		Sign()
+	require.NoError(t, err)
+
+	_, err = helpers.Contribute(ctx, seq, "main", []ranke.Claim{future})
+	require.ErrorIs(t, err, ranke.ErrFutureDated, "a claim may not be dated after its base")
+	require.True(t, headBefore.Equal(head(t, ctx, seq)), "a denied contribution must not advance the head")
+}
+
 // limiting builds a claim of a type reserved to the Sequencer: it names the target it
 // restricts, which is what makes it limiting (paper 2 §Deletion).
 func limiting(t *testing.T, op ranke.Contributor, target ranke.Claim, at time.Time) ranke.Claim {
@@ -274,6 +366,7 @@ func TestAddWireAdvancesDeclaredBranches(t *testing.T) {
 	w := ranke.NewWireWriter(&buf, ranke.WireConstraints{
 		Branches:     []string{"alpha", "beta"},
 		Referencable: []string{ranke.BranchArchive},
+		Creatable:    []string{"alpha", "beta"},
 	})
 	require.NoError(t, w.WriteClaim("alpha", onAlpha))
 	require.NoError(t, w.WriteClaim("beta", onBeta))

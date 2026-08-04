@@ -207,7 +207,8 @@ func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	onAlpha, onBeta := f.note(t, "for alpha"), f.note(t, "for beta")
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("alpha", []ranke.Claim{onAlpha}))
 	require.NoError(t, c.AddClaims("beta", []ranke.Claim{onBeta}))
@@ -242,7 +243,8 @@ func TestUnnamedBranchRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
 
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	require.Error(t, c.AddClaims("", []ranke.Claim{f.note(t, "nowhere")}))
 
@@ -316,7 +318,8 @@ func TestFutureDatedClaimRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t, ctx)
 
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	_, base := c.Base()
 
@@ -344,7 +347,8 @@ func TestBaseIsTheSnapshotItOpenedAt(t *testing.T) {
 	// build this one first — it is contributed last, after the head has moved.
 	late := f.note(t, "late but not lost")
 
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	baseHead, _ := c.Base()
 
@@ -375,7 +379,8 @@ func TestSealedContributionRefusesMoreClaims(t *testing.T) {
 
 	first, second := f.note(t, "sealed"), f.note(t, "too late")
 
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("main", []ranke.Claim{first}))
 	_, err = c.CompleteAndVerify(ctx)
@@ -395,7 +400,8 @@ func TestForeignContributionRefused(t *testing.T) {
 	a, b := newFixture(t, ctx), newFixture(t, ctx)
 
 	mine := a.note(t, "belongs to a")
-	c, err := a.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := a.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("main", []ranke.Claim{mine}))
 	v, err := c.CompleteAndVerify(ctx)
@@ -416,7 +422,8 @@ func TestMultiHeadContributionKeepsBoth(t *testing.T) {
 	f := newFixture(t, ctx)
 
 	one, two := f.note(t, "note one"), f.note(t, "note two")
-	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive))
+	c, err := f.seq.NewContribution(ctx, ranke.WithReferencableBranches(ranke.BranchArchive),
+		ranke.WithCreatableBranches(ranke.TargetBranches))
 	require.NoError(t, err)
 	require.NoError(t, c.AddClaims("main", []ranke.Claim{one, two}))
 	v, err := c.CompleteAndVerify(ctx)

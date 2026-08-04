@@ -8,6 +8,7 @@ package ranke
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 )
@@ -17,6 +18,7 @@ import (
 type Constraints struct {
 	lifted       map[string]bool // reserved node types this contribution may carry
 	referencable []string        // branches it may reference claims from
+	creatable    []string        // branches it may bring into being
 }
 
 // ContributionOption sets one constraint.
@@ -49,6 +51,29 @@ func WithLiftedTypes(types ...string) ContributionOption {
 // from (step 3). BranchArchive admits every branch, BranchUniverse the whole 𝒰.
 func WithReferencableBranches(branches ...string) ContributionOption {
 	return func(c *Constraints) { c.referencable = append(c.referencable, branches...) }
+}
+
+// WithCreatableBranches names the branches a contribution may bring into being, a
+// branch the base does not carry being created by the merge that names it.
+// TargetBranches admits any, the surface §Access holds a creation grant against.
+func WithCreatableBranches(branches ...string) ContributionOption {
+	return func(c *Constraints) { c.creatable = append(c.creatable, branches...) }
+}
+
+// AdmitBranch reports whether the contribution may write to branch, which the base
+// carrying it settles: creating one is a right of its own (§Access, C over $branches).
+func (c Constraints) AdmitBranch(ctx context.Context, base Archive, branch string) error {
+	_, err := base.GetBranch(ctx, branch)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, errBranchNotFound):
+		return err
+	case slices.Contains(c.creatable, branch),
+		slices.Contains(c.creatable, TargetBranches):
+		return nil
+	}
+	return WithDetail(ErrBranchNotCreatable, branch)
 }
 
 // AdmitReferences enforces step 3's read requirement: every claim the contribution's
@@ -104,8 +129,11 @@ func (c Constraints) allowedHeads(ctx context.Context, base Archive, branch stri
 	heads := make(map[string]Id, len(names))
 	for _, name := range names {
 		b, err := base.GetBranch(ctx, name)
-		if err != nil {
-			continue
+		switch {
+		case errors.Is(err, errBranchNotFound):
+			continue // absent from the base, so it holds nothing to read
+		case err != nil:
+			return nil, err
 		}
 		heads[name] = b.Head()
 	}
@@ -124,6 +152,16 @@ var reservedTypes = map[string]bool{
 	NodeBranches: true,
 	NodeDelete:   true,
 	NodeExpiry:   true,
+}
+
+// AdmitCreatedAt applies step 2's timestamp rule: a claim is dated at or before the
+// base time t (§Timestamping). Both Sequencers call it, so the rule reads one way.
+func AdmitCreatedAt(c Claim, base time.Time) error {
+	if t := c.Node().CreatedAt(); t.After(base) {
+		return WithDetail(ErrFutureDated,
+			c.ID().String()+" dated "+t.Format(iso8601Nano)+", base "+base.Format(iso8601Nano))
+	}
+	return nil
 }
 
 // AdmitType reports whether a claim of nodeType may be added under these
