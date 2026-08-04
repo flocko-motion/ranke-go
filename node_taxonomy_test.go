@@ -58,7 +58,17 @@ func TestNodeSubtypeAliases(t *testing.T) {
 		NodeSubtypeBranches:    NodeSubtypeBranchesAlias,
 		NodeSubtypeDiff:        NodeSubtypeDiffAlias,
 		NodeSubtypeHead:        NodeSubtypeHeadAlias,
+		NodeSubtypeDelete:      NodeSubtypeDeleteAlias,
+		NodeSubtypeExpiry:      NodeSubtypeExpiryAlias,
 	}, nodeSubtypeToAlias, nodeSubtypeFromAlias, NodeSubtype("email")) // open vocabulary
+}
+
+// TestLimitingSubtypesAgreeAcrossTables: a limiting claim and the edge naming its
+// target share a type string, so the two alias tables must abbreviate it the same
+// way — otherwise one claim's node and edge disagree on what "delete" is called.
+func TestLimitingSubtypesAgreeAcrossTables(t *testing.T) {
+	require.Equal(t, string(nodeSubtypeToAlias(NodeSubtypeDelete)), string(edgeSubtypeToAlias(EdgeSubtypeDelete)))
+	require.Equal(t, string(nodeSubtypeToAlias(NodeSubtypeExpiry)), string(edgeSubtypeToAlias(EdgeSubtypeExpiry)))
 }
 
 // TestNodeAliasesAreSingleCharacter: node aliases are one character — the size

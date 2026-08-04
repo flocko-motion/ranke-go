@@ -75,6 +75,12 @@ const (
 	NodeSubtypeDiffAlias        NodeSubtype = "d"
 	NodeSubtypeHead             NodeSubtype = "head"
 	NodeSubtypeHeadAlias        NodeSubtype = "h"
+	// The limiting claims (paper 1 §Type Vocabulary). Each takes the letter its
+	// edge subtype takes, as contributor, head and diff already do.
+	NodeSubtypeDelete      NodeSubtype = "delete"
+	NodeSubtypeDeleteAlias NodeSubtype = "x"
+	NodeSubtypeExpiry      NodeSubtype = "expiry"
+	NodeSubtypeExpiryAlias NodeSubtype = "e"
 )
 
 // nodeSubtypeToAlias / nodeSubtypeFromAlias convert the closed node
@@ -91,6 +97,10 @@ func nodeSubtypeToAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeDiffAlias
 	case NodeSubtypeHead:
 		return NodeSubtypeHeadAlias
+	case NodeSubtypeDelete:
+		return NodeSubtypeDeleteAlias
+	case NodeSubtypeExpiry:
+		return NodeSubtypeExpiryAlias
 	default:
 		return s
 	}
@@ -108,6 +118,10 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeDiff
 	case NodeSubtypeHeadAlias:
 		return NodeSubtypeHead
+	case NodeSubtypeDeleteAlias:
+		return NodeSubtypeDelete
+	case NodeSubtypeExpiryAlias:
+		return NodeSubtypeExpiry
 	default:
 		return s
 	}

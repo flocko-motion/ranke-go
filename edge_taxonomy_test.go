@@ -27,6 +27,8 @@ func TestEdgeSubtypeAliases(t *testing.T) {
 		EdgeSubtypeBranch:      EdgeSubtypeBranchAlias,
 		EdgeSubtypePrune:       EdgeSubtypePruneAlias,
 		EdgeSubtypeDiff:        EdgeSubtypeDiffAlias,
+		EdgeSubtypeDelete:      EdgeSubtypeDeleteAlias,
+		EdgeSubtypeExpiry:      EdgeSubtypeExpiryAlias,
 	}, edgeSubtypeToAlias, edgeSubtypeFromAlias, EdgeSubtype("transcription")) // open vocabulary
 }
 
@@ -35,7 +37,17 @@ func TestEdgeAliasesAreSingleCharacter(t *testing.T) {
 	for long, short := range map[string]string{
 		string(EdgeClassDerivation): string(edgeClassToAlias(EdgeClassDerivation)),
 		string(EdgeSubtypePrune):    string(edgeSubtypeToAlias(EdgeSubtypePrune)),
+		string(EdgeSubtypeDelete):   string(edgeSubtypeToAlias(EdgeSubtypeDelete)),
+		string(EdgeSubtypeExpiry):   string(edgeSubtypeToAlias(EdgeSubtypeExpiry)),
 	} {
 		require.Len(t, short, 1, "alias for %q must be one character", long)
 	}
+}
+
+// TestLimitingEdgeTypesMatchTheirClaims: a limiting claim and the edge naming its
+// target share a type string (paper 1 §Type Vocabulary), so one constant cannot
+// drift from the other.
+func TestLimitingEdgeTypesMatchTheirClaims(t *testing.T) {
+	require.Equal(t, NodeDelete, EdgeTypeDelete)
+	require.Equal(t, NodeExpiry, EdgeTypeExpiry)
 }

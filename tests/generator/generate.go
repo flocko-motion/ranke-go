@@ -423,14 +423,14 @@ func (b *builder) expiries() {
 	for i := 0; i < b.spec.KeyExpiries && b.err == nil; i++ {
 		// Never expire the operator's key — it signs the branch tables.
 		target := b.contribs[1+(i%(len(b.contribs)-1))]
-		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/expiry"})
+		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: ranke.EdgeTypeExpiry})
 		if err != nil {
 			b.fail(fmt.Errorf("%w: expiry edge %d: %w", errGenerate, i, err))
 			return
 		}
 		c := b.add(ranke.NewClaim(ranke.NodeExpiry, b.contribs[0]).
 			WithEdges(e).
-			WithField("pubkey_expires_after", expiresAt).
+			WithField(ranke.FieldPubkeyExpiresAfter, expiresAt).
 			WithCreatedAt(b.clock.Tick()).
 			WithHeight(ranke.HeightOf(b.contribs[0], target)).
 			Sign())
@@ -440,13 +440,13 @@ func (b *builder) expiries() {
 	}
 }
 
-// deletes mints spec.Deletes contribution/delete tombstones, each attributed to
-// the operator, edged to the claim whose bytes were removed (§Types). The paper
-// defines the edge subtype; the node type is an open-vocabulary choice here.
+// deletes mints spec.Deletes contribution/delete claims, each attributed to the
+// operator, edged to the claim whose bytes were removed. The paper defines
+// contribution/delete as both a node and an edge type (§Type Vocabulary).
 func (b *builder) deletes() {
 	for i := 0; i < b.spec.Deletes && len(b.srcClaims) > 0 && b.err == nil; i++ {
 		target := b.srcClaims[i%len(b.srcClaims)]
-		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: "contribution/delete"})
+		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: target.ID(), Type: ranke.EdgeTypeDelete})
 		if err != nil {
 			b.fail(fmt.Errorf("%w: delete edge %d: %w", errGenerate, i, err))
 			return

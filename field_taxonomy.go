@@ -37,8 +37,9 @@ const (
 	FieldContentHashAlias = "h"
 	FieldHeight           = "height"
 	FieldHeightAlias      = "H"
-	// FieldEdgesDiffOmit lists, on a diff claim, ids of inherited edges to drop
-	// when materialising, one per line. Overwrite/add is re-stating the edge.
+	// FieldEdgesDiffOmit lists, on a diff claim, names of inherited edges to drop when
+	// materialising, one per line — only named edges inherit. Overwrite/add is
+	// re-stating the edge.
 	FieldEdgesDiffOmit      = "edges_diff_omit"
 	FieldEdgesDiffOmitAlias = "E"
 	// FieldFieldsDiffOmit is the node-field analogue: newline-separated names.
