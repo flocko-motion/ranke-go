@@ -230,3 +230,25 @@ func TestValidateQueryRefusesNegativeCaps(t *testing.T) {
 		Output: Output{Content: &OutputContent{Max: 0, Overflow: OverflowOmit}},
 	}))
 }
+
+// TestNegativeHopsMatchBothRules: a negative hop count breaks the step rule and the
+// schema's minimum, so it answers to either sentinel. A caller watching traversals
+// reads ErrQueryHops; one checking every schema minimum reads ErrQueryBounds; neither
+// has to know the other's name.
+func TestNegativeHopsMatchBothRules(t *testing.T) {
+	base := Select{Branch: "main"}
+	for _, step := range []PathStep{{Min: Hops(-1)}, {Max: -1}} {
+		err := ValidateQuery(Query{Select: Select{Branch: base.Branch, Path: []PathStep{step}}})
+		require.ErrorIs(t, err, ErrQueryHops)
+		require.ErrorIs(t, err, ErrQueryBounds)
+		// One message, and it is the step rule's — errors.Join would print both.
+		require.NotContains(t, err.Error(), "\n")
+		require.Contains(t, err.Error(), "hop bounds admit no count")
+	}
+
+	// A floor above a bounded ceiling breaks no bound, so it stays the step rule alone.
+	overshoot := ValidateQuery(Query{Select: Select{Branch: base.Branch,
+		Path: []PathStep{{Min: Hops(3), Max: 1}}}})
+	require.ErrorIs(t, overshoot, ErrQueryHops)
+	require.NotErrorIs(t, overshoot, ErrQueryBounds)
+}
