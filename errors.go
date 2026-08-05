@@ -112,6 +112,7 @@ var (
 	ErrQueryComparisonForm   = errors.New("ranke.Query: a comparison applies exactly one operator (eq | ne | lt | le | gt | ge | in | glob)")
 	ErrQueryHops             = errors.New("ranke.Query: PathStep.Min is above a bounded Max, so the step admits no hop count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
+	ErrQueryBounds           = errors.New("ranke.Query: value below the minimum the schema fixes for its field")
 	ErrQueryOverflow         = errors.New("ranke.Query: Output.Content.Overflow is required (cutoff | omit | reference)")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
 	ErrFutureDated           = errors.New("ranke.Contribution: claim is dated after the base the contribution opened against")

@@ -66,6 +66,13 @@ func ValidateQuery(q Query) error {
 	if err := validateOutput(q.Output); err != nil {
 		return err
 	}
+	// A cap is a count, which the schema bounds at zero. Zero is the unbounded read.
+	if q.Limit.Results < 0 {
+		return WithDetail(ErrQueryBounds, "limit.results "+strconv.Itoa(q.Limit.Results))
+	}
+	if q.Limit.Time < 0 {
+		return WithDetail(ErrQueryBounds, "limit.time "+q.Limit.Time.String())
+	}
 	for _, key := range q.Order {
 		if err := oneOf("order.compare", string(key.Compare), "", string(CompareNumeric), string(CompareLexical)); err != nil {
 			return err
@@ -165,6 +172,10 @@ func validateOutput(o Output) error {
 	}
 	if o.Content == nil {
 		return nil
+	}
+	// A byte cap is a count, which the schema bounds at zero.
+	if o.Content.Max < 0 {
+		return WithDetail(ErrQueryBounds, "output.content.max "+strconv.Itoa(o.Content.Max))
 	}
 	if o.Content.Overflow == "" {
 		return ErrQueryOverflow
