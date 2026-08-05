@@ -1,6 +1,7 @@
 package matrix_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,14 +54,16 @@ func TestHopsMinExcludesTheStart(t *testing.T) {
 	})
 }
 
-// TestHopsMinAboveMax: a floor above the ceiling admits nothing.
+// TestHopsMinAboveMax: a floor above the ceiling is a malformed step, so every
+// backend refuses the query rather than answering it empty. Answering empty would
+// report the graph holding nothing, which is a different claim about the archive.
 func TestHopsMinAboveMax(t *testing.T) {
 	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
-		got := reached(t, u, m.Head, ranke.Query{
+		_, err := rql.Run(context.Background(), u, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: m.Relations[0],
 				Path: []ranke.PathStep{{Min: ranke.Hops(3), Max: 1, Edges: []string{"relation/*"}}}},
-		})
-		require.Empty(t, got, "no hop count satisfies both bounds")
+		}, m.Head)
+		require.ErrorIs(t, err, ranke.ErrQueryHops, "no hop count satisfies both bounds")
 	})
 }
 

@@ -62,9 +62,12 @@ Agents tend to forget details from the papers. The papers specify all details, s
   graph (`generator.Toy*`) for that; the matrix is the second layer.
 - Tests require infrastructure. Missing infrastructure is a test failure, not a
   skip.
-- Every neo4j-touching test flushes the whole database at open, and `go test ./...`
-  runs packages in parallel — so they wipe each other. Run `go test -p 1` for
-  anything involving neo4j until that is fixed.
+- Every neo4j-touching test flushes the whole database at open, and one live instance
+  serves every package. `internal/exclusive` holds a cross-process lock around that,
+  so `go test ./...` is safe and `-p 1` is no longer needed. A `sync.Mutex` cannot do
+  this: each package is its own process.
+- A new test that wipes a shared service takes `exclusive.Lock` too, or it will wipe
+  another package's data.
 
 # Generator
 
