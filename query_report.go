@@ -46,23 +46,26 @@ func reportRank(l ReportLevel) int {
 // QueryReport is a query's execution log (Execution.Report set), returned via
 // ResultStream.Report. Engine/layer identity is per-event, since one query can
 // span several engines.
+// A report travels a result sequence as its last record, so its field names are wire
+// names: lower-case like every other, and a duration says its unit, since one
+// serialises as a bare integer of nanoseconds.
 type QueryReport struct {
-	StartedAt time.Time     // wall clock at query start
-	Elapsed   time.Duration // total execution time
-	Results   int           // items emitted
-	Truncated bool          // whether Limit cut the read short
-	Events    []QueryEvent  // the ordered, multi-engine execution log
+	StartedAt time.Time     `json:"started_at"` // wall clock at query start
+	Elapsed   time.Duration `json:"elapsed_ns"` // total execution time
+	Results   int           `json:"results"`    // items emitted
+	Truncated bool          `json:"truncated"`  // whether Limit cut the read short
+	Events    []QueryEvent  `json:"events,omitempty"`
 }
 
 // QueryEvent is one logged step or point during execution.
 type QueryEvent struct {
-	At       time.Duration  // offset from QueryReport.StartedAt
-	Engine   string         // who emitted it: "native", "cypher", "stack", "partition", …
-	Op       string         // what it did: "load-root", "step", "filter", "sort", "route", "lower-cypher", …
-	Level    ReportLevel    // info | warn | error
-	Duration time.Duration  // elapsed for a timed step; 0 for a point event
-	Detail   string         // human message, or the lowered query text (e.g. Cypher)
-	Attrs    map[string]any // structured extras: layer/shard name, depth, edge/result counts, …
+	At       time.Duration  `json:"at_ns"`                 // offset from QueryReport.StartedAt
+	Engine   string         `json:"engine"`                // who emitted it: "native", "cypher", "stack", "partition", …
+	Op       string         `json:"op"`                    // what it did: "load-root", "step", "filter", "sort", "route", "translate-cypher", …
+	Level    ReportLevel    `json:"level"`                 // info | warn | error
+	Duration time.Duration  `json:"duration_ns,omitempty"` // elapsed for a timed step; 0 for a point event
+	Detail   string         `json:"detail,omitempty"`      // human message, or the translated query text (e.g. Cypher)
+	Attrs    map[string]any `json:"attrs,omitempty"`       // structured extras: layer/shard name, depth, edge/result counts, …
 }
 
 // reportCollector accumulates a query's events, carried in ctx so every station

@@ -137,6 +137,7 @@ var (
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errRefsBranchTable       = errors.New("ranke.verify: claim references a branch table")
 	errEncodeClaim           = errors.New("ranke: encode claim")
+	errMarshalCBOR           = errors.New("ranke.MarshalCBOR")
 	errDecodeClaim           = errors.New("ranke.DecodeClaim")
 	errAssemble              = errors.New("ranke.AssembleClaim")
 	errNodePreimage          = errors.New("ranke: claim CBOR has no node preimage")

@@ -2,7 +2,10 @@ package ranke
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -109,4 +112,63 @@ func TestReportFilterCounts(t *testing.T) {
 	f := opsOf(rs.Report())["filter"]
 	require.Equal(t, 3, f.Attrs["in"], "closure had 3 claims")
 	require.Equal(t, 1, f.Attrs["kept"], "only the source survived the Where")
+}
+
+// TestReportCarriesWireNames: a report travels a result sequence as its last record,
+// so its keys are wire names. Without tags they were Go field names — capitalised,
+// where every other shape on the wire is lower-case — and a duration was a bare
+// integer saying nothing of its unit.
+func TestReportCarriesWireNames(t *testing.T) {
+	report := QueryReport{
+		StartedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		Elapsed:   1500 * time.Millisecond,
+		Results:   3,
+		Truncated: true,
+		Events: []QueryEvent{{
+			At: 250 * time.Millisecond, Engine: "cypher", Op: "step",
+			Level: ReportInfo, Duration: 10 * time.Millisecond, Detail: "MATCH …",
+		}},
+	}
+
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+
+	require.Equal(t, "2026-01-02T03:04:05Z", got["started_at"])
+	require.Equal(t, float64(1_500_000_000), got["elapsed_ns"], "nanoseconds, as the name says")
+	require.Equal(t, float64(3), got["results"])
+	require.Equal(t, true, got["truncated"])
+
+	events, ok := got["events"].([]any)
+	require.True(t, ok)
+	event, ok := events[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, float64(250_000_000), event["at_ns"])
+	require.Equal(t, "cypher", event["engine"])
+	require.Equal(t, float64(10_000_000), event["duration_ns"])
+}
+
+// TestMarshalCBORIsDeterministic: the helper a sequence frames its non-claim payloads
+// with. One encoder serves the whole system, so a map's keys order the way a claim's
+// do and two runs agree byte for byte.
+func TestMarshalCBORIsDeterministic(t *testing.T) {
+	// Keys order by their encoded bytes, so "b" precedes "aa" — the rule that makes
+	// two implementations agree, and the reason this is not any CBOR encoder.
+	raw, err := MarshalCBOR(map[string]string{"aa": "1", "b": "2"})
+	require.NoError(t, err)
+	require.Equal(t, "a2616261326261616131", hex.EncodeToString(raw))
+
+	again, err := MarshalCBOR(map[string]string{"b": "2", "aa": "1"})
+	require.NoError(t, err)
+	require.Equal(t, raw, again, "insertion order does not reach the bytes")
+
+	// An id and a route, which is what a result sequence carries under cbor framing.
+	id, err := MarshalCBOR("bciqlu6awx6hqdt7kifaubxs5vyrchmadmgrzmf32ts2bb73b6iablli")
+	require.NoError(t, err)
+	require.Equal(t, byte(0x78), id[0], "a CBOR text string, readable as an id")
+
+	route, err := MarshalCBOR([]string{"bciqa", "bciqb"})
+	require.NoError(t, err)
+	require.Equal(t, byte(0x82), route[0], "a CBOR array of two")
 }
