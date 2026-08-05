@@ -262,9 +262,10 @@ func TestArchiveQueryRefusesContentCap(t *testing.T) {
 	_, err = arc.Query(ctx, q)
 	require.ErrorIs(t, err, ErrUnsupported)
 
-	// A cap of zero asks for no inlined content, which is what the engine does. R-QCANON
-	// names it in the canonical form, so refusing it would leave the one output form
-	// verifiable against an id unaskable.
+	// Max 0 asks for every claim's content in full (R-QCONTENT), which is what the
+	// engine delivers. R-QCANON names that form, since S(v) holds a claim's inline
+	// content, so refusing it would leave the one output form verifiable against an id
+	// unaskable.
 	canonical := Query{Select: Select{Branch: "main"}, Output: Output{
 		Detail: DetailClaims, Form: FormOriginal, Encoding: ResultCBOR,
 		Content: &OutputContent{Max: 0, Overflow: OverflowOmit},
