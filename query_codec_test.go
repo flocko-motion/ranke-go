@@ -253,10 +253,9 @@ func TestNegativeHopsMatchBothRules(t *testing.T) {
 	require.NotErrorIs(t, overshoot, ErrQueryBounds)
 }
 
-// TestOverflowVocabularyMatchesTheSchema: overflow is cutoff or omit, and nothing
-// else. A third value, "reference", once left a content_hash stub where the content
-// had been — which changes the fields a claim carries, so R-QCONTENT now has a claim
-// keep every field either way and the schema enumerates two.
+// TestOverflowVocabularyMatchesTheSchema: cutoff or omit, and nothing else. A third
+// value, "reference", left a content_hash stub where content had been — which changes
+// the fields a claim carries, so `R-QCONTENT` dropped it.
 func TestOverflowVocabularyMatchesTheSchema(t *testing.T) {
 	sel := Select{Branch: "main"}
 	for _, overflow := range []Overflow{OverflowCutoff, OverflowOmit} {

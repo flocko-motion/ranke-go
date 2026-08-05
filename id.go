@@ -91,13 +91,10 @@ func (h *id) Equal(other Id) bool {
 	return bytes.Equal(h.raw, other.rawBytes())
 }
 
-// Algorithm reads the leading multicodec varint to name the scheme.
-//
-// A named multihash is what counts as one. multihash.Decode reads a code and then a
-// length, and a signature id supplies both by coincidence: its multikey code is 0xed
-// 0x01, so the length it reads is the signature's FIRST BYTE, and one signature in 256
-// begins with the 63 that matches the bytes remaining. Such an id decoded as an
-// unnamed multihash and this returned "" for it.
+// Algorithm reads the leading multicodec varint to name the scheme. Only a NAMED
+// multihash counts as one: multihash.Decode reads a code then a length, and a signature
+// supplies both by chance — code 0xed 0x01, then its own first byte as the length — so
+// one in 256 decoded as an unnamed multihash and returned "".
 func (h *id) Algorithm() string {
 	if dec, err := multihash.Decode(h.raw); err == nil && dec.Name != "" {
 		return dec.Name

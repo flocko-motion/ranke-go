@@ -24,11 +24,9 @@ var encodingMode cbor.EncMode
 
 func init() {
 	opts := cbor.CoreDetEncOptions()
-	// A timestamp is RFC 3339 with nanoseconds everywhere on this wire — created_at,
-	// delete_by, pubkey_expires_after are all text. CBOR's default for a time.Time is
-	// epoch seconds, which would give the same value two forms across the two
-	// encodings and drop sub-second precision from the one. No claim record holds a
-	// time.Time, so this reaches only the payloads MarshalCBOR serves.
+	// `V-TIME`: a timestamp is RFC 3339 text in every encoding. CBOR's default for a
+	// time.Time is epoch seconds, which would give one value two forms and drop its
+	// nanoseconds. No claim record holds a time.Time, so this reaches only MarshalCBOR.
 	opts.Time = cbor.TimeRFC3339Nano
 	mode, err := opts.EncMode()
 	if err != nil {
@@ -71,12 +69,10 @@ type encEdge struct {
 	Content           []byte            `cbor:"10,keyasint,omitempty"`
 }
 
-// MarshalCBOR returns v in CBOR Deterministic Encoding (RFC 8949 §4.2) — for a
-// payload that is NOT a claim: a result id, a route of ids, an execution report. A
-// claim's own bytes come from Claim.EncodeCBOR, which its id is computed over.
-//
-// It exists so one deterministic encoder serves the whole system: a caller framing a
-// CBOR sequence would otherwise configure its own, and two encoders is two answers.
+// MarshalCBOR returns v in CBOR Deterministic Encoding (RFC 8949 §4.2), for a payload
+// other than a claim: a result id, a route of ids, an execution report. A claim's own
+// bytes come from Claim.EncodeCBOR. One encoder serves the whole system, since a
+// second would be a second answer about byte order.
 func MarshalCBOR(v any) ([]byte, error) {
 	b, err := encodingMode.Marshal(v)
 	if err != nil {

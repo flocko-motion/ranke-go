@@ -103,17 +103,15 @@ type Output struct {
 	Encoding ResultEncoding // serialized form of each claim (json | cbor)
 }
 
-// OutputContent caps the content inlined per claim and fixes what becomes of the
-// bytes past that cap (`R-QCONTENT`). Max 0 inlines every claim's content in full, as
-// a zero bound elsewhere in a query means unbounded, and leaves Overflow no effect.
+// OutputContent caps the content inlined per claim (`R-QCONTENT`). Max 0 inlines in
+// full, as a zero bound elsewhere in a query means unbounded, leaving Overflow moot.
 type OutputContent struct {
 	Max      int      // cap in bytes; 0 inlines in full
 	Overflow Overflow // handling for anything past Max
 }
 
-// Overflow is what becomes of the content past OutputContent.Max. Either way a claim
-// keeps every field it carries: content is inlined or it is not, and no field is
-// replaced by a stand-in for it.
+// Overflow is what becomes of the content past OutputContent.Max. A claim keeps every
+// field it carries either way, so no value stands in for content left out.
 type Overflow string
 
 const (
