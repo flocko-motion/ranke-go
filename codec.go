@@ -64,6 +64,20 @@ type encEdge struct {
 	Content           []byte            `cbor:"10,keyasint,omitempty"`
 }
 
+// MarshalCBOR returns v in CBOR Deterministic Encoding (RFC 8949 §4.2) — for a
+// payload that is NOT a claim: a result id, a route of ids, an execution report. A
+// claim's own bytes come from Claim.EncodeCBOR, which its id is computed over.
+//
+// It exists so one deterministic encoder serves the whole system: a caller framing a
+// CBOR sequence would otherwise configure its own, and two encoders is two answers.
+func MarshalCBOR(v any) ([]byte, error) {
+	b, err := encodingMode.Marshal(v)
+	if err != nil {
+		return nil, Wrap(errMarshalCBOR, err)
+	}
+	return b, nil
+}
+
 // encodeNode returns the canonical S(v) bytes a node id is computed over.
 func encodeNode(n *node, edges []*edge) ([]byte, error) {
 	en, err := buildEncNode(n, edges)
