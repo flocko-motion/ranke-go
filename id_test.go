@@ -1,6 +1,7 @@
 package ranke
 
 import (
+	"crypto/ed25519"
 	"strings"
 	"testing"
 
@@ -138,4 +139,30 @@ func TestAlgorithmNonMultihashPayload(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, "unknown", id.Algorithm(),
 		"a known multicodec varint should be named, got %q", id.Algorithm())
+}
+
+// TestSignatureIdNamesItsScheme: a signature id must name its scheme whatever its
+// bytes. multihash.Decode reads a code then a length, and a multikey signature supplies
+// both by accident — code 0xed 0x01, then the signature's first byte as the length — so
+// one signature in 256 begins with the 63 that matches the 63 bytes after it, decoding
+// as an unnamed multihash. Algorithm() returned "" for those, which is how this
+// surfaced: a random keypair per test made one run in a few hundred red.
+func TestSignatureIdNamesItsScheme(t *testing.T) {
+	for _, first := range []byte{0, 1, 62, 63, 64, 255} {
+		raw := make([]byte, 2+ed25519.SignatureSize)
+		raw[0], raw[1] = 0xed, 0x01
+		raw[2] = first
+		signature, err := idFromBytes(raw)
+		require.NoError(t, err)
+		require.Equal(t, "ed25519-pub", signature.Algorithm(),
+			"a signature names its scheme whatever byte it opens with (got first=%d)", first)
+	}
+}
+
+// TestHashIdStillNamesSha256: the fix refuses an UNNAMED multihash, so a real one must
+// still name itself.
+func TestHashIdStillNamesSha256(t *testing.T) {
+	h, err := HashContent([]byte("content"))
+	require.NoError(t, err)
+	require.Equal(t, "sha2-256", h.Algorithm())
 }

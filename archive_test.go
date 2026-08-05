@@ -261,6 +261,18 @@ func TestArchiveQueryRefusesContentCap(t *testing.T) {
 
 	_, err = arc.Query(ctx, q)
 	require.ErrorIs(t, err, ErrUnsupported)
+
+	// A cap of zero asks for no inlined content, which is what the engine does. R-QCANON
+	// names it in the canonical form, so refusing it would leave the one output form
+	// verifiable against an id unaskable.
+	canonical := Query{Select: Select{Branch: "main"}, Output: Output{
+		Detail: DetailClaims, Form: FormOriginal, Encoding: ResultCBOR,
+		Content: &OutputContent{Max: 0, Overflow: OverflowOmit},
+	}}
+	require.NoError(t, ValidateQuery(canonical))
+	rs, err := arc.Query(ctx, canonical)
+	require.NoError(t, err, "the canonical form is askable")
+	require.NoError(t, rs.Close())
 }
 
 // TestQueryClaimDoesNotScope: Select.Claim starts a traversal and scopes nothing,

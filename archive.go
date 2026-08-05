@@ -113,10 +113,13 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
-	// No engine applies the cap yet, and uncapped content answers a different query
-	// than the one asked. Delete this once an executor honours it.
-	if q.Output.Content != nil {
-		return nil, WithDetail(ErrUnsupported, "Output.Content")
+	// A cap of zero asks for no inlined content, which is what the engine does — and
+	// R-QCANON names it in the canonical form, so refusing it would leave the one
+	// output form verifiable against an id unaskable. A cap above zero is the part no
+	// executor honours yet, and uncapped content answers a different query than the one
+	// asked. Delete the check once an executor honours a cap.
+	if q.Output.Content != nil && q.Output.Content.Max != 0 {
+		return nil, WithDetail(ErrUnsupported, "Output.Content.Max")
 	}
 	scope, err := a.resolveScope(ctx, q)
 	if err != nil {
