@@ -105,6 +105,11 @@ func (a *archive) GetClaimContent(ctx context.Context, id Id) (io.Reader, error)
 
 // Query resolves the branch scope and delegates to 𝒰.
 func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
+	// Every read passes ValidateQuery, so a Go-built query is held to what a wire one
+	// is — one verdict, whichever way the query arrived.
+	if err := ValidateQuery(q); err != nil {
+		return nil, err
+	}
 	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
@@ -142,16 +147,11 @@ func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 	return scope, nil
 }
 
-// validateSelect checks a read's shape on the way in, so the engines below trust it.
+// validateSelect holds a read to what only a read can decide: a scan reaches claims
+// by no stated route. The rest of a query's shape is ValidateQuery's, which Query
+// calls first, so neither states a rule twice.
 func validateSelect(q Query) error {
 	sel := q.Select
-	if sel.Branch == "" {
-		return ErrQueryNoScope
-	}
-	// $universe is the whole set, so only Select.Head bounds a read there.
-	if sel.Branch == BranchUniverse && sel.Head == nil {
-		return ErrQueryNoHead
-	}
 	if len(sel.Path) > 0 {
 		return nil
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
+	"github.com/flocko-motion/ranke-go/internal/exclusive"
 	"github.com/flocko-motion/ranke-go/tests/generator"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
@@ -46,6 +47,10 @@ func connectTestNeo4j(t *testing.T) (*neo4jUniverse, neo4jdriver.DriverWithConte
 	if os.Getenv("RANKE_NEO4J_BOLT") == "" && !neo4jReachable() {
 		t.Skip("no neo4j reachable (services/neo4j.sh native up)")
 	}
+	// The flush below empties the one live instance every package shares, so access is
+	// held exclusive for the test's lifetime (see internal/exclusive).
+	release := exclusive.Lock(exclusive.Neo4j)
+	t.Cleanup(release)
 	driver, err := neo4jdriver.NewDriverWithContext(testEnv("RANKE_NEO4J_BOLT", "bolt://127.0.0.1:7687"),
 		neo4jdriver.BasicAuth(testEnv("RANKE_NEO4J_USER", testNeo4jUser), testEnv("RANKE_NEO4J_PASS", testNeo4jPass), ""))
 	require.NoError(t, err)

@@ -25,6 +25,7 @@ import (
 	"github.com/flocko-motion/ranke-go/adapter/storage/s3"
 	"github.com/flocko-motion/ranke-go/adapter/storage/sqlite"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
+	"github.com/flocko-motion/ranke-go/internal/exclusive"
 )
 
 // ErrUnavailable reports that a backend cannot run in this environment (e.g. s3
@@ -162,9 +163,14 @@ func openNeo4j() (ranke.Universe, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// One live instance serves every package and each flushes it at the start, so
+	// access is held exclusive until cleanup — that is what keeps two packages under
+	// `go test ./...` off each other's graph.
+	release := exclusive.Lock(exclusive.Neo4j)
 	driver, err := neo4jdriver.NewDriverWithContext(
 		conn.BoltURI, neo4jdriver.BasicAuth(conn.User, conn.Password, ""))
 	if err != nil {
+		release()
 		connCleanup()
 		return nil, nil, err
 	}
@@ -174,6 +180,7 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		"MATCH (n) DETACH DELETE n", nil,
 		neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase("neo4j")); err != nil {
 		_ = driver.Close(context.Background())
+		release()
 		connCleanup()
 		return nil, nil, fmt.Errorf("flush neo4j: %w", err)
 	}
@@ -184,6 +191,7 @@ func openNeo4j() (ranke.Universe, func(), error) {
 		neo4jstore.WithContentCap(4096))
 	return u, func() {
 		_ = driver.Close(context.Background())
+		release()
 		connCleanup()
 	}, nil
 }

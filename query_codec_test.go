@@ -183,3 +183,28 @@ func TestValidateQueryIsOneVerdict(t *testing.T) {
 	_, err := DecodeQuery([]byte(`{"select":{"branch":"$universe"}}`))
 	require.ErrorIs(t, err, ErrQueryNoHead)
 }
+
+// TestValidateQueryRefusesNegativeHops: a hop count is a count, and the schema bounds
+// both at zero. Clamping a negative to zero instead accepted a query the schema
+// refuses, and any implementation reading ranke-go rather than the schema inherited
+// that — so the refusal is here, where one verdict is reached.
+func TestValidateQueryRefusesNegativeHops(t *testing.T) {
+	q := Query{Select: Select{Branch: "main", Path: []PathStep{{Min: Hops(-1)}}}}
+	require.ErrorIs(t, ValidateQuery(q), ErrQueryHops)
+
+	q = Query{Select: Select{Branch: "main", Path: []PathStep{{Max: -1}}}}
+	require.ErrorIs(t, ValidateQuery(q), ErrQueryHops)
+
+	// Zero is admissible at both ends: Min 0 carries the starting set through, and
+	// Max 0 leaves the step unbounded.
+	ok := Query{Select: Select{Branch: "main", Path: []PathStep{{Min: Hops(0), Max: 0}}}}
+	require.NoError(t, ValidateQuery(ok))
+}
+
+// TestMinHopsStatesItsValue: MinHops defaults an absent Min to one hop and otherwise
+// states what it was given, validation having already refused a negative.
+func TestMinHopsStatesItsValue(t *testing.T) {
+	require.Equal(t, 1, PathStep{}.MinHops(), "absent means one hop")
+	require.Equal(t, 0, PathStep{Min: Hops(0)}.MinHops())
+	require.Equal(t, 3, PathStep{Min: Hops(3)}.MinHops())
+}
