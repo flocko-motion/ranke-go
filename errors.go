@@ -110,7 +110,7 @@ var (
 	errEncodeQuery           = errors.New("ranke.EncodeQuery")
 	ErrQueryWhereForm        = errors.New("ranke.Query: a where node is exactly one of and | or | not | {field, test}")
 	ErrQueryComparisonForm   = errors.New("ranke.Query: a comparison applies exactly one operator (eq | ne | lt | le | gt | ge | in | glob)")
-	ErrQueryHops             = errors.New("ranke.Query: PathStep.Min is above a bounded Max, so the step admits no hop count")
+	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
 	ErrQueryBounds           = errors.New("ranke.Query: value below the minimum the schema fixes for its field")
 	ErrQueryOverflow         = errors.New("ranke.Query: Output.Content.Overflow is required (cutoff | omit | reference)")
@@ -198,6 +198,23 @@ func (e *wrapErr) Unwrap() []error {
 // WithDetail returns sentinel with detail appended lazily.
 func WithDetail(sentinel error, detail string) error {
 	return &wrapErr{sentinel: sentinel, detail: detail}
+}
+
+// alsoErr reads as its primary sentinel and matches a second one as well, for a
+// condition two rules both name. errors.Join would do the matching and render both
+// messages on separate lines; a client shows this one, so the message stays the
+// primary's.
+type alsoErr struct {
+	primary error
+	also    error
+}
+
+func (e *alsoErr) Error() string   { return e.primary.Error() }
+func (e *alsoErr) Unwrap() []error { return []error{e.primary, e.also} }
+
+// alsoMatches returns primary, matchable as also too.
+func alsoMatches(primary, also error) error {
+	return &alsoErr{primary: primary, also: also}
 }
 
 // Wrap returns sentinel wrapping cause; both are matchable via errors.Is.

@@ -90,13 +90,18 @@ func validateStep(step PathStep) error {
 	if err := oneOf("dir", string(step.Dir), "", string(DirProvenance), string(DirUses), string(DirConnections)); err != nil {
 		return err
 	}
-	// A hop count is a count, which the schema bounds at zero on both ends.
+	// A hop count is a count, which the schema bounds at zero on both ends. A negative
+	// one breaks that bound as well as the step rule, so it matches ErrQueryBounds too:
+	// a caller watching traversals reads ErrQueryHops, one checking every schema minimum
+	// reads ErrQueryBounds, and neither has to know the other's sentinel.
+	hopBound := alsoMatches(ErrQueryHops, ErrQueryBounds)
 	if step.Min != nil && *step.Min < 0 {
-		return WithDetail(ErrQueryHops, "min "+strconv.Itoa(*step.Min)+" is negative")
+		return WithDetail(hopBound, "min "+strconv.Itoa(*step.Min)+" is negative")
 	}
 	if step.Max < 0 {
-		return WithDetail(ErrQueryHops, "max "+strconv.Itoa(step.Max)+" is negative")
+		return WithDetail(hopBound, "max "+strconv.Itoa(step.Max)+" is negative")
 	}
+	// A floor above a bounded ceiling breaks no bound, so it stays the step rule alone.
 	if step.Max > 0 && step.MinHops() > step.Max {
 		return WithDetail(ErrQueryHops, strconv.Itoa(step.MinHops())+" > "+strconv.Itoa(step.Max))
 	}
