@@ -54,13 +54,11 @@ type PathStep struct {
 // Hops is a PathStep.Min value; Hops(0) admits the step's start itself.
 func Hops(n int) *int { return &n }
 
-// MinHops is Min with its default of one hop applied.
+// MinHops is Min with its default of one hop applied. A negative Min is refused by
+// ValidateQuery, which every read passes, so there is nothing here to fall back to.
 func (s PathStep) MinHops() int {
 	if s.Min == nil {
 		return 1
-	}
-	if *s.Min < 0 {
-		return 0
 	}
 	return *s.Min
 }

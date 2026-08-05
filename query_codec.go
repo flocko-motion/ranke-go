@@ -83,6 +83,14 @@ func validateStep(step PathStep) error {
 	if err := oneOf("dir", string(step.Dir), "", string(DirProvenance), string(DirUses), string(DirConnections)); err != nil {
 		return err
 	}
+	// A hop count is a count: the schema bounds both at zero, and a negative one names
+	// no step a walk could take.
+	if step.Min != nil && *step.Min < 0 {
+		return WithDetail(ErrQueryHops, "min "+strconv.Itoa(*step.Min)+" is negative")
+	}
+	if step.Max < 0 {
+		return WithDetail(ErrQueryHops, "max "+strconv.Itoa(step.Max)+" is negative")
+	}
 	if step.Max > 0 && step.MinHops() > step.Max {
 		return WithDetail(ErrQueryHops, strconv.Itoa(step.MinHops())+" > "+strconv.Itoa(step.Max))
 	}
