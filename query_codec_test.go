@@ -201,8 +201,8 @@ func TestValidateQueryRefusesNegativeHops(t *testing.T) {
 	require.NoError(t, ValidateQuery(ok))
 }
 
-// TestMinHopsStatesItsValue: with a negative Min refused at validation, MinHops has
-// nothing to fall back to — it applies the default for an absent Min and no more.
+// TestMinHopsStatesItsValue: MinHops defaults an absent Min to one hop and otherwise
+// states what it was given, validation having already refused a negative.
 func TestMinHopsStatesItsValue(t *testing.T) {
 	require.Equal(t, 1, PathStep{}.MinHops(), "absent means one hop")
 	require.Equal(t, 0, PathStep{Min: Hops(0)}.MinHops())

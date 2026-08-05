@@ -54,9 +54,9 @@ func TestHopsMinExcludesTheStart(t *testing.T) {
 	})
 }
 
-// TestHopsMinAboveMax: a floor above the ceiling is a malformed step, so every
-// backend refuses the query rather than answering it empty. Answering empty would
-// report the graph holding nothing, which is a different claim about the archive.
+// TestHopsMinAboveMax: a floor above the ceiling is a malformed step, so every backend
+// refuses the query. An empty answer would report the graph holding nothing, which is a
+// different claim about the archive.
 func TestHopsMinAboveMax(t *testing.T) {
 	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		_, err := rql.Run(context.Background(), u, ranke.Query{

@@ -16,7 +16,7 @@ import (
 )
 
 // Neo4j names the lock every test touching the shared neo4j takes. Keyed by the
-// service rather than by the caller, so unrelated services stay parallel.
+// service, so unrelated services stay parallel.
 const Neo4j = "ranke-neo4j"
 
 // Lock blocks until no other process holds name, and returns the release. It never
@@ -39,7 +39,7 @@ func Lock(name string) (release func()) {
 }
 
 // Held reports whether another process holds name, without waiting. A test asserting
-// the serialisation uses this; nothing in a normal run needs it.
+// the serialisation is what uses it.
 func Held(name string) bool {
 	path := filepath.Join(os.TempDir(), name+".lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o666)

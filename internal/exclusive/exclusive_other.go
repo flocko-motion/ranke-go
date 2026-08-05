@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// Without flock, exclusion rests on an atomic create: the first process to make the
-// sentinel holds the lock. A process that dies leaves it behind, so a wait that runs
-// past staleWait takes it anyway rather than hanging a suite forever.
+// Exclusion rests on an atomic create: the first process to make the sentinel holds
+// the lock. A process that dies leaves it behind, so a wait past staleWait takes it
+// anyway and a suite still finishes.
 const staleWait = 5 * time.Minute
 
 func lockFile(f *os.File) error {

@@ -163,9 +163,9 @@ func openNeo4j() (ranke.Universe, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// One live instance serves every package, and each flushes it at the start, so
-	// access is held exclusive until cleanup. Without this, two packages under
-	// `go test ./...` wipe each other's graph.
+	// One live instance serves every package and each flushes it at the start, so
+	// access is held exclusive until cleanup — that is what keeps two packages under
+	// `go test ./...` off each other's graph.
 	release := exclusive.Lock(exclusive.Neo4j)
 	driver, err := neo4jdriver.NewDriverWithContext(
 		conn.BoltURI, neo4jdriver.BasicAuth(conn.User, conn.Password, ""))
