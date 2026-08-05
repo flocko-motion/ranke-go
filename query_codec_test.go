@@ -208,3 +208,25 @@ func TestMinHopsStatesItsValue(t *testing.T) {
 	require.Equal(t, 0, PathStep{Min: Hops(0)}.MinHops())
 	require.Equal(t, 3, PathStep{Min: Hops(3)}.MinHops())
 }
+
+// TestValidateQueryRefusesNegativeCaps: the schema bounds four values at zero, and
+// hops was only two of them. A cap is a count, so a negative one names no read —
+// caught here under a bounds sentinel, which a caller switching on the code can tell
+// from a value outside an enumerated set.
+func TestValidateQueryRefusesNegativeCaps(t *testing.T) {
+	base := Select{Branch: "main"}
+
+	require.ErrorIs(t, ValidateQuery(Query{Select: base, Limit: Limit{Results: -1}}), ErrQueryBounds)
+	require.ErrorIs(t, ValidateQuery(Query{Select: base, Limit: Limit{Time: -time.Second}}), ErrQueryBounds)
+	require.ErrorIs(t, ValidateQuery(Query{
+		Select: base,
+		Output: Output{Content: &OutputContent{Max: -1, Overflow: OverflowOmit}},
+	}), ErrQueryBounds)
+
+	// Zero is the unbounded read at every one of them.
+	require.NoError(t, ValidateQuery(Query{
+		Select: base,
+		Limit:  Limit{Results: 0, Time: 0},
+		Output: Output{Content: &OutputContent{Max: 0, Overflow: OverflowOmit}},
+	}))
+}
