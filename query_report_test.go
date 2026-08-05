@@ -172,3 +172,39 @@ func TestMarshalCBORIsDeterministic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, byte(0x82), route[0], "a CBOR array of two")
 }
+
+// TestReportTimestampMatchesAcrossEncodings: §Output has both encodings carry the same
+// information, so a timestamp is the same text in each. CBOR's default for a time.Time
+// is epoch seconds, which gave the report two forms and dropped its sub-second
+// precision from one of them.
+func TestReportTimestampMatchesAcrossEncodings(t *testing.T) {
+	started := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.UTC)
+	report := QueryReport{StartedAt: started, Elapsed: time.Second, Results: 1}
+
+	asJSON, err := json.Marshal(report)
+	require.NoError(t, err)
+	var fromJSON map[string]any
+	require.NoError(t, json.Unmarshal(asJSON, &fromJSON))
+	require.Equal(t, "2026-01-02T03:04:05.123456789Z", fromJSON["started_at"])
+
+	asCBOR, err := MarshalCBOR(report)
+	require.NoError(t, err)
+	require.Contains(t, string(asCBOR), "2026-01-02T03:04:05.123456789Z",
+		"a CBOR text string, so the nanoseconds survive and the two forms agree")
+}
+
+// TestClaimBytesIgnoreTheTimeMode: a claim states created_at as text already, so no
+// claim record holds a time.Time and the encoder's time mode cannot reach its bytes.
+func TestClaimBytesIgnoreTheTimeMode(t *testing.T) {
+	alice := contributor(t)
+	c, err := NewClaim(TypeSource("note"), alice).
+		WithCreatedAt(time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.UTC)).
+		WithHeight(HeightOf(alice)).
+		Sign()
+	require.NoError(t, err)
+
+	raw, err := c.EncodeCBOR(FormOriginal)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "2026-01-02T03:04:05.123456789Z",
+		"created_at is text in the record, whatever the encoder does with a time.Time")
+}

@@ -23,7 +23,14 @@ import (
 var encodingMode cbor.EncMode
 
 func init() {
-	mode, err := cbor.CoreDetEncOptions().EncMode()
+	opts := cbor.CoreDetEncOptions()
+	// A timestamp is RFC 3339 with nanoseconds everywhere on this wire — created_at,
+	// delete_by, pubkey_expires_after are all text. CBOR's default for a time.Time is
+	// epoch seconds, which would give the same value two forms across the two
+	// encodings and drop sub-second precision from the one. No claim record holds a
+	// time.Time, so this reaches only the payloads MarshalCBOR serves.
+	opts.Time = cbor.TimeRFC3339Nano
+	mode, err := opts.EncMode()
 	if err != nil {
 		panic("ranke: build CBOR Deterministic encoder: " + err.Error())
 	}
