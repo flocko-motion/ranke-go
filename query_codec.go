@@ -186,7 +186,7 @@ func validateOutput(o Output) error {
 		return ErrQueryOverflow
 	}
 	return oneOf("output.content.overflow", string(o.Content.Overflow),
-		string(OverflowCutoff), string(OverflowOmit), string(OverflowReference))
+		string(OverflowCutoff), string(OverflowOmit))
 }
 
 // oneOf reports whether got is among allowed, naming the field when it is not.

@@ -113,11 +113,14 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
-	// A cap of zero asks for no inlined content, which is what the engine does — and
-	// R-QCANON names it in the canonical form, so refusing it would leave the one
-	// output form verifiable against an id unaskable. A cap above zero is the part no
-	// executor honours yet, and uncapped content answers a different query than the one
-	// asked. Delete the check once an executor honours a cap.
+	// Max 0 asks for every claim's content in full (`R-QCONTENT`), which is what the
+	// engine delivers: a result carries the stored record. R-QCANON names that form,
+	// since S(v) holds a claim's inline content, so refusing it would leave the one
+	// output form verifiable against an id unaskable.
+	//
+	// A cap above zero is the part no executor honours, and delivering content in full
+	// where a cap was asked for answers a different query. Delete the check once an
+	// executor honours one.
 	if q.Output.Content != nil && q.Output.Content.Max != 0 {
 		return nil, WithDetail(ErrUnsupported, "Output.Content.Max")
 	}
