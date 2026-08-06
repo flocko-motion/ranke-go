@@ -20,6 +20,9 @@ var (
 	// cache filled under a smaller cap in a previous run). A stack treats it
 	// like a miss and descends to a layer that holds the full bytes.
 	ErrContentCapped = errors.New("ranke: content capped (stored shorter than content_size)")
+	// ErrBranchNotFound: the archive holds no branch of that name. Also matches
+	// ErrNotFound, so a caller may read it either way.
+	ErrBranchNotFound = errors.New("ranke.Archive.GetBranch: branch not found")
 
 	// --- Id ---
 	errInvalidId     = errors.New("ranke: invalid id")
@@ -157,10 +160,9 @@ var (
 	errArchiveLoadHead       = errors.New("ranke.NewArchive: load head")
 
 	// --- Archive ---
-	errNilUniverse    = errors.New("ranke.NewArchive: nil Universe")
-	errNilHeadID      = errors.New("ranke.NewArchive: nil head id")
-	errNilID          = errors.New("ranke.Archive: nil id")
-	errBranchNotFound = errors.New("ranke.Archive.GetBranch: branch not found")
+	errNilUniverse = errors.New("ranke.NewArchive: nil Universe")
+	errNilHeadID   = errors.New("ranke.NewArchive: nil head id")
+	errNilID       = errors.New("ranke.Archive: nil id")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

@@ -183,7 +183,9 @@ func (a *archive) HasBranch(_ context.Context, name string) (bool, error) {
 func (a *archive) GetBranch(_ context.Context, name string) (Branch, error) {
 	e, ok := a.loadBranches()[name]
 	if !ok {
-		return nil, errBranchNotFound
+		// Also ErrNotFound, so a caller classifies the absence from the error it holds
+		// rather than asking the store a second time.
+		return nil, alsoMatches(ErrBranchNotFound, ErrNotFound)
 	}
 	return newBranch(a.u, e), nil
 }
