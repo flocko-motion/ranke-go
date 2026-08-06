@@ -67,7 +67,7 @@ func (c Constraints) AdmitBranch(ctx context.Context, base Archive, branch strin
 	switch {
 	case err == nil:
 		return nil
-	case !errors.Is(err, errBranchNotFound):
+	case !errors.Is(err, ErrBranchNotFound):
 		return err
 	case slices.Contains(c.creatable, branch),
 		slices.Contains(c.creatable, TargetBranches):
@@ -130,7 +130,7 @@ func (c Constraints) allowedHeads(ctx context.Context, base Archive, branch stri
 	for _, name := range names {
 		b, err := base.GetBranch(ctx, name)
 		switch {
-		case errors.Is(err, errBranchNotFound):
+		case errors.Is(err, ErrBranchNotFound):
 			continue // absent from the base, so it holds nothing to read
 		case err != nil:
 			return nil, err
