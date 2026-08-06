@@ -166,7 +166,7 @@ func validateOutput(o Output) error {
 	if err := oneOf("output.shape", string(o.Shape), "", string(ShapeSingle), string(ShapePath)); err != nil {
 		return err
 	}
-	if err := oneOf("output.detail", string(o.Detail), "", string(DetailID), string(DetailGraph), string(DetailClaims)); err != nil {
+	if err := oneOf("output.detail", string(o.Detail), "", string(DetailID), string(DetailClaims)); err != nil {
 		return err
 	}
 	if err := oneOf("output.form", string(o.Form), "", string(FormOriginal), string(FormMaterialized)); err != nil {

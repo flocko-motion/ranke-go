@@ -19,18 +19,28 @@ func routeIds(route []Claim) []Id {
 }
 
 // EncodeResults fills each result's ClaimEncoded/PathEncoded per out.Encoding, in
-// out.Form. Native asks for the Go objects, which the executor already set.
+// out.Form, inlining the content out.Content allows (R-QCONTENT). Native asks for the
+// Go objects, which the executor already set and which keep their content whole — an
+// in-process caller holds the claim itself, so a cap would only cost it the bytes.
 func EncodeResults(results []QueryResult, out Output) error {
+	var enc func(*claim, Form, *contentBudget) ([]byte, error)
 	switch out.Encoding {
 	case "", ResultNative:
 		return nil
 	case ResultCBOR:
-		return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeCBOR(out.Form) })
+		enc = (*claim).encodeCBOR
 	case ResultJSON:
-		return encodeEach(results, func(c Claim) ([]byte, error) { return c.EncodeJSON(out.Form) })
+		enc = (*claim).encodeJSON
 	default:
 		return WithDetail(ErrQueryEncoding, string(out.Encoding))
 	}
+	return encodeEach(results, func(c Claim) ([]byte, error) {
+		cc := c.unwrap()
+		if cc == nil {
+			return nil, nil
+		}
+		return enc(cc, out.Form, newContentBudget(out.Content))
+	})
 }
 
 // encodeEach fills every result's ClaimEncoded and PathEncoded through enc.

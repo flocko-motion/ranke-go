@@ -113,12 +113,6 @@ func (a *archive) Query(ctx context.Context, q Query) (ResultStream, error) {
 	if err := validateSelect(q); err != nil {
 		return nil, err
 	}
-	// Max 0 means in full (`R-QCONTENT`), which is what a result already carries and
-	// what `R-QCANON` names. A cap above zero no executor honours, and serving content
-	// in full where a cap was asked answers a different query. Delete once one honours.
-	if q.Output.Content != nil && q.Output.Content.Max != 0 {
-		return nil, WithDetail(ErrUnsupported, "Output.Content.Max")
-	}
 	scope, err := a.resolveScope(ctx, q)
 	if err != nil {
 		return nil, err

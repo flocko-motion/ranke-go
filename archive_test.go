@@ -242,38 +242,87 @@ func TestArchiveQueryResolvesBranch(t *testing.T) {
 	require.Equal(t, idsOf(bth, em, root), idSet(drain(t, rs)))
 }
 
-// A cap no engine applies must be refused, since uncapped content answers a
-// different query. ErrUnsupported is what a caller gates a capability on.
-func TestArchiveQueryRefusesContentCap(t *testing.T) {
+// A read serves the content Output.Content asks for (R-QCONTENT), through the archive
+// rather than only in the codec — the rule was stated for a whole query.
+func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	ctx := context.Background()
 	u := NewMemoryUniverse()
 	root := contributor(t)
-	em := srcClaim(t, root, "seed")
+	const body = "seed content, long enough to cut"
+	em := srcClaim(t, root, body)
 	bth := branchTable(t, root, []Claim{em}, branchEdge(t, "main", em.ID()))
 	putClaims(t, u, root, em, bth)
 
 	arc, err := NewArchive(ctx, u, bth.ID())
 	require.NoError(t, err)
 
-	q := Query{Select: Select{Branch: "main"},
-		Output: Output{Content: &OutputContent{Max: 4096, Overflow: OverflowCutoff}}}
-	require.NoError(t, ValidateQuery(q), "the cap is well-formed; only unserved")
+	// The claim under test carries inline content; the branch table alongside it does
+	// not, so a run covers both a record with content and one without.
+	read := func(t *testing.T, oc *OutputContent) []byte {
+		t.Helper()
+		q := Query{Select: Select{Branch: "main"}, Output: Output{
+			Detail: DetailClaims, Form: FormOriginal, Encoding: ResultCBOR, Content: oc,
+		}}
+		require.NoError(t, ValidateQuery(q))
+		rs, err := arc.Query(ctx, q)
+		require.NoError(t, err)
+		for _, r := range drain(t, rs) {
+			if r.ClaimNative.ID().String() == em.ID().String() {
+				return r.ClaimEncoded
+			}
+		}
+		t.Fatal("the claim under test is missing from the results")
+		return nil
+	}
 
-	_, err = arc.Query(ctx, q)
-	require.ErrorIs(t, err, ErrUnsupported)
+	stored, err := em.EncodeCBOR(FormOriginal)
+	require.NoError(t, err)
 
-	// Max 0 asks for every claim's content in full (R-QCONTENT), which is what the
-	// engine delivers. R-QCANON names that form, since S(v) holds a claim's inline
-	// content, so refusing it would leave the one output form verifiable against an id
-	// unaskable.
-	canonical := Query{Select: Select{Branch: "main"}, Output: Output{
-		Detail: DetailClaims, Form: FormOriginal, Encoding: ResultCBOR,
-		Content: &OutputContent{Max: 0, Overflow: OverflowOmit},
-	}}
-	require.NoError(t, ValidateQuery(canonical))
-	rs, err := arc.Query(ctx, canonical)
-	require.NoError(t, err, "the canonical form is askable")
-	require.NoError(t, rs.Close())
+	// R-QCANON: content in full is the stored bytes, so this form and only this form
+	// hashes back to the id.
+	t.Run("in full is S(v)", func(t *testing.T) {
+		require.Equal(t, stored, read(t, &OutputContent{Max: 0, Overflow: OverflowOmit}))
+	})
+
+	t.Run("absent inlines nothing", func(t *testing.T) {
+		got := read(t, nil)
+		require.NotEqual(t, stored, got)
+		c, err := DecodeClaim(nil, got)
+		require.NoError(t, err)
+		inline, err := c.Node().GetInlineContent()
+		require.NoError(t, err)
+		require.Empty(t, inline, "no content came with it")
+		require.Equal(t, uint64(len(body)), c.Node().GetContentSize(),
+			"the size still declares what the claim holds")
+	})
+
+	t.Run("cutoff inlines up to the cap", func(t *testing.T) {
+		c, err := DecodeClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowCutoff}))
+		require.NoError(t, err)
+		inline, err := c.Node().GetInlineContent()
+		require.NoError(t, err)
+		require.Equal(t, []byte(body[:4]), inline)
+		require.Equal(t, uint64(len(body)), c.Node().GetContentSize())
+	})
+
+	t.Run("omit inlines none of it", func(t *testing.T) {
+		c, err := DecodeClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowOmit}))
+		require.NoError(t, err)
+		inline, err := c.Node().GetInlineContent()
+		require.NoError(t, err)
+		require.Empty(t, inline)
+	})
+
+	// Content within the cap never overflows, so overflow has nothing to apply to.
+	t.Run("content within the cap arrives whole", func(t *testing.T) {
+		for _, ov := range []Overflow{OverflowCutoff, OverflowOmit} {
+			c, err := DecodeClaim(nil, read(t, &OutputContent{Max: len(body), Overflow: ov}))
+			require.NoError(t, err)
+			inline, err := c.Node().GetInlineContent()
+			require.NoError(t, err)
+			require.Equal(t, []byte(body), inline, string(ov))
+		}
+	})
 }
 
 // TestQueryClaimDoesNotScope: Select.Claim starts a traversal and scopes nothing,

@@ -178,8 +178,8 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		e.contentSize = cfg.ContentSize
 	}
 
-	// Compute the edge's own id over its canonical encoding.
-	b, err := encodeEdge(e)
+	// Compute the edge's own id over its canonical encoding, content included.
+	b, err := encodeEdge(e, nil)
 	if err != nil {
 		return nil, WrapDetail(errNewEdge, "canonical encode", err)
 	}

@@ -216,8 +216,6 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		// ── shape: how much each result carries ─────────────────────────────
 		{"output/detail-id", ranke.Query{Select: sel(),
 			Output: ranke.Output{Detail: ranke.DetailID}}},
-		{"output/detail-graph", ranke.Query{Select: sel(),
-			Output: ranke.Output{Detail: ranke.DetailGraph}}},
 		{"output/detail-claims", ranke.Query{Select: sel(),
 			Output: ranke.Output{Detail: ranke.DetailClaims}}},
 		{"output/shape-path", ranke.Query{

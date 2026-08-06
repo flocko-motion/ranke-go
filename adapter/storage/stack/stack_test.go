@@ -469,10 +469,13 @@ func (s *sliceStream) Report() *ranke.QueryReport { return nil }
 func (s *sliceStream) Err() error                 { return nil }
 func (s *sliceStream) Close() error               { return nil }
 
-// TestQueryCBORIsTheStoredRecord: a cbor read through a stack whose engine layer
-// keeps no canonical bytes must answer with the RawClaims layer's stored record,
-// byte for byte. The engine does the selection — reconstructed claims, or ids
+// TestQueryCBORIsTheStoredRecord: the canonical read (`R-QCANON`) through a stack whose
+// engine layer keeps no canonical bytes must answer with the RawClaims layer's stored
+// record, byte for byte. The engine does the selection — reconstructed claims, or ids
 // alone — and the stack re-reads those ids from the layer that holds the bytes.
+//
+// Content in full is part of that form: a claim's inline content is inside S(v), so a
+// read that caps it cannot deliver the bytes an id was computed over.
 func TestQueryCBORIsTheStoredRecord(t *testing.T) {
 	ctx := context.Background()
 	engines := map[string]func(ranke.Universe) ranke.Universe{
@@ -492,7 +495,10 @@ func TestQueryCBORIsTheStoredRecord(t *testing.T) {
 			}
 			q := ranke.Query{
 				Select: ranke.Select{Branch: ranke.BranchUniverse, Head: c.ID()},
-				Output: ranke.Output{Encoding: ranke.ResultCBOR},
+				Output: ranke.Output{
+					Detail: ranke.DetailClaims, Form: ranke.FormOriginal,
+					Encoding: ranke.ResultCBOR, Content: &ranke.OutputContent{Max: 0},
+				},
 			}
 			rs, err := st.Query(ctx, q, ranke.Scope{Branch: ranke.BranchUniverse})
 			if err != nil {
