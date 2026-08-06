@@ -54,7 +54,6 @@ func TestDecodeQueryRefusesSchemaInvalid(t *testing.T) {
 		{"unknown operator", `{"select":{"branch":"m"},"where":{"field":"type","test":{"matches":"a"}}}`, ErrQueryComparisonForm},
 		{"unknown direction", `{"select":{"branch":"m","path":[{"dir":"sideways"}]}}`, ErrQueryEnum},
 		{"unknown shape", `{"select":{"branch":"m"},"output":{"shape":"tree"}}`, ErrQueryEnum},
-		{"content without overflow", `{"select":{"branch":"m"},"output":{"content":{"max":4096}}}`, ErrQueryOverflow},
 		{"unknown overflow", `{"select":{"branch":"m"},"output":{"content":{"max":1,"overflow":"wrap"}}}`, ErrQueryEnum},
 		{"native is not a wire encoding", `{"select":{"branch":"m"},"output":{"encoding":"native"}}`, ErrQueryEnum},
 		{"warn is not a wire report", `{"select":{"branch":"m"},"execution":{"report":"warn"}}`, ErrQueryEnum},
@@ -264,6 +263,13 @@ func TestOverflowVocabularyMatchesTheSchema(t *testing.T) {
 	}
 	q := Query{Select: sel, Output: Output{Content: &OutputContent{Max: 4096, Overflow: "reference"}}}
 	require.ErrorIs(t, ValidateQuery(q), ErrQueryEnum, "reference left the vocabulary")
+
+	// A cap alone is a whole content pair, an absent overflow being omit (`R-QCONTENT`).
+	bare := `{"select":{"branch":"main"},"output":{"content":{"max":4096}}}`
+	decoded, err := DecodeQuery([]byte(bare))
+	require.NoError(t, err, "overflow is optional")
+	require.Equal(t, Overflow(""), decoded.Output.Content.Overflow,
+		"the default stays unwritten, so the engine applies it")
 }
 
 // TestDetailVocabularyMatchesTheSchema: id or claims (`R-QDETAIL`). "graph" asked for

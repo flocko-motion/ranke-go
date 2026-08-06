@@ -182,11 +182,9 @@ func validateOutput(o Output) error {
 	if o.Content.Max < 0 {
 		return WithDetail(ErrQueryBounds, "output.content.max "+strconv.Itoa(o.Content.Max))
 	}
-	if o.Content.Overflow == "" {
-		return ErrQueryOverflow
-	}
+	// An absent overflow is omit (`R-QCONTENT`), so the pair needs only its cap.
 	return oneOf("output.content.overflow", string(o.Content.Overflow),
-		string(OverflowCutoff), string(OverflowOmit))
+		"", string(OverflowCutoff), string(OverflowOmit))
 }
 
 // oneOf reports whether got is among allowed, naming the field when it is not.
