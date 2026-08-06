@@ -97,7 +97,7 @@ type Comparison struct {
 // Output shapes each result along orthogonal axes: Shape, Detail, Form, Content, Encoding.
 type Output struct {
 	Shape    Shape          // single | path
-	Detail   Detail         // id | graph | claims
+	Detail   Detail         // id | claims
 	Form     Form           // original | materialized
 	Content  *OutputContent // content inlined per claim; nil inlines none
 	Encoding ResultEncoding // serialized form of each claim (json | cbor)
@@ -146,13 +146,11 @@ const (
 	ShapePath   Shape = "path"   // the route to each claim
 )
 
-// Detail is how much each entity carries: a claim part (node + all outgoing edges,
-// possibly leaving the result) carries more than the closed graph.
+// Detail is how much each element carries (`R-QDETAIL`).
 type Detail string
 
 const (
 	DetailID     Detail = "id"     // identities only
-	DetailGraph  Detail = "graph"  // closed graph: nodes + edges among them
 	DetailClaims Detail = "claims" // claim parts: node + all outgoing edges (default; empty == claims)
 )
 

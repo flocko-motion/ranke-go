@@ -265,3 +265,17 @@ func TestOverflowVocabularyMatchesTheSchema(t *testing.T) {
 	q := Query{Select: sel, Output: Output{Content: &OutputContent{Max: 4096, Overflow: "reference"}}}
 	require.ErrorIs(t, ValidateQuery(q), ErrQueryEnum, "reference left the vocabulary")
 }
+
+// TestDetailVocabularyMatchesTheSchema: id or claims (`R-QDETAIL`). "graph" asked for
+// the closed graph — nodes with only the edges among them — which is a claim cut down
+// to the result set, so a client could not tell a claim's edges from the ones that
+// survived the cut.
+func TestDetailVocabularyMatchesTheSchema(t *testing.T) {
+	sel := Select{Branch: "main"}
+	for _, detail := range []Detail{"", DetailID, DetailClaims} {
+		q := Query{Select: sel, Output: Output{Detail: detail}}
+		require.NoError(t, ValidateQuery(q), string(detail))
+	}
+	q := Query{Select: sel, Output: Output{Detail: "graph"}}
+	require.ErrorIs(t, ValidateQuery(q), ErrQueryEnum, "graph left the vocabulary")
+}

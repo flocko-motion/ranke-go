@@ -49,7 +49,8 @@ type encNode struct {
 	Fields map[string]string `cbor:"8,keyasint,omitempty"`
 	// Content holds inline content bytes; exclusive with ContentHash (§Content)
 	Content []byte `cbor:"9,keyasint,omitempty"`
-	// ContentSize is mandatory whenever the node carries content (§Content)
+	// ContentSize is mandatory whenever the node carries content (§Content). It stands
+	// alone where a read withheld the bytes (R-QCONTENT) or a cache dropped them.
 	ContentSize uint64 `cbor:"11,keyasint,omitempty"`
 	// Height is the longest possible path, defined in paper 1 (§4.1)
 	Height uint64 `cbor:"12,keyasint,omitempty"`
@@ -63,7 +64,7 @@ type encEdge struct {
 	ContentHash       []byte            `cbor:"4,keyasint,omitempty"` // external content address; mutually exclusive with Content
 	RelationDirection int8              `cbor:"5,keyasint,omitempty"`
 	Fields            map[string]string `cbor:"6,keyasint,omitempty"`
-	ContentSize       uint64            `cbor:"7,keyasint,omitempty"` // content byte length; emitted iff content present
+	ContentSize       uint64            `cbor:"7,keyasint,omitempty"` // content byte length; stands alone where the bytes were withheld
 	EncodingClass     string            `cbor:"8,keyasint,omitempty"`
 	EncodingSub       string            `cbor:"9,keyasint,omitempty"`
 	Content           []byte            `cbor:"10,keyasint,omitempty"`
@@ -81,18 +82,20 @@ func MarshalCBOR(v any) ([]byte, error) {
 	return b, nil
 }
 
-// encodeNode returns the canonical S(v) bytes a node id is computed over.
+// encodeNode returns the canonical S(v) bytes a node id is computed over, which
+// inline content is always part of — hence the full budget.
 func encodeNode(n *node, edges []*edge) ([]byte, error) {
-	en, err := buildEncNode(n, edges)
+	en, err := buildEncNode(n, edges, nil)
 	if err != nil {
 		return nil, err
 	}
 	return encodingMode.Marshal(en)
 }
 
-// encodeEdge serializes an edge and returns its canonical S(e) bytes.
-func encodeEdge(e *edge) ([]byte, error) {
-	ee, err := buildEncEdge(e)
+// encodeEdge serializes an edge and returns its bytes, carrying the inline content b
+// affords. S(e), which an edge id is computed over, comes of a nil budget.
+func encodeEdge(e *edge, b *contentBudget) ([]byte, error) {
+	ee, err := buildEncEdge(e, b)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +147,8 @@ func unaliasFieldKeys(fields map[string]string) map[string]string {
 
 // buildEncNode builds the encNode for n with each edge serialized to its S(e)
 // and embedded raw, so S(v) commits to the edge records and their content
-// (§Content).
-func buildEncNode(n *node, edges []*edge) (encNode, error) {
+// (§Content). b spends across the claim, node content before its edges.
+func buildEncNode(n *node, edges []*edge, b *contentBudget) (encNode, error) {
 	en := encNode{
 		TypeClass:     aliasToWire(n.typeClass, nodeClassToAlias),
 		TypeSub:       aliasToWire(NodeSubtype(n.typeSub), nodeSubtypeToAlias),
@@ -157,16 +160,18 @@ func buildEncNode(n *node, edges []*edge) (encNode, error) {
 	}
 	switch {
 	case n.content != nil: // inline: the id commits to the bytes (§Content)
-		en.Content = n.content
+		en.Content = b.take(n.content)
 		en.ContentSize = n.contentSize
 	case n.contentHash != nil: // external: the id commits to the address
 		en.ContentHash = idBytes(n.contentHash)
+		en.ContentSize = n.contentSize
+	case n.contentSize > 0: // inline content whose bytes this view does not hold
 		en.ContentSize = n.contentSize
 	}
 	if len(edges) > 0 {
 		en.Edges = make([]cbor.RawMessage, len(edges))
 		for i, e := range edges {
-			raw, err := encodeEdge(e)
+			raw, err := encodeEdge(e, b)
 			if err != nil {
 				return encNode{}, err
 			}
@@ -176,8 +181,9 @@ func buildEncNode(n *node, edges []*edge) (encNode, error) {
 	return en, nil
 }
 
-// buildEncEdge constructs the encEdge record for an *edge
-func buildEncEdge(e *edge) (encEdge, error) {
+// buildEncEdge constructs the encEdge record for an *edge, carrying the inline
+// content b affords.
+func buildEncEdge(e *edge, b *contentBudget) (encEdge, error) {
 	ee := encEdge{
 		Reference:         idBytes(e.reference),
 		TypeClass:         aliasToWire(e.typeClass, edgeClassToAlias),
@@ -189,10 +195,12 @@ func buildEncEdge(e *edge) (encEdge, error) {
 	}
 	switch {
 	case e.content != nil:
-		ee.Content = e.content
+		ee.Content = b.take(e.content)
 		ee.ContentSize = e.contentSize
 	case e.contentHash != nil:
 		ee.ContentHash = idBytes(e.contentHash)
+		ee.ContentSize = e.contentSize
+	case e.contentSize > 0: // inline content whose bytes this view does not hold
 		ee.ContentSize = e.contentSize
 	}
 	return ee, nil
@@ -228,14 +236,18 @@ type encClaimFile struct {
 // EncodeCBOR serializes the claim to canonical CBOR in the form asked for: the
 // record as written, which persistence stores, or that record with its diff overlay
 // resolved.
-func (c *claim) EncodeCBOR(form Form) ([]byte, error) {
+func (c *claim) EncodeCBOR(form Form) ([]byte, error) { return c.encodeCBOR(form, nil) }
+
+// encodeCBOR is EncodeCBOR carrying the inline content b affords (R-QCONTENT). Content
+// in full keeps the stored bytes, which is what lets that form be S(v) (R-QCANON).
+func (c *claim) encodeCBOR(form Form, b *contentBudget) ([]byte, error) {
 	node, edges := c.node, c.edges
 	if form == FormMaterialized && c.diffClaim != nil {
 		node, edges = c.node.flattened(), c.effectiveEdges()
-	} else if c.raw != nil {
+	} else if c.raw != nil && b.inFull() {
 		return c.raw, nil // the record the decode kept, so the id still derives from it
 	}
-	en, err := buildEncNode(node, edges)
+	en, err := buildEncNode(node, edges, b)
 	if err != nil {
 		return nil, err
 	}
@@ -264,8 +276,9 @@ type jsonCarrier interface {
 	GetField(name string) (string, error)
 }
 
-// jsonCarry writes cc's content declaration and fields into m.
-func jsonCarry(m map[string]any, cc jsonCarrier) {
+// jsonCarry writes cc's content declaration and fields into m, inlining the content
+// budget affords. content_size stands whether or not the bytes came with it.
+func jsonCarry(m map[string]any, cc jsonCarrier, budget *contentBudget) {
 	if enc := cc.Encoding(); enc != "" {
 		m["encoding"] = enc
 	}
@@ -276,7 +289,9 @@ func jsonCarry(m map[string]any, cc jsonCarrier) {
 		m[FieldContentHash] = h.String()
 	}
 	if b, err := cc.GetInlineContent(); err == nil && len(b) > 0 {
-		m[FieldContent] = b
+		if kept := budget.take(b); len(kept) > 0 {
+			m[FieldContent] = kept
+		}
 	}
 	names := cc.Fields()
 	if len(names) == 0 {
@@ -298,7 +313,10 @@ func jsonCarry(m map[string]any, cc jsonCarrier) {
 // The projection reports a claim; verification needs the CBOR form, whose bytes are
 // the ones the id was signed over. A read may also cap the content JSON inlines
 // (§Output `content`).
-func (c *claim) EncodeJSON(form Form) ([]byte, error) {
+func (c *claim) EncodeJSON(form Form) ([]byte, error) { return c.encodeJSON(form, nil) }
+
+// encodeJSON is EncodeJSON carrying the inline content b affords (R-QCONTENT).
+func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 	n, edges := c.node, c.edges
 	if form == FormMaterialized {
 		n, edges = c.node.flattened(), c.effectiveEdges()
@@ -309,7 +327,7 @@ func (c *claim) EncodeJSON(form Form) ([]byte, error) {
 		"created_at": n.CreatedAt().UTC().Format(iso8601Nano),
 		"height":     n.Height(),
 	}
-	jsonCarry(m, n)
+	jsonCarry(m, n, b)
 	if len(edges) > 0 {
 		list := make([]map[string]any, 0, len(edges))
 		for _, e := range edges {
@@ -317,7 +335,7 @@ func (c *claim) EncodeJSON(form Form) ([]byte, error) {
 			if d := e.RelationDirection(); d != 0 {
 				em["relation_direction"] = int8(d)
 			}
-			jsonCarry(em, e)
+			jsonCarry(em, e, b)
 			list = append(list, em)
 		}
 		m["edges"] = list
@@ -403,6 +421,8 @@ func decodeNode(en encNode) (*node, error) {
 		}
 		n.contentHash = ch
 		n.contentSize = en.ContentSize
+	case en.ContentSize > 0: // the producer withheld the bytes; the size still tells their length
+		n.contentSize = en.ContentSize
 	}
 	// n.edges is populated by DecodeClaim from the inlined edge records.
 	return n, nil
@@ -432,6 +452,8 @@ func decodeEdge(ee encEdge) (*edge, error) {
 			return nil, err
 		}
 		e.contentHash = ch
+		e.contentSize = ee.ContentSize
+	case ee.ContentSize > 0: // the producer withheld the bytes; the size still tells their length
 		e.contentSize = ee.ContentSize
 	}
 	return e, nil

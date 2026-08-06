@@ -86,7 +86,6 @@ func TestOneQueryPerRQL(t *testing.T) {
 
 	cases := map[string]ranke.Query{
 		"single/id":     {Select: sel, Output: ranke.Output{Detail: ranke.DetailID}},
-		"single/graph":  {Select: sel, Output: ranke.Output{Detail: ranke.DetailGraph}},
 		"single/claims": {Select: sel, Output: ranke.Output{Detail: ranke.DetailClaims}},
 		"single/where":  {Select: sel, Where: &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}}},
 		"single/order":  {Select: sel, Order: []ranke.OrderKey{{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc}}, Limit: ranke.Limit{Results: 10}},
