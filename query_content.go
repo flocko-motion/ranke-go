@@ -1,22 +1,23 @@
 // package: ranke / query
 // type:    logic
-// job:     R-QCONTENT — how many bytes of inline content each encoded claim carries, read off
-// Output.Content and spent by the codec
+// job:     R-QCONTENT — how many bytes of inline content an encoded claim carries, read off
+// Output.Content and spent by the codec across the claim's content sequence
 // limits:  inline content only, per §Content the bytes a record holds; external content stays in
 // the Universe, which is what lets content in full be S(v) (R-QCANON)
 package ranke
 
-// contentBudget is the inline content one encoded claim may still carry, spent in
-// canonical order — the node's content, then its edges'. A nil budget inlines every
-// claim's content in full, leaving a stored record byte-identical.
+// contentBudget is the inline content one encoded claim may still carry, spent along the
+// claim's content sequence — its edges' content in S(v)'s order, then the node's, edge
+// content being the smaller part — and what arrives is a prefix of it. A nil budget
+// inlines content in full.
 type contentBudget struct {
-	left     int
-	overflow Overflow
+	left    int
+	cutoff  bool // inline a partial value at the cap
+	stopped bool // the prefix has ended
 }
 
-// newContentBudget reads Output.Content as R-QCONTENT states it: Max 0 inlines content
-// in full, an absent Content inlines none, and any higher Max is the cap in bytes. Each
-// claim gets its own, the cap being per claim.
+// newContentBudget reads Output.Content per R-QCONTENT: Max 0 inlines in full, an absent
+// Content inlines none, an absent Overflow is omit. One budget per claim.
 func newContentBudget(oc *OutputContent) *contentBudget {
 	switch {
 	case oc == nil:
@@ -24,26 +25,29 @@ func newContentBudget(oc *OutputContent) *contentBudget {
 	case oc.Max == 0:
 		return nil
 	default:
-		return &contentBudget{left: oc.Max, overflow: oc.Overflow}
+		return &contentBudget{left: oc.Max, cutoff: oc.Overflow == OverflowCutoff}
 	}
 }
 
-// inFull reports whether b leaves content as stored, so an encode may hand back the
-// bytes it holds rather than building the record again.
+// inFull reports whether b leaves content as stored, so an encode may reuse those bytes.
 func (b *contentBudget) inFull() bool { return b == nil }
 
-// take returns the run of content the budget affords and spends it. Content within the
-// cap passes whole; past it, cutoff keeps the bytes up to the cap and omit keeps none
-// (R-QCONTENT). content_size is unaffected, so a claim still declares what it holds.
+// take returns the content the budget affords and spends it. At the cap the prefix ends:
+// cutoff keeps the bytes up to it, omit keeps none of that value, and nothing follows.
 func (b *contentBudget) take(content []byte) []byte {
-	if b == nil || len(content) == 0 {
+	switch {
+	case b == nil:
 		return content
-	}
-	if len(content) <= b.left {
+	case len(content) == 0:
+		return content // carries none, so the sequence passes through it
+	case b.stopped:
+		return nil
+	case len(content) <= b.left:
 		b.left -= len(content)
 		return content
 	}
-	if b.overflow == OverflowCutoff && b.left > 0 {
+	b.stopped = true
+	if b.cutoff && b.left > 0 {
 		kept := content[:b.left]
 		b.left = 0
 		return kept

@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A cap is stated per claim (R-QCONTENT), so it spends across the claim's records —
-// node content first, then its edges' in canonical order. The reading matters only
-// where an edge carries content of its own, which is why it is pinned here.
+// A cap bounds the claim, not each record (R-QCONTENT), and is spent along the claim's
+// content sequence: its edges' content in S(v)'s order, then the node's. Edges first is
+// what keeps the smaller values whole, so the order is pinned here.
 func TestContentBudgetSpendsAcrossTheClaim(t *testing.T) {
 	root := contributor(t)
 	target := srcClaim(t, root, "target")
@@ -23,41 +23,65 @@ func TestContentBudgetSpendsAcrossTheClaim(t *testing.T) {
 		return e
 	}
 
+	// Two edges of 7 bytes each and a node of 2, so the sequence is 7, 7, 2 — the node
+	// last and small enough to fit in a remainder the prefix rule denies it.
 	c, err := NewClaim(TypeSource("note"), root).
-		WithInlineContent([]byte("nodecontent")).
+		WithInlineContent([]byte("no")).
 		WithEncoding(EncodingPlain).
 		WithEdges(edgeWith("edgeone"), edgeWith("edgetwo")).
 		WithHeight(HeightOf(root, target)).
 		Sign()
 	require.NoError(t, err)
 
-	// Node content is 11 bytes, so a cap of 14 leaves 3 for the first edge and none
-	// for the second.
-	raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(&OutputContent{
-		Max: 14, Overflow: OverflowCutoff,
-	}))
-	require.NoError(t, err)
-
-	got, err := DecodeClaim(nil, raw)
-	require.NoError(t, err)
-	nodeInline, err := got.Node().GetInlineContent()
-	require.NoError(t, err)
-	require.Equal(t, []byte("nodecontent"), nodeInline, "the node is served first, and fits")
-
-	// The claim's own edges, leaving aside the contributor edge every signature adds.
-	var carried []int
-	for _, e := range got.Edges() {
-		if e.GetContentSize() != uint64(len("edgeone")) {
-			continue
-		}
-		inline, err := e.GetInlineContent()
+	// Edges serialize in canonical (id) order rather than the order they were passed
+	// in, so the two are told apart by what each carried, not by name.
+	read := func(t *testing.T, oc *OutputContent) (edges []int, node int) {
+		t.Helper()
+		raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(oc))
 		require.NoError(t, err)
-		carried = append(carried, len(inline))
+		got, err := DecodeClaim(nil, raw)
+		require.NoError(t, err)
+		for _, e := range got.Edges() {
+			if e.GetContentSize() != uint64(len("edgeone")) {
+				continue // the contributor edge every signature adds carries no content
+			}
+			inline, err := e.GetInlineContent()
+			require.NoError(t, err)
+			edges = append(edges, len(inline))
+		}
+		inline, err := got.Node().GetInlineContent()
+		require.NoError(t, err)
+		return edges, len(inline)
 	}
-	// Edges serialize in canonical (id) order, so which of the two took the remainder
-	// follows that order rather than the order they were passed in.
-	require.ElementsMatch(t, []int{3, 0}, carried,
-		"one edge takes the 3 bytes left, the other none — and both still declare 7")
+
+	// The node's 2 bytes would fit a cap of 2 on their own. They do not arrive, because
+	// the sequence reaches the edges first and stops at the one it cannot afford.
+	t.Run("the edges come before the node", func(t *testing.T) {
+		edges, node := read(t, &OutputContent{Max: 2, Overflow: OverflowOmit})
+		require.ElementsMatch(t, []int{0, 0}, edges)
+		require.Zero(t, node, "the node is last, so a cap this small never reaches it")
+	})
+
+	// The sharp case for a prefix: 3 bytes are left over and the node needs 2, yet the
+	// prefix already ended at the edge that overflowed.
+	t.Run("omit ends the prefix at the last whole value", func(t *testing.T) {
+		edges, node := read(t, &OutputContent{Max: 10, Overflow: OverflowOmit})
+		require.ElementsMatch(t, []int{7, 0}, edges, "one edge whole, the next omitted")
+		require.Zero(t, node, "content after the prefix is left out though it would fit")
+	})
+
+	t.Run("cutoff ends the prefix inside a value", func(t *testing.T) {
+		edges, node := read(t, &OutputContent{Max: 10, Overflow: OverflowCutoff})
+		require.ElementsMatch(t, []int{7, 3}, edges, "the second edge is cut at the cap")
+		require.Zero(t, node)
+	})
+
+	// A cap the whole sequence fits leaves every value whole, node included.
+	t.Run("a cap the claim fits inlines all of it", func(t *testing.T) {
+		edges, node := read(t, &OutputContent{Max: 16, Overflow: OverflowOmit})
+		require.ElementsMatch(t, []int{7, 7}, edges)
+		require.Equal(t, 2, node)
+	})
 }
 
 // The budget applies to the JSON projection as it does to CBOR, the two carrying the
@@ -147,22 +171,28 @@ func TestContentBudgetTake(t *testing.T) {
 		require.Empty(t, b.take(content))
 	})
 
-	t.Run("cutoff keeps the bytes up to the cap", func(t *testing.T) {
+	t.Run("cutoff ends the prefix inside a value", func(t *testing.T) {
 		b := newContentBudget(&OutputContent{Max: 3, Overflow: OverflowCutoff})
 		require.Equal(t, []byte("abc"), b.take(content))
-		require.Empty(t, b.take(content), "the cap is spent")
+		require.Empty(t, b.take([]byte("a")), "the prefix has ended")
 	})
 
-	t.Run("omit keeps none of an overflowing content", func(t *testing.T) {
+	t.Run("omit ends the prefix before it", func(t *testing.T) {
 		b := newContentBudget(&OutputContent{Max: 3, Overflow: OverflowOmit})
 		require.Empty(t, b.take(content))
-		require.Equal(t, []byte("ab"), b.take([]byte("ab")),
-			"the cap is unspent, so a content that fits still arrives")
+		require.Empty(t, b.take([]byte("ab")),
+			"what arrives is a prefix, so a later value that fits is still left out")
 	})
 
-	t.Run("no content needs no budget", func(t *testing.T) {
+	// An absent overflow is omit (R-QCONTENT), so a cap alone is a whole answer.
+	t.Run("an absent overflow is omit", func(t *testing.T) {
+		b := newContentBudget(&OutputContent{Max: 3})
+		require.Empty(t, b.take(content), "no partial value at the cap")
+	})
+
+	t.Run("a record with no content passes through", func(t *testing.T) {
 		b := newContentBudget(&OutputContent{Max: 3, Overflow: OverflowCutoff})
 		require.Empty(t, b.take(nil))
-		require.Equal(t, []byte("abc"), b.take(content), "nothing was spent")
+		require.Equal(t, []byte("abc"), b.take(content), "nothing was spent, nothing stopped")
 	})
 }

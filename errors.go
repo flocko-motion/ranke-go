@@ -113,7 +113,6 @@ var (
 	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
 	ErrQueryBounds           = errors.New("ranke.Query: value below the minimum the schema fixes for its field")
-	ErrQueryOverflow         = errors.New("ranke.Query: Output.Content.Overflow is required (cutoff | omit)")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
 	ErrFutureDated           = errors.New("ranke.Contribution: claim is dated after the base the contribution opened against")
 	ErrBranchNotCreatable    = errors.New("ranke.Contribution: branch is absent from the base, and creating one is a right of its own")

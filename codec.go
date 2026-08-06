@@ -158,16 +158,8 @@ func buildEncNode(n *node, edges []*edge, b *contentBudget) (encNode, error) {
 		Height:        n.height,
 		Fields:        aliasFieldKeys(n.fields),
 	}
-	switch {
-	case n.content != nil: // inline: the id commits to the bytes (§Content)
-		en.Content = b.take(n.content)
-		en.ContentSize = n.contentSize
-	case n.contentHash != nil: // external: the id commits to the address
-		en.ContentHash = idBytes(n.contentHash)
-		en.ContentSize = n.contentSize
-	case n.contentSize > 0: // inline content whose bytes this view does not hold
-		en.ContentSize = n.contentSize
-	}
+	// The edges first, the node's own content last: that is the order a budget spends
+	// the claim's content sequence in (R-QCONTENT).
 	if len(edges) > 0 {
 		en.Edges = make([]cbor.RawMessage, len(edges))
 		for i, e := range edges {
@@ -177,6 +169,16 @@ func buildEncNode(n *node, edges []*edge, b *contentBudget) (encNode, error) {
 			}
 			en.Edges[i] = raw
 		}
+	}
+	switch {
+	case n.content != nil: // inline: the id commits to the bytes (§Content)
+		en.Content = b.take(n.content)
+		en.ContentSize = n.contentSize
+	case n.contentHash != nil: // external: the id commits to the address
+		en.ContentHash = idBytes(n.contentHash)
+		en.ContentSize = n.contentSize
+	case n.contentSize > 0: // inline content whose bytes this view does not hold
+		en.ContentSize = n.contentSize
 	}
 	return en, nil
 }
@@ -327,7 +329,8 @@ func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 		"created_at": n.CreatedAt().UTC().Format(iso8601Nano),
 		"height":     n.Height(),
 	}
-	jsonCarry(m, n, b)
+	// The edges before the node, spending the budget in the order R-QCONTENT fixes for
+	// the claim's content sequence — the same order the CBOR record is built in.
 	if len(edges) > 0 {
 		list := make([]map[string]any, 0, len(edges))
 		for _, e := range edges {
@@ -340,6 +343,7 @@ func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 		}
 		m["edges"] = list
 	}
+	jsonCarry(m, n, b)
 	return json.Marshal(m)
 }
 
