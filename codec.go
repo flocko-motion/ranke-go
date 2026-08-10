@@ -35,39 +35,41 @@ func init() {
 	encodingMode = mode
 }
 
-// encNode is the wire shape of a node (§4.1); tags are stable numeric keys.
+// encNode is the wire shape of a node (§4.1) under the keys `V-SER` fixes: 1 to 8 the
+// slots an edge shares, one number meaning one thing in both, then 9 to 11 its own.
 type encNode struct {
 	TypeClass     string `cbor:"1,keyasint"`
 	TypeSub       string `cbor:"2,keyasint"`
 	EncodingClass string `cbor:"3,keyasint,omitempty"`
 	EncodingSub   string `cbor:"4,keyasint,omitempty"`
 	ContentHash   []byte `cbor:"5,keyasint,omitempty"` // external content: its address H(c); mutually exclusive with Content
-	CreatedAt     string `cbor:"6,keyasint"`           // RFC3339 nano UTC
-	// Edge records inlined in canonical order, each element one edge's S(e).
-	Edges []cbor.RawMessage `cbor:"7,keyasint,omitempty"`
-	// Fields is a map under tag 8, key-sorted by CBOR Deterministic.
-	Fields map[string]string `cbor:"8,keyasint,omitempty"`
 	// Content holds inline content bytes; exclusive with ContentHash (§Content)
-	Content []byte `cbor:"9,keyasint,omitempty"`
+	Content []byte `cbor:"6,keyasint,omitempty"`
 	// ContentSize is mandatory whenever the node carries content (§Content). It stands
 	// alone where a read withheld the bytes (R-QCONTENT) or a cache dropped them.
-	ContentSize uint64 `cbor:"11,keyasint,omitempty"`
+	ContentSize uint64 `cbor:"7,keyasint,omitempty"`
+	// Fields is a map under tag 8, key-sorted by CBOR Deterministic.
+	Fields    map[string]string `cbor:"8,keyasint,omitempty"`
+	CreatedAt string            `cbor:"9,keyasint"` // RFC3339 nano UTC
+	// Edge records inlined in canonical order, each element one edge's S(e).
+	Edges []cbor.RawMessage `cbor:"10,keyasint,omitempty"`
 	// Height is the longest possible path, defined in paper 1 (§4.1)
-	Height uint64 `cbor:"12,keyasint,omitempty"`
+	Height uint64 `cbor:"11,keyasint,omitempty"`
 }
 
-// encEdge is the canonical record of an edge (§4.2)
+// encEdge is the canonical record of an edge (§4.2): keys 1 to 8 as a node has them,
+// then 12 to 13 (`V-SER`).
 type encEdge struct {
-	Reference         []byte            `cbor:"1,keyasint"`
-	TypeClass         string            `cbor:"2,keyasint"`
-	TypeSub           string            `cbor:"3,keyasint"`
-	ContentHash       []byte            `cbor:"4,keyasint,omitempty"` // external content address; mutually exclusive with Content
-	RelationDirection int8              `cbor:"5,keyasint,omitempty"`
-	Fields            map[string]string `cbor:"6,keyasint,omitempty"`
+	TypeClass         string            `cbor:"1,keyasint"`
+	TypeSub           string            `cbor:"2,keyasint"`
+	EncodingClass     string            `cbor:"3,keyasint,omitempty"`
+	EncodingSub       string            `cbor:"4,keyasint,omitempty"`
+	ContentHash       []byte            `cbor:"5,keyasint,omitempty"` // external content address; mutually exclusive with Content
+	Content           []byte            `cbor:"6,keyasint,omitempty"`
 	ContentSize       uint64            `cbor:"7,keyasint,omitempty"` // content byte length; stands alone where the bytes were withheld
-	EncodingClass     string            `cbor:"8,keyasint,omitempty"`
-	EncodingSub       string            `cbor:"9,keyasint,omitempty"`
-	Content           []byte            `cbor:"10,keyasint,omitempty"`
+	Fields            map[string]string `cbor:"8,keyasint,omitempty"`
+	Reference         []byte            `cbor:"12,keyasint"`
+	RelationDirection int8              `cbor:"13,keyasint,omitempty"`
 }
 
 // MarshalCBOR returns v in CBOR Deterministic Encoding (RFC 8949 §4.2), for a payload
