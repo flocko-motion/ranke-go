@@ -190,7 +190,7 @@ func TestClaimRoundTrip_SelfSignedContributor(t *testing.T) {
 	c, _ := newSignedContributor(t)
 	require.True(t, c.IsContributor())
 	require.NotEmpty(t, mustInline(t, c.Node()), "a signed contributor's content is its pubkey")
-	require.Equal(t, "ed25519-pub", c.ID().Algorithm(), "signed id names the sign scheme")
+	require.Equal(t, "eddsa", c.ID().Algorithm(), "signed id names the sign scheme")
 	roundTrip(t, c)
 }
 

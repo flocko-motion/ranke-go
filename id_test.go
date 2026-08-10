@@ -141,21 +141,34 @@ func TestAlgorithmNonMultihashPayload(t *testing.T) {
 		"a known multicodec varint should be named, got %q", id.Algorithm())
 }
 
-// TestSignatureIdNamesItsScheme: a signature id must name its scheme whatever its
-// bytes. multihash.Decode reads a code then a length, and a multikey signature supplies
-// both by accident — code 0xed 0x01, then the signature's first byte as the length — so
-// one signature in 256 begins with the 63 that matches the 63 bytes after it, decoding
-// as an unnamed multihash. Algorithm() returned "" for those, which is how this
-// surfaced: a random keypair per test made one run in a few hundred red.
+// TestSignatureIdNamesItsScheme: a signature id names its scheme whatever byte it opens
+// with. Signatures frame under eddsa (0xd0ed, varint ed a1 03).
 func TestSignatureIdNamesItsScheme(t *testing.T) {
+	for _, first := range []byte{0, 1, 62, 63, 64, 255} {
+		raw := make([]byte, 3+ed25519.SignatureSize)
+		raw[0], raw[1], raw[2] = 0xed, 0xa1, 0x03
+		raw[3] = first
+		signature, err := idFromBytes(raw)
+		require.NoError(t, err)
+		require.Equal(t, "eddsa", signature.Algorithm(),
+			"a signature names its scheme whatever byte it opens with (got first=%d)", first)
+	}
+}
+
+// TestTwoBytePrefixIsNotAnUnnamedMultihash: Algorithm accepts only a NAMED multihash.
+// multihash.Decode reads a code then a length, which a two-byte prefix supplies by
+// accident — 0xed 0x01, then the payload's first byte as the length — so one payload in
+// 256 decoded as a nameless multihash and Algorithm returned "". Any two-byte code can
+// recreate it, so the guard outlives the signature framing that first hit it.
+func TestTwoBytePrefixIsNotAnUnnamedMultihash(t *testing.T) {
 	for _, first := range []byte{0, 1, 62, 63, 64, 255} {
 		raw := make([]byte, 2+ed25519.SignatureSize)
 		raw[0], raw[1] = 0xed, 0x01
 		raw[2] = first
-		signature, err := idFromBytes(raw)
+		payload, err := idFromBytes(raw)
 		require.NoError(t, err)
-		require.Equal(t, "ed25519-pub", signature.Algorithm(),
-			"a signature names its scheme whatever byte it opens with (got first=%d)", first)
+		require.Equal(t, "ed25519-pub", payload.Algorithm(),
+			"a two-byte code names itself rather than decoding as a nameless multihash (first=%d)", first)
 	}
 }
 
