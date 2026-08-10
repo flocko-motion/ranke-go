@@ -28,13 +28,18 @@ type Edge interface {
 	// GetContentHash is the address of EXTERNAL content, H(content); nil for
 	// inline content (bytes in the edge, §Content) and for no content.
 	GetContentHash() Id
-	// GetContentSize is the content's byte length (0 when no content).
+	// GetContentSize is the content's full byte length (0 when no content), whatever
+	// this record holds of it.
 	GetContentSize() uint64
 	// ContentKind reports whether and where the edge's content lives — Inline,
 	// External, or None.
 	ContentKind() ContentKind
-	// GetInlineContent returns the inline content bytes (nil when none);
-	// it errors when the content is external.
+	// ContentComplete reports whether this record holds every byte it declares; a read
+	// under a content cap serves a prefix (`R-QCONTENT`).
+	ContentComplete() bool
+	// GetInlineContent returns the inline content bytes (nil when none), which may be a
+	// PREFIX of what the edge declares — check ContentComplete. It errors when the
+	// content is external.
 	GetInlineContent() ([]byte, error)
 	// GetContent returns a reader over the content, transparently
 	// streaming external content from u; u may be nil for inline content.
@@ -219,6 +224,15 @@ func (e *edge) ContentKind() ContentKind {
 }
 func (e *edge) GetContentHash() Id     { return e.contentHash }
 func (e *edge) GetContentSize() uint64 { return e.contentSize }
+
+// ContentComplete compares what the record holds against what it declares; see
+// node.ContentComplete.
+func (e *edge) ContentComplete() bool {
+	if e.contentHash != nil {
+		return false
+	}
+	return uint64(len(e.content)) == e.contentSize
+}
 
 func (e *edge) GetInlineContent() ([]byte, error) {
 	if e.ContentKind() == ContentExternal {

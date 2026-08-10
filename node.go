@@ -21,14 +21,20 @@ type Node interface {
 	// GetContentHash is the address of EXTERNAL content, H(content); nil for
 	// inline content (bytes in the node, §Content) and for no content.
 	GetContentHash() Id
-	// GetContentSize is the content's byte length (0 when no content), paired with
-	// the hash to defend against truncation and to size a read without loading it.
+	// GetContentSize is the content's full byte length (0 when no content), whatever
+	// this record holds of it: paired with the hash it defends against truncation, and
+	// against GetInlineContent it says how much arrived.
 	GetContentSize() uint64
 	// ContentKind reports where the node's content lives — Inline, External, or
 	// None — reading through a diff overlay via the effective content source.
 	ContentKind() ContentKind
-	// GetInlineContent returns the inline content bytes; it errors when the content
-	// is external — check ContentKind first, or use GetContent with a Universe.
+	// ContentComplete reports whether this record holds every byte it declares. A read
+	// under a content cap serves a prefix (`R-QCONTENT`), so a caller needing the whole
+	// content asks here rather than assuming what GetInlineContent returned is all of it.
+	ContentComplete() bool
+	// GetInlineContent returns the inline content bytes, which may be a PREFIX of the
+	// content the node declares — check ContentComplete. It errors when the content is
+	// external; check ContentKind first, or use GetContent with a Universe.
 	GetInlineContent() ([]byte, error)
 	// GetContent returns a reader over the content, transparently
 	// streaming external content from u; u may be nil for inline content.
@@ -150,6 +156,17 @@ func (n *node) ContentKind() ContentKind {
 	default:
 		return ContentNone
 	}
+}
+
+// ContentComplete compares what the record holds against what it declares. External
+// content is never held, so it is complete only once fetched; no content is complete
+// trivially, both lengths being zero.
+func (n *node) ContentComplete() bool {
+	cs := n.contentSource()
+	if cs.contentHash != nil {
+		return false
+	}
+	return uint64(len(cs.content)) == cs.contentSize
 }
 
 // Height returns the claim's own generation number, read straight off the node.
