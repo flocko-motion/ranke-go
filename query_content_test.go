@@ -125,6 +125,79 @@ func mustBase64(t *testing.T, v any) []byte {
 	return out
 }
 
+// content_size is the FULL length whatever a record holds of it, so a caller can tell
+// how much arrived. The whole held-vs-declared model rests on this: were a capping
+// encoder to write the truncated length instead, the record would stop verifying
+// against its id and the shortfall would be unrecoverable.
+func TestACappedRecordDeclaresTheTrueSize(t *testing.T) {
+	root := contributor(t)
+	const body = "seventeen bytes!!"
+	c := srcClaim(t, root, body)
+
+	for _, tc := range []struct {
+		name string
+		oc   *OutputContent
+		held int
+	}{
+		{"in full", &OutputContent{Max: 0}, len(body)},
+		{"absent", nil, 0},
+		{"cutoff", &OutputContent{Max: 4, Overflow: OverflowCutoff}, 4},
+		{"omit", &OutputContent{Max: 4, Overflow: OverflowOmit}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(tc.oc))
+			require.NoError(t, err)
+			got, err := DecodeClaim(nil, raw)
+			require.NoError(t, err)
+
+			inline, err := got.Node().GetInlineContent()
+			require.NoError(t, err)
+			require.Len(t, inline, tc.held, "the bytes served")
+			require.Equal(t, uint64(len(body)), got.Node().GetContentSize(),
+				"the declared length is the content's, not the prefix's")
+			require.Equal(t, tc.held == len(body), got.Node().ContentComplete())
+		})
+	}
+}
+
+// ContentComplete is the question a caller actually has — is what I hold all of it —
+// which a kind or a size alone cannot answer.
+func TestContentCompleteDistinguishesAPrefix(t *testing.T) {
+	root := contributor(t)
+
+	bare, err := NewClaim(TypeSource("marker"), root).WithHeight(HeightOf(root)).Sign()
+	require.NoError(t, err)
+	require.Equal(t, ContentNone, bare.Node().ContentKind())
+	require.True(t, bare.Node().ContentComplete(), "no content is complete trivially")
+
+	whole := srcClaim(t, root, "all of it")
+	require.True(t, whole.Node().ContentComplete())
+
+	// A prefix reports Inline and a non-zero size exactly as a whole content does, so
+	// neither tells a caller the bytes are short.
+	raw, err := whole.unwrap().encodeCBOR(FormOriginal, newContentBudget(
+		&OutputContent{Max: 3, Overflow: OverflowCutoff}),
+	)
+	require.NoError(t, err)
+	prefix, err := DecodeClaim(nil, raw)
+	require.NoError(t, err)
+	require.Equal(t, ContentInline, prefix.Node().ContentKind(), "as a whole content does")
+	require.NotZero(t, prefix.Node().GetContentSize(), "as a whole content does")
+	require.False(t, prefix.Node().ContentComplete(), "and yet it holds 3 of 9 bytes")
+
+	// External content is never held by the record, so it is incomplete until fetched.
+	blob := []byte("elsewhere")
+	hash, err := HashContent(blob)
+	require.NoError(t, err)
+	ext, err := NewClaim(TypeSource("blob"), root).
+		WithExternalContent(hash, uint64(len(blob))).
+		WithEncoding(EncodingOctetStream).
+		WithHeight(HeightOf(root)).
+		Sign()
+	require.NoError(t, err)
+	require.False(t, ext.Node().ContentComplete())
+}
+
 // A claim whose content_size stands without its bytes is what a read under a cap
 // delivers, and what a structure-only cache holds (node.ContentKind). The size has to
 // survive the codec, else the claim reads as having no content at all.
