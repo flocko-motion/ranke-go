@@ -293,51 +293,45 @@ func frontierCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, pa
 		orderLimitClause(q.Order, q.Limit.Results, final), params
 }
 
-// pathCypher lowers a path-shape read as one continuous path, so a route
-// reconstructs per endpoint. Relationship-uniqueness spans the whole route.
+// pathCypher lowers a path-shape read as a per-step pipeline, the route carried forward
+// as a list, so relationship-uniqueness resets at each boundary (`R-QCFRONTIER`). Each
+// step keeps the one route per endpoint `R-QSHAPE` names, which is exact per step: a
+// segment depends on the node it starts from, not on how that node was reached.
 func pathCypher(q ranke.Query, scope ranke.Scope, steps []ranke.PathStep, params map[string]any) (string, map[string]any) {
-	var pat, where strings.Builder
-	pat.WriteString("(n0)")
-	addWhere := func(cond string) {
-		if where.Len() > 0 {
-			where.WriteString("\n  AND ")
-		}
-		where.WriteString(cond)
-	}
-	for i, step := range steps {
-		rv, nv := "r"+strconv.Itoa(i), "n"+strconv.Itoa(i+1)
-		// The chain omits the repeated head node between segments (a single pattern).
-		pat.WriteString(segmentPattern("", rv, nv, step))
-		for _, c := range segmentFilters(step, rv, nv, i, params) {
-			addWhere(c)
-		}
-	}
-	final := "n" + strconv.Itoa(len(steps))
-	addWhere("size(labels(" + final + ")) > 0")
-	ctr := 0
-	if wc := whereClause(q.Where, final, params, &ctr); wc != "true" {
-		addWhere(wc)
-	}
-	if tagBounded(scope) {
+	conf := tagBounded(scope)
+	if conf {
 		params["bkey"] = ranke.BranchTagKey(scope.Branch)
 		params["height"] = scope.Height
-		addWhere("all(x IN nodes(path) WHERE x[$bkey] <= $height)")
 	}
-	// allShortestPaths is O(nodes) for a single segment, but demands provably
-	// distinct ends; the acyclic structural graph makes that inequality free.
-	prelude := startClause(q, scope, params) + "\nWITH DISTINCT n0\n"
-	match := prelude + "MATCH path=" + pat.String()
-	if len(steps) == 1 {
-		match = prelude + "MATCH path = allShortestPaths(" + pat.String() + ")"
-		if steps[0].MinHops() > 0 {
-			addWhere("n0 <> " + final)
+	final := "n" + strconv.Itoa(len(steps))
+	var b strings.Builder
+	b.WriteString(startClause(q, scope, params) + "\nWITH DISTINCT n0, [n0] AS route")
+	for i, step := range steps {
+		rv, nv, pv := "r"+strconv.Itoa(i), "n"+strconv.Itoa(i+1), "p"+strconv.Itoa(i)
+		seg := pv + " = " + segmentPattern("n"+strconv.Itoa(i), rv, nv, step)
+		conds := segmentFilters(step, rv, nv, i, params)
+		if conf { // confine every node on the segment (bounds reverse steps to members)
+			conds = append(conds, "all(x IN nodes("+pv+") WHERE x[$bkey] <= $height)")
 		}
+		if i == len(steps)-1 { // endpoint: valid node + the where tree
+			conds = append(conds, "size(labels("+nv+")) > 0")
+			ctr := 0
+			if wc := whereClause(q.Where, nv, params, &ctr); wc != "true" {
+				conds = append(conds, wc)
+			}
+		}
+		b.WriteString("\nMATCH " + seg)
+		if len(conds) > 0 {
+			b.WriteString("\nWHERE " + strings.Join(conds, "\n  AND "))
+		}
+		// The segment repeats the node the route already ends at, so it joins from 1.
+		b.WriteString("\nWITH " + nv + ", route + nodes(" + pv + ")[1..] AS route" +
+			"\n  ORDER BY size(route), [x IN route | x.created_at + x.id]" +
+			"\nWITH " + nv + ", head(collect(route)) AS route")
 	}
-	return match + "\nWHERE " + where.String() +
-		"\nWITH " + final + ", path ORDER BY length(path), [x IN nodes(path) | x.created_at + x.id]" +
-		"\nWITH " + final + ", head(collect([x IN nodes(path) | " + nodeData("x") + "])) AS route" +
+	return b.String() +
 		orderLimitClause(q.Order, q.Limit.Results, final) +
-		"\nRETURN route", params
+		"\nRETURN [x IN route | " + nodeData("x") + "] AS route", params
 }
 
 // segmentPattern renders one PathStep as a variable-length Cypher segment in its

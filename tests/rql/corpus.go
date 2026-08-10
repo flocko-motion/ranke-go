@@ -39,6 +39,10 @@ func Timed(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		"order/height-desc-limit": true,
 		"path/uses-of-sources":    true,
 		"closure/universe":        true,
+		// A path shape, which lowers through its own per-step pipeline (`R-QCFRONTIER`)
+		// and reconstructs a route per endpoint. Without one here the whole shape went
+		// untimed, so what its lowering costs was invisible.
+		"output/shape-path-multi-edge": true,
 	}
 	var out []NamedQuery
 	for _, nq := range Corpus(m, root) {
