@@ -1,7 +1,7 @@
 // package: ranke / taxonomy
 // type:    logic
-// job:     the closed edge-type vocabulary (§4.8) — classes, subtypes, and their compact aliases —
-// with enumeration/validation helpers
+// job:     the edge-type vocabulary (§4.8) — the closed class set, the subtypes the ADT defines,
+// and their compact aliases — with enumeration/validation helpers
 // limits:  vocabulary only; edge construction and matching live elsewhere (-> edge, filter)
 package ranke
 
@@ -24,9 +24,9 @@ var EdgeClasses = []EdgeClass{
 	EdgeClassContribution,
 }
 
-// EdgeSubtype is a contribution/* edge subtype. Only contribution/* has a
-// closed subtype set; derivation/* and relation/* subtypes are open
-// vocabulary.
+// EdgeSubtype is a contribution/* edge subtype. Every subtype vocabulary is open
+// (paper 1 §Type Vocabulary); these are the ones the ADT gives meaning to, so a
+// verifier acts on them and passes any other through as an ordinary reference.
 type EdgeSubtype string
 
 const (
