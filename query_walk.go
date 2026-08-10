@@ -15,26 +15,34 @@ import (
 )
 
 // queryTraverse walks the Select's Path one step at a time within closure(origin),
-// returning the reached claims and, when needPaths is set, each claim's route.
-func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
+// returning the claims reached that conf admits and, when needPaths is set, each
+// claim's route. Only the first step can pass through claims outside the scope,
+// since every later step expands from what the previous one collected.
+func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, conf *confinement, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
 	steps := sel.Path
 	if len(steps) == 0 {
 		steps = []PathStep{{}} // all edges, provenance, unbounded → full closure
 	}
 
 	startAt := reportStart(rc)
-	frontier, err := walkStart(ctx, u, sel.Claim, origin, rc)
+	frontier, err := walkStart(ctx, u, sel.Claim, origin, conf, rc)
 	if err != nil {
 		return nil, nil, err
 	}
 	rc.timed("native", "load-start", ReportInfo, startAt, "", map[string]any{"claims": len(frontier)})
 
-	// A reverse step names referrers, which only an inverted closure yields.
+	// A reverse step names referrers, which only an inverted closure yields. It is
+	// built over the scope's graph, so a reverse step finds the referrers the
+	// branch holds — from origin it would invert whatever graph Select.Head sits in.
 	var incoming map[string][]incomingEdge
 	if stepsNeedReverse(steps) {
-		anchor, err := GetClaim(ctx, u, origin)
+		root := origin
+		if conf != nil {
+			root = conf.root
+		}
+		anchor, err := GetClaim(ctx, u, root)
 		if err != nil {
-			return nil, nil, WrapDetail(errQuery, "closure origin "+origin.String(), err)
+			return nil, nil, WrapDetail(errQuery, "closure origin "+root.String(), err)
 		}
 		idxStart := reportStart(rc)
 		incoming, err = buildIncoming(ctx, u, anchor, rc)
@@ -51,7 +59,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, needP
 	var reached []Claim
 	for i, step := range steps {
 		stepStart := reportStart(rc)
-		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, needPaths, rc)
+		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, conf, needPaths, rc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -62,8 +70,10 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, needP
 }
 
 // walkStart is the set the first step expands from: the claim Select.Claim names,
-// else every claim in closure(origin).
-func walkStart(ctx context.Context, u Universe, start, origin Id, rc *reportCollector) ([]Claim, error) {
+// else every claim in closure(origin). The start need not be in the scope's graph —
+// a read is the intersection, so the walk begins where Select.Head says and the
+// scope decides what may be collected.
+func walkStart(ctx context.Context, u Universe, start, origin Id, conf *confinement, rc *reportCollector) ([]Claim, error) {
 	if start != nil {
 		c, err := GetClaim(ctx, u, start)
 		if err != nil {
@@ -75,7 +85,7 @@ func walkStart(ctx context.Context, u Universe, start, origin Id, rc *reportColl
 	if err != nil {
 		return nil, WrapDetail(errQuery, "closure origin "+origin.String(), err)
 	}
-	return queryWalkStep(ctx, u, []Claim{c}, PathStep{Min: Hops(0)}, nil, map[string][]Claim{}, false, rc)
+	return queryWalkStep(ctx, u, []Claim{c}, PathStep{Min: Hops(0)}, nil, map[string][]Claim{}, conf, false, rc)
 }
 
 // stepsNeedReverse reports whether any step walks edges backward (uses or
@@ -130,7 +140,7 @@ func buildIncoming(ctx context.Context, u Universe, root Claim, rc *reportCollec
 // queryWalkStep expands the frontier along one PathStep: level-synchronized BFS
 // over *0..step.Max hops (0 = unbounded, frontier is hop 0) along Dir's edges,
 // collecting step.Nodes matches. Equal routes break on (created_at, id).
-func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, needPaths bool, rc *reportCollector) ([]Claim, error) {
+func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathStep, incoming map[string][]incomingEdge, routes map[string][]Claim, conf *confinement, needPaths bool, rc *reportCollector) ([]Claim, error) {
 	// Three sets, one meaning each. visited: walked through by this step. fixed:
 	// route settled by an earlier, hence shorter, level. collected: in the result.
 	visited := map[string]bool{}
@@ -143,7 +153,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 	// of routing: a path coming back to a frontier node still yields a result.
 	reach := func(c Claim, hop int) {
 		k := c.ID().String()
-		if hop < minHops || collected[k] || !matchTypeList(step.Nodes, c.Node().Type()) {
+		if hop < minHops || collected[k] || !conf.admits(c.ID()) || !matchTypeList(step.Nodes, c.Node().Type()) {
 			return
 		}
 		collected[k] = true
