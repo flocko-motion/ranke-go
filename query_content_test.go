@@ -125,10 +125,9 @@ func mustBase64(t *testing.T, v any) []byte {
 	return out
 }
 
-// content_size is the FULL length whatever a record holds of it, so a caller can tell
-// how much arrived. The whole held-vs-declared model rests on this: were a capping
-// encoder to write the truncated length instead, the record would stop verifying
-// against its id and the shortfall would be unrecoverable.
+// content_size is the FULL length whatever a record holds of it. Writing the truncated
+// length would leave the shortfall unrecoverable, and the record unverifiable — the size
+// sits inside S(v).
 func TestACappedRecordDeclaresTheTrueSize(t *testing.T) {
 	root := contributor(t)
 	const body = "seventeen bytes!!"

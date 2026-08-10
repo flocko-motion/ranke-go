@@ -26,10 +26,9 @@ func recordKeys(t *testing.T, v any) map[string]int {
 	return out
 }
 
-// TestRecordKeysMatchTheTable pins the numbering `V-SER` fixes. Nothing else asserts it:
-// the keys live in struct tags, so a renumber compiles, encodes, decodes and round-trips
-// happily while every id in existence moves. Only a reader holding bytes from the other
-// numbering would notice, and by then they are published.
+// TestRecordKeysMatchTheTable pins the numbering `V-SER` fixes. The keys live in struct
+// tags, so a renumber round-trips happily while every id moves — only a reader holding
+// bytes from the other numbering notices, and by then they are published.
 func TestRecordKeysMatchTheTable(t *testing.T) {
 	// The eight slots a node and an edge share, which take the same key in both.
 	shared := map[string]int{
@@ -60,9 +59,8 @@ func TestRecordKeysMatchTheTable(t *testing.T) {
 	require.Equal(t, want(edge), recordKeys(t, encEdge{}), "edge record keys")
 }
 
-// One number, one meaning: a reader that mixed the two records up would still decode,
-// the CBOR being untyped maps, and would silently read a node's created_at as an edge's
-// reference. Sharing the low keys is what removes that failure.
+// One number, one meaning. The records are untyped maps, so a reader that mixed them up
+// would decode rather than fail, reading a created_at as a reference.
 func TestSharedRecordKeysAgree(t *testing.T) {
 	n, e := recordKeys(t, encNode{}), recordKeys(t, encEdge{})
 	for name, key := range n {
