@@ -197,10 +197,8 @@ func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[
 	return traversalCypher(q, scope, needPaths)
 }
 
-// scanCypher lowers a Path-less read: the outward closure of the frontier
-// (`R-QSTEPS`) — the claim `R-QANCHOR` anchors, else every claim the scope holds.
-// Branch membership is the _b_<branch> tag (<= Height gives point-in-time); a Head
-// narrows to its reach, and an anchored read is the intersection of the two.
+// scanCypher lowers a Path-less read: the frontier's outward closure (`R-QSTEPS`) —
+// the claim `R-QANCHOR` anchors, else the scope, intersected with any Head (`R-QHEAD`).
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
 	params := map[string]any{}
 	var reach []string // the ids whose outward closure bounds the read

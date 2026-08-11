@@ -77,18 +77,19 @@ func TestToyUnanchoredScanIsTheWholeScope(t *testing.T) {
 	})
 }
 
-// TestToyAnchoredScanStillIntersectsHead: a Head narrows a read wherever it starts
-// (`R-QHEAD`), so an anchor reaching past it is cut back to the intersection.
-func TestToyAnchoredScanStillIntersectsHead(t *testing.T) {
+// TestToyAnchoredScanUnderAHeadIsTheIntersection: an anchor lies inside the closure
+// a Head fixes (`R-QANCHOR`), so the two together read the anchor's closure — the
+// Head narrows the scope and never widens what the anchor reaches.
+func TestToyAnchoredScanUnderAHeadIsTheIntersection(t *testing.T) {
 	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 
 		both := reached(t, u, m.Head, ranke.Query{
-			Select: ranke.Select{Branch: rql.Branch, Head: base, Claim: delta},
+			Select: ranke.Select{Branch: rql.Branch, Head: delta, Claim: base},
 		})
-		require.Contains(t, both, base.String(), "what both closures hold")
-		require.NotContains(t, both, delta.String(), "the anchor itself lies outside the Head's")
+		require.Contains(t, both, base.String(), "the anchor, inside the Head's closure")
+		require.NotContains(t, both, delta.String(), "and not what the Head reaches past it")
 	})
 }
 

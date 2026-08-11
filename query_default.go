@@ -62,20 +62,6 @@ func (c *confinement) admits(cl Claim) bool {
 	return err == nil && at <= c.height
 }
 
-// keep is admits over a set; a nil confinement narrows nothing.
-func (c *confinement) keep(cs []Claim) []Claim {
-	if c == nil {
-		return cs
-	}
-	kept := make([]Claim, 0, len(cs))
-	for _, cl := range cs {
-		if c.admits(cl) {
-			kept = append(kept, cl)
-		}
-	}
-	return kept
-}
-
 // confine builds the scope's membership test, nil when the scope confines nothing.
 // Tags answer per claim where the Universe keeps them, else the closure is swept.
 func confine(ctx context.Context, u Universe, scope Scope) (*confinement, error) {
@@ -151,18 +137,13 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	}
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
-	var narrow *confinement
 	if len(sel.Path) == 0 {
 		// No path is the frontier's outward closure (`R-QSTEPS`): one unbounded step
 		// inward from the claim `R-QANCHOR` anchors, or from the origin when it names
-		// none, the start itself included. An anchored read starts off the origin, so
-		// the narrowing a Head states (`R-QHEAD`) is applied to what it collects.
+		// none, the start itself included. An anchor lies inside the closure a Head
+		// fixes (`R-QANCHOR`), so its own closure is already within that narrowing.
 		if sel.Claim == nil {
 			sel.Claim = origin
-		} else if sel.Head != nil {
-			if narrow, err = confine(ctx, u, Scope{Head: sel.Head}); err != nil {
-				return nil, err
-			}
 		}
 		sel.Path = []PathStep{{Min: Hops(0)}}
 		needPaths = false
@@ -182,7 +163,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	}
 	// Shaping what the traversal reached runs under outer: the budget bounds the
 	// read, and the answer it produced still has to be returned.
-	return finishReached(outer, u, q, narrow.keep(reached), routes, bounded, rc, createdReport)
+	return finishReached(outer, u, q, reached, routes, bounded, rc, createdReport)
 }
 
 // finishReached is the reference post-traversal pipeline (Where, sort, limit, shape)
