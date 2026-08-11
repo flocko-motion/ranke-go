@@ -132,11 +132,11 @@ func TestDiffOmitEffectDoesNotInheritDownAChain(t *testing.T) {
 	require.Equal(t, "from mid", v)
 }
 
-// TestDiffOmitListIsItselfAnInheritedField records what the code does with the omit
-// list as a VALUE, which is the one place the rule and the code do not line up. See
-// the note in the PR: the list inherits like any ordinary field, so a claim stating
-// no omit of its own still reports its predecessor's. Its effect does not inherit
-// (above), which is the half that governs what a read returns.
+// TestDiffOmitListIsItselfAnInheritedField is V-DIFF's "inherited as data" half, and
+// the surprising one: a materialised claim reports an omit list it never stated. So
+// reading fields_diff_omit off a materialised claim says nothing about what was
+// dropped there — that is the predecessor's list, and its effect stayed behind
+// (TestDiffOmitEffectDoesNotInheritDownAChain).
 func TestDiffOmitListIsItselfAnInheritedField(t *testing.T) {
 	ctr := contributor(t)
 	base := noteWith(t, ctr, nil, "base", map[string]string{"x": "from base"})
