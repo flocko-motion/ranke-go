@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -289,10 +289,23 @@ docs-clean:
 lint:
 	brokkr lint
 
-# Quick quality gate: build the binaries, check formatting, and run the lint
-# gate — the fast "does it compile, is it gofmt-clean, does it pass lint"
-# without vet or the full test suite (-> check).
-verify: build fmt-check lint
+# Rule-citation gate: every `V-…`/`R-…` id a comment cites is one the spec
+# declares, and every declared rule is either cited or listed in
+# scripts/rule-citations.allow with a reason. It reads $(PAPERS_DIR), so it says
+# nothing about whether a citation is TRUE — only that the ids exist and are
+# accounted for.
+rule-citations:
+	@./scripts/rule-citations.sh
+
+# Quick quality gate: build the binaries, check formatting, run the lint gate,
+# and check rule citations — the fast "does it compile, is it gofmt-clean, does
+# it pass lint" without vet or the full test suite (-> check).
+#
+# Needs the spec: rule-citations reads $(PAPERS_DIR), which is gitignored, so on
+# a fresh clone `make verify` fails until `make docs` has fetched the papers. A
+# gate that cannot see the spec cannot check it, and a skip would turn green
+# exactly where it is blind.
+verify: build fmt-check lint rule-citations
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance

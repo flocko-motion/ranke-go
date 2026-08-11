@@ -127,7 +127,14 @@ cross-universe copy to `adapter.DefaultCopyClaims` / `DefaultCopyContents`.
 make            # run the tests
 make build      # verify the library compiles
 make test-verbose
+make docs       # fetch the spec and papers into docs/papers/ (gitignored)
+make verify     # build, gofmt, lint, rule citations — needs `make docs` first
 ```
+
+`make verify` checks the rule ids in comments against the spec's own
+declarations, so it reads `docs/papers/`. That directory is fetched rather than
+committed, and a gate that cannot see the spec fails rather than passing: run
+`make docs` once on a fresh clone.
 
 The shared black-box suite in `adapter/adaptertest` runs against any
 `Universe`; `adapter/fs` and `adapter/mem` each wrap it, and `fs` adds
