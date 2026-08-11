@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/full test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -160,10 +160,32 @@ test:
 #
 # WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
 # which `make clean` owns and .gitignore covers.
-test/full:
+# Guarded because it is minutes, CI runs it on every push, and it was being reached
+# for during ordinary work where `make test` was the answer. CI passes the guard by
+# being CI; a person passes it by saying so.
+test/full: full-intended
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_PERF_SIZE=$(FULL_PERF_SIZE) RANKE_SCALE=1 \
 		$(GOTEST) -timeout 30m ./...
 	@$(MAKE) verify-scenarios verify-docs
+
+# full-intended stops a slow run nobody meant to start. GITHUB_ACTIONS and CI are
+# set by a runner; RANKE_FULL is a person saying they mean it.
+full-intended:
+	@if [ -z "$$GITHUB_ACTIONS$$CI$$RANKE_FULL" ]; then \
+		echo ""; \
+		echo "  make test/full takes MINUTES: every backend row, the benchmark, the"; \
+		echo "  10k-claim scale set, the scenario bundles and their docs."; \
+		echo ""; \
+		echo "  During regular work you want:   make test      (seconds)"; \
+		echo "  CI runs test/full on every push, so the slow run happens anyway."; \
+		echo ""; \
+		echo "  Run it yourself ONLY when you touched what the fast gate leaves out —"; \
+		echo "  a service-backed row, the benchmark, the scale set, a scenario bundle:"; \
+		echo ""; \
+		echo "      RANKE_FULL=1 make test/full"; \
+		echo ""; \
+		exit 1; \
+	fi
 
 test-verbose:
 	$(GOTEST) -v ./tests/...
@@ -357,5 +379,6 @@ rule-citations:
 verify: build fmt-check lint rule-citations verify-scenarios
 
 # One-shot "is everything green", kept as the name people reach for: the static
-# gates, vet, and the full suite against live services.
+# gates, vet, and the full suite against live services. It therefore costs what
+# test/full costs and carries the same guard — release-time, not while working.
 check: verify vet test/full

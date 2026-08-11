@@ -25,15 +25,22 @@ routinely the shorter list.
 The entry point for building and testing. `grep -E '^[a-z].*:' Makefile` lists
 the targets; each carries a comment saying what it is for.
 
+**Run `make test` while you work.** It is the one to reach for every time, and
+CI runs `test/full` on what you push, so the thorough run happens without you
+spending the minutes on it.
+
 - `make test` — the fast gate: one pass over `./...`, the rows that need no
   service (`RANKE_ROWS=mem,fs,sqlite`), no benchmark and no 10k-claim scale set.
   Seconds, and the cache works.
 - `make test/full` — everything: every row required, the benchmark, the scale
-  set, the scenarios and their docs. The target CI runs.
+  set, the scenarios and their docs. Minutes, and CI runs it on every push, so
+  run it when you have touched what the fast gate leaves out — a service-backed
+  row, the benchmark, the scale set, a scenario bundle — and not otherwise.
 - `make test/matrix` — the matrix alone, verbose, over every row. A row it asks
   for and cannot open FAILS; narrow the set with `RANKE_ROWS=mem,fs,sqlite` when
   the services are not up.
-- `make check` — the static gates, vet, and `test/full` in one.
+- `make check` — the static gates, vet, and `test/full` in one, so it costs what
+  `test/full` costs. Release-time, not while working.
 - Every target runs through `$(GOTEST)`, so one override reaches all of them
   (`make test/integration GOTEST="go test -count=1"` to skip the cache). Packages
   run in parallel — `internal/exclusive` serialises the shared services — and
