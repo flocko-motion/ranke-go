@@ -61,7 +61,9 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, conf 
 		stepStart := reportStart(rc)
 		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, conf, needPaths, rc)
 		if err != nil {
-			return nil, nil, err
+			// What the walk reached comes back with the error, so a caller whose time
+			// budget ran out can keep it as the bounded answer (`R-QLIMIT`).
+			return reached, routes, err
 		}
 		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Max, "reached": len(reached)})
 		frontier = reached
@@ -177,7 +179,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 
 	for hop := 0; len(level) > 0; hop++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return out, err // partial, so a bounded read keeps what it reached
 		}
 		if step.Max > 0 && hop >= step.Max {
 			break

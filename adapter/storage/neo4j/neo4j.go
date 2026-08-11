@@ -16,6 +16,7 @@ import (
 	"path"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -83,13 +84,26 @@ var (
 
 // query runs a Cypher statement in an auto-commit transaction, scoped to the
 // configured database when set.
-func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[string]any) (*neo4jdriver.EagerResult, error) {
+func (u *neo4jUniverse) query(ctx context.Context, cypher string, params map[string]any, opts ...neo4jdriver.ExecuteQueryConfigurationOption) (*neo4jdriver.EagerResult, error) {
 	u.queries.Add(1)
+	cfg := make([]neo4jdriver.ExecuteQueryConfigurationOption, 0, len(opts)+1)
+	cfg = append(cfg, opts...)
 	if u.database != "" {
-		return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params,
-			neo4jdriver.EagerResultTransformer, neo4jdriver.ExecuteQueryWithDatabase(u.database))
+		cfg = append(cfg, neo4jdriver.ExecuteQueryWithDatabase(u.database))
 	}
-	return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params, neo4jdriver.EagerResultTransformer)
+	return neo4jdriver.ExecuteQuery(ctx, u.driver, cypher, params, neo4jdriver.EagerResultTransformer, cfg...)
+}
+
+// txTimeout carries limit.time to the server as a transaction timeout, so the bound
+// travels with the statement instead of being raced client-side (`R-QLIMIT`). Zero
+// is unbounded, and adds no configurer at all.
+func txTimeout(d time.Duration) []neo4jdriver.ExecuteQueryConfigurationOption {
+	if d <= 0 {
+		return nil
+	}
+	return []neo4jdriver.ExecuteQueryConfigurationOption{
+		neo4jdriver.ExecuteQueryWithTransactionConfig(neo4jdriver.WithTxTimeout(d)),
+	}
 }
 
 // cypherPutClaims projects claims into neo4j's native typed graph: MERGE by id so

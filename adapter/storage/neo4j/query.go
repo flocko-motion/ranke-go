@@ -9,6 +9,7 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,8 +30,15 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 	rep.log("cypher", "lower", ranke.ReportDebug, 0, cypher)
 
 	execStart := time.Now()
-	res, err := u.query(ctx, cypher, params)
+	res, err := u.query(ctx, cypher, params, txTimeout(q.Limit.Time)...)
 	if err != nil {
+		// The server terminating the transaction is limit.time being spent, which
+		// bounds the answer rather than failing it (`R-QLIMIT`). It leaves no partial
+		// rows, so the bounded answer here is the empty one, reported as cut short.
+		if boundedByTime(err, q.Limit.Time, ctx.Err()) {
+			rep.log("cypher", "limit", ranke.ReportInfo, time.Since(execStart), q.Limit.Time.String())
+			return &cypherStream{report: rep.finalize(0, true)}, nil
+		}
 		return nil, fmt.Errorf("%w: execute: %w", errQuery, err)
 	}
 	rep.log("cypher", "execute", ranke.ReportInfo, time.Since(execStart), "")
@@ -74,8 +82,16 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 			})
 		}
 	}
+	// The statement asked for one row past the cap, so an extra row here is the
+	// evidence that more existed — the same thing the reference learns by holding
+	// the whole set and cutting it (`R-QLIMIT`).
+	truncated := false
+	if n := q.Limit.Results; n > 0 && len(results) > n {
+		results, truncated = results[:n], true
+		rep.log("neo4j", "limit", ranke.ReportInfo, 0, strconv.Itoa(n)+" results, truncated")
+	}
 	rep.log("neo4j", "reconstruct", ranke.ReportInfo, time.Since(recStart), strconv.Itoa(len(results))+" results")
-	return &cypherStream{results: results, report: rep.finalize(len(results))}, nil
+	return &cypherStream{results: results, report: rep.finalize(len(results), truncated)}, nil
 }
 
 // reachedPaths assembles one result per record: a claim per route element, last is
@@ -545,7 +561,9 @@ func orderLimitClause(keys []ranke.OrderKey, limit int, node string) string {
 	// Natural order (created_at, id) — the tiebreak, always last.
 	b.WriteString(node + ".created_at, " + node + ".id")
 	if limit > 0 {
-		b.WriteString("\nLIMIT " + strconv.Itoa(limit))
+		// One past the cap: the extra row is how the caller learns more existed, and
+		// it is trimmed before the results are returned.
+		b.WriteString("\nLIMIT " + strconv.Itoa(limit+1))
 	}
 	return b.String()
 }
@@ -620,49 +638,20 @@ func (s *cypherStream) Report() *ranke.QueryReport { return s.report }
 func (s *cypherStream) Err() error                 { return nil }
 func (s *cypherStream) Close() error               { return nil }
 
-// reportBuilder collects execution events above the requested level; a zero level
-// makes log/finalize no-ops.
-type reportBuilder struct {
-	level   ranke.ReportLevel
-	started time.Time
-	events  []ranke.QueryEvent
+// boundedByTime reports whether err is limit.time being spent rather than the read
+// failing: a budget was set, the caller's context is still live, and the server ended
+// the transaction on the budget the statement carried.
+func boundedByTime(err error, budget time.Duration, ctxErr error) bool {
+	return budget > 0 && ctxErr == nil && isTxTimeout(err)
 }
 
-func newReport(level ranke.ReportLevel, started time.Time) *reportBuilder {
-	return &reportBuilder{level: level, started: started}
-}
-
-func (r *reportBuilder) on() bool { return reportRank(r.level) > 0 }
-
-func (r *reportBuilder) log(engine, op string, level ranke.ReportLevel, dur time.Duration, detail string) {
-	if !r.on() || reportRank(level) > reportRank(r.level) {
-		return
+// isTxTimeout reports whether err is the server ending the transaction on its
+// timeout, which is how limit.time arrives back here.
+func isTxTimeout(err error) bool {
+	var nerr *neo4jdriver.Neo4jError
+	if errors.As(err, &nerr) {
+		return strings.Contains(nerr.Code, "TransactionTimedOut") ||
+			strings.Contains(nerr.Code, "Terminated")
 	}
-	r.events = append(r.events, ranke.QueryEvent{
-		At: time.Since(r.started), Engine: engine, Op: op, Level: level, Duration: dur, Detail: detail,
-	})
-}
-
-func (r *reportBuilder) finalize(results int) *ranke.QueryReport {
-	if !r.on() {
-		return nil
-	}
-	return &ranke.QueryReport{StartedAt: r.started, Elapsed: time.Since(r.started), Results: results, Events: r.events}
-}
-
-func reportRank(l ranke.ReportLevel) int {
-	switch l {
-	case ranke.ReportError:
-		return 1
-	case ranke.ReportWarn:
-		return 2
-	case ranke.ReportInfo:
-		return 3
-	case ranke.ReportDebug:
-		return 4
-	case ranke.ReportTrace:
-		return 5
-	default:
-		return 0
-	}
+	return false
 }
