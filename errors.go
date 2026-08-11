@@ -107,7 +107,6 @@ var (
 	ErrQueryNoHead           = errors.New("ranke.Query: Select.Head is required under $universe (it has no natural head to scope by)")
 	ErrQueryNoScope          = errors.New("ranke.Query: Select.Branch is required (scope is mandatory — use BranchUniverse for an unconfined read)")
 	ErrQueryScanShape        = errors.New("ranke.Query: a scan (no Select.Path) reaches claims by no stated route, so Output.Shape must be single")
-	ErrQueryScanClaim        = errors.New("ranke.Query: a scan (no Select.Path) has no traversal to start, so Select.Claim is meaningless")
 	ErrQueryEncoding         = errors.New("ranke.Query: unknown Output.Encoding (native | json | cbor)")
 	errDecodeQuery           = errors.New("ranke.DecodeQuery")
 	errEncodeQuery           = errors.New("ranke.EncodeQuery")

@@ -33,11 +33,12 @@ const (
 )
 
 // Select is a generator: Branch is the scope, Head narrows it to one claim's
-// closure, Path is the traversal and Claim anchors it; no Path scans the scope.
+// closure (`R-QHEAD`), Claim anchors the frontier (`R-QANCHOR`) and Path is the
+// traversal; no Path reads the frontier's outward closure (`R-QSTEPS`).
 type Select struct {
 	Branch string // scope: BranchUniverse, BranchArchive, or a branch name
 	Head   Id     // narrows the scope to this claim's closure
-	Claim  Id     // anchors a traversal; nil leaves the pattern unanchored
+	Claim  Id     // anchors the frontier; nil leaves the pattern unanchored
 	Path   []PathStep
 }
 

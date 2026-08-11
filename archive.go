@@ -143,19 +143,12 @@ func (a *archive) resolveScope(ctx context.Context, q Query) (Scope, error) {
 }
 
 // validateSelect holds a read to what only a read can decide: a scan reaches claims
-// by no stated route. The rest of a query's shape is ValidateQuery's, which Query
-// calls first, so neither states a rule twice.
+// by no stated route. Select.Claim is meaningful without a path — it anchors the
+// frontier the closure is taken from (`R-QANCHOR`). The rest of a query's shape is
+// ValidateQuery's, which Query calls first, so neither states a rule twice.
 func validateSelect(q Query) error {
-	sel := q.Select
-	if len(sel.Path) > 0 {
-		return nil
-	}
-	// A scan.
-	if q.Output.Shape == ShapePath {
+	if len(q.Select.Path) == 0 && q.Output.Shape == ShapePath {
 		return ErrQueryScanShape
-	}
-	if sel.Claim != nil {
-		return ErrQueryScanClaim
 	}
 	return nil
 }

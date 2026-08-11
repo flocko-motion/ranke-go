@@ -47,6 +47,51 @@ func TestToyScopeArchive(t *testing.T) {
 	})
 }
 
+// TestToyAnchoredScanIsTheClaimsClosure: with no path, Select.Claim anchors the
+// frontier (`R-QANCHOR`) and the read is that claim's outward closure (`R-QSTEPS`) —
+// not the whole scope. Anchored at the diff base, the delta overlaying it is outside.
+func TestToyAnchoredScanIsTheClaimsClosure(t *testing.T) {
+	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		delta := m.DiffChainHead
+		base := diffPredecessor(t, u, delta)
+
+		anchored := reached(t, u, m.Head, ranke.Query{
+			Select: ranke.Select{Branch: rql.Branch, Claim: base},
+		})
+		require.Contains(t, anchored, base.String(), "the anchor is in its own closure")
+		require.NotContains(t, anchored, delta.String(), "what overlays the anchor is not")
+		require.NotContains(t, anchored, m.Head.String(), "nor is the archive head above it")
+	})
+}
+
+// TestToyUnanchoredScanIsTheWholeScope is the control: naming no claim leaves the
+// frontier the whole closure, so the same scan still returns the scope entire.
+func TestToyUnanchoredScanIsTheWholeScope(t *testing.T) {
+	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		delta := m.DiffChainHead
+		base := diffPredecessor(t, u, delta)
+
+		scope := reached(t, u, m.Head, ranke.Query{Select: ranke.Select{Branch: rql.Branch}})
+		require.Contains(t, scope, delta.String(), "the branch's own head claim")
+		require.Contains(t, scope, base.String(), "and everything it reaches")
+	})
+}
+
+// TestToyAnchoredScanStillIntersectsHead: a Head narrows a read wherever it starts
+// (`R-QHEAD`), so an anchor reaching past it is cut back to the intersection.
+func TestToyAnchoredScanStillIntersectsHead(t *testing.T) {
+	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		delta := m.DiffChainHead
+		base := diffPredecessor(t, u, delta)
+
+		both := reached(t, u, m.Head, ranke.Query{
+			Select: ranke.Select{Branch: rql.Branch, Head: base, Claim: delta},
+		})
+		require.Contains(t, both, base.String(), "what both closures hold")
+		require.NotContains(t, both, delta.String(), "the anchor itself lies outside the Head's")
+	})
+}
+
 // TestToyUniverseNeedsRoot: $universe scopes to a closure, so a read there must pin
 // Select.Head.
 func TestToyUniverseNeedsRoot(t *testing.T) {

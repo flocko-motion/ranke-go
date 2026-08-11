@@ -2,9 +2,9 @@
 // type:    adapter
 // job:     native RQL execution — lower the whole query to one Cypher statement, run it,
 // reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure
-// when it names none; branch confinement is the _b_<branch> tag (<= Height,
-// point-in-time), not a walk; a cbor read yields ids only
+// limits:  every read starts from Select.Claim, or from anywhere in the closure when it names
+// none — a scan without a path, a walk with one; branch confinement is the
+// _b_<branch> tag (<= Height, point-in-time), not a walk; a cbor read yields ids only
 package neo4j
 
 import (
@@ -188,24 +188,37 @@ func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string
 	return "MATCH (n0)"
 }
 
-// lowerCypher routes a query to its Cypher: a Path-less read is the scope's claim
-// set (a scan), anything else follows the Path's steps.
+// lowerCypher routes a query to its Cypher: a Path-less read is the frontier's
+// closure (a scan), anything else follows the Path's steps.
 func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
 	if len(q.Select.Path) == 0 {
-		return scanCypher(q, scope) // no traversal: the scope's claim set
+		return scanCypher(q, scope) // no traversal: the frontier's outward closure
 	}
 	return traversalCypher(q, scope, needPaths)
 }
 
-// scanCypher lowers a Path-less read: the scope's claim set. Branch membership is
-// the _b_<branch> tag (<= Height gives point-in-time); Head narrows to its reach.
+// scanCypher lowers a Path-less read: the outward closure of the frontier
+// (`R-QSTEPS`) — the claim `R-QANCHOR` anchors, else every claim the scope holds.
+// Branch membership is the _b_<branch> tag (<= Height gives point-in-time); a Head
+// narrows to its reach, and an anchored read is the intersection of the two.
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
-	anchor := closureAnchor(q, scope)
 	params := map[string]any{}
-	match := "MATCH (n)"
-	if anchor != nil {
+	var reach []string // the ids whose outward closure bounds the read
+	if q.Select.Claim != nil {
+		params["root"] = q.Select.Claim.String()
+		reach = append(reach, "$root")
+	}
+	if anchor := closureAnchor(q, scope); anchor != nil {
 		params["head"] = anchor.String()
-		match = "MATCH (h {id: $head})-[*0..]->(n)\nWITH DISTINCT n"
+		reach = append(reach, "$head")
+	}
+	match := "MATCH (n)"
+	if len(reach) > 0 {
+		clauses := make([]string, len(reach))
+		for i, p := range reach {
+			clauses[i] = "MATCH (h" + strconv.Itoa(i) + " {id: " + p + "})-[*0..]->(n)\nWITH DISTINCT n"
+		}
+		match = strings.Join(clauses, "\n")
 	}
 	var conds []string
 	if tagBounded(scope) {
