@@ -47,11 +47,11 @@ func TestToyScopeArchive(t *testing.T) {
 	})
 }
 
-// TestToyAnchoredScanIsTheClaimsClosure: with no path, Select.Claim anchors the
-// frontier (`R-QANCHOR`) and the read is that claim's outward closure (`R-QSTEPS`) —
-// not the whole scope. Anchored at the diff base, the delta overlaying it is outside.
+// TestToyAnchoredScanIsTheClaimsClosure: with no path, Select.Claim anchors the frontier
+// (`R-QANCHOR`) and the read is that claim's outward closure (`R-QSTEPS`). Anchored at
+// the diff base, the delta overlaying it sits above and stays out.
 func TestToyAnchoredScanIsTheClaimsClosure(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 
@@ -67,7 +67,7 @@ func TestToyAnchoredScanIsTheClaimsClosure(t *testing.T) {
 // TestToyUnanchoredScanIsTheWholeScope is the control: naming no claim leaves the
 // frontier the whole closure, so the same scan still returns the scope entire.
 func TestToyUnanchoredScanIsTheWholeScope(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 
@@ -77,11 +77,10 @@ func TestToyUnanchoredScanIsTheWholeScope(t *testing.T) {
 	})
 }
 
-// TestToyAnchoredScanUnderAHeadIsTheIntersection: an anchor lies inside the closure
-// a Head fixes (`R-QANCHOR`), so the two together read the anchor's closure — the
-// Head narrows the scope and never widens what the anchor reaches.
+// TestToyAnchoredScanUnderAHeadIsTheIntersection: an anchor lies inside the closure a
+// Head fixes (`R-QANCHOR`), so together they read the anchor's closure. A Head narrows.
 func TestToyAnchoredScanUnderAHeadIsTheIntersection(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 
@@ -90,6 +89,24 @@ func TestToyAnchoredScanUnderAHeadIsTheIntersection(t *testing.T) {
 		})
 		require.Contains(t, both, base.String(), "the anchor, inside the Head's closure")
 		require.NotContains(t, both, delta.String(), "and not what the Head reaches past it")
+	})
+}
+
+// TestToyAnchoredScanOutsideTheHeadMatchesTheWalk pins the shape where the engines can
+// part: `R-QANCHOR`'s MUST goes unenforced, so an anchor outside the Head's closure still
+// answers — its own closure, and the same claims its pathed twin returns on every row.
+func TestToyAnchoredScanOutsideTheHeadMatchesTheWalk(t *testing.T) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		delta := m.DiffChainHead
+		base := diffPredecessor(t, u, delta) // delta overlays base, so it sits outside closure(base)
+
+		sel := ranke.Select{Branch: rql.Branch, Head: base, Claim: delta}
+		scan := reached(t, u, m.Head, ranke.Query{Select: sel})
+		require.Contains(t, scan, delta.String(), "the anchor answers, whatever the Head reaches")
+
+		sel.Path = []ranke.PathStep{{Min: ranke.Hops(0)}}
+		require.Equal(t, scan, reached(t, u, m.Head, ranke.Query{Select: sel}),
+			"a scan is the pathed read's zero-step form, on every backend")
 	})
 }
 

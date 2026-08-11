@@ -112,6 +112,16 @@ func tagConfinement(ctx context.Context, u Universe, scope Scope) (*confinement,
 	return &confinement{root: scope.Head, tagKey: key, height: scope.Height}, nil
 }
 
+// frontier is the claim a read starts from: the anchor `R-QANCHOR` names, else the
+// origin. An anchor supersedes the Head, which matches `R-QHEAD`'s intersection while
+// `R-QANCHOR`'s MUST holds — that the anchor lies inside the closure, unchecked here.
+func frontier(sel Select, origin Id) Id {
+	if sel.Claim != nil {
+		return sel.Claim
+	}
+	return origin
+}
+
 // DefaultQuery is the reference implementation of Universe.Query, reading only through
 // the public Universe API: walk the closure, materialise, filter, order, limit, shape.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
@@ -138,14 +148,8 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
 	if len(sel.Path) == 0 {
-		// No path is the frontier's outward closure (`R-QSTEPS`): one unbounded step
-		// inward from the claim `R-QANCHOR` anchors, or from the origin when it names
-		// none, the start itself included. An anchor lies inside the closure a Head
-		// fixes (`R-QANCHOR`), so its own closure is already within that narrowing.
-		if sel.Claim == nil {
-			sel.Claim = origin
-		}
-		sel.Path = []PathStep{{Min: Hops(0)}}
+		sel.Claim = frontier(sel, origin)
+		sel.Path = []PathStep{{Min: Hops(0)}} // the frontier's outward closure (`R-QSTEPS`)
 		needPaths = false
 	}
 	reached, routes, err := queryTraverse(ctx, u, sel, origin, conf, needPaths, rc)

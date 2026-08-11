@@ -174,18 +174,31 @@ func closureAnchor(q ranke.Query, scope ranke.Scope) ranke.Id {
 	return nil
 }
 
-// startClause binds n0, where a traversal's first segment starts: the claim
-// Select.Claim names, else any claim the closure holds.
-func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string {
+// frontierRoot binds the claim a read starts from — the anchor `R-QANCHOR` names, else
+// the closure anchor — returning its parameter name, "" when neither bounds the read.
+func frontierRoot(q ranke.Query, scope ranke.Scope, params map[string]any) string {
 	if q.Select.Claim != nil {
 		params["root"] = q.Select.Claim.String()
-		return "MATCH (n0 {id: $root})"
+		return "$root"
 	}
 	if anchor := closureAnchor(q, scope); anchor != nil {
 		params["head"] = anchor.String()
-		return "MATCH (h {id: $head})-[*0..]->(n0)"
+		return "$head"
 	}
-	return "MATCH (n0)"
+	return ""
+}
+
+// startClause binds n0, where a traversal's first segment starts: the claim
+// Select.Claim names, else any claim the closure holds.
+func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string {
+	root := frontierRoot(q, scope, params)
+	switch {
+	case root == "":
+		return "MATCH (n0)"
+	case q.Select.Claim != nil:
+		return "MATCH (n0 {id: " + root + "})" // the anchor itself is the frontier
+	}
+	return "MATCH (h {id: " + root + "})-[*0..]->(n0)"
 }
 
 // lowerCypher routes a query to its Cypher: a Path-less read is the frontier's
@@ -197,26 +210,13 @@ func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[
 	return traversalCypher(q, scope, needPaths)
 }
 
-// scanCypher lowers a Path-less read: the frontier's outward closure (`R-QSTEPS`) —
-// the claim `R-QANCHOR` anchors, else the scope, intersected with any Head (`R-QHEAD`).
+// scanCypher lowers a Path-less read: the frontier's outward closure (`R-QSTEPS`),
+// frontierRoot fixing the start so a scan and a walk begin alike (ranke.frontier).
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
 	params := map[string]any{}
-	var reach []string // the ids whose outward closure bounds the read
-	if q.Select.Claim != nil {
-		params["root"] = q.Select.Claim.String()
-		reach = append(reach, "$root")
-	}
-	if anchor := closureAnchor(q, scope); anchor != nil {
-		params["head"] = anchor.String()
-		reach = append(reach, "$head")
-	}
 	match := "MATCH (n)"
-	if len(reach) > 0 {
-		clauses := make([]string, len(reach))
-		for i, p := range reach {
-			clauses[i] = "MATCH (h" + strconv.Itoa(i) + " {id: " + p + "})-[*0..]->(n)\nWITH DISTINCT n"
-		}
-		match = strings.Join(clauses, "\n")
+	if root := frontierRoot(q, scope, params); root != "" {
+		match = "MATCH (h {id: " + root + "})-[*0..]->(n)\nWITH DISTINCT n"
 	}
 	var conds []string
 	if tagBounded(scope) {
