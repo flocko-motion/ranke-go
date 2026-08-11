@@ -32,10 +32,10 @@ import (
 // with no podman); a caller reports the row as skipped.
 var ErrUnavailable = errors.New("backend unavailable")
 
-// forceNativeServices routes the pod-based services (neo4j, redis) to localhost.
+// forceNativeServices routes the pod-based services (neo4j, redis, s3) to localhost.
 var forceNativeServices bool
 
-// UseNativeServices routes neo4j and redis to host-native instances on localhost
+// UseNativeServices routes neo4j, redis and s3 to host-native instances on localhost
 // rather than podman pods — the harness's --native mode. Call before opening a backend.
 func UseNativeServices(on bool) { forceNativeServices = on }
 
@@ -127,7 +127,7 @@ func openSqlite() (ranke.Universe, func(), error) {
 }
 
 func openS3() (ranke.Universe, func(), error) {
-	client, bucket, cleanup, err := minioPod()
+	client, bucket, cleanup, err := s3Conn()
 	if err != nil {
 		return nil, nil, err
 	}

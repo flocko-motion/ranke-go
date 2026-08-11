@@ -25,22 +25,25 @@ routinely the shorter list.
 The entry point for building and testing. `grep -E '^[a-z].*:' Makefile` lists
 the targets; each carries a comment saying what it is for.
 
-- `make test` — the three layers in order: `test/core` (datatype, no
-  infrastructure), `test/integration` (`./tests/...`), `test/matrix`
-  (cross-backend agreement).
-- `make test/matrix` — the matrix alone, verbose. Rows whose service is down
-  skip themselves, so it is green on a bare checkout and grows teeth as
-  services come up.
-- `make check` — build, vet, lint, and the full suite in one.
+- `make test` — the fast gate: one pass over `./...`, the rows that need no
+  service (`RANKE_ROWS=mem,fs,sqlite`), no benchmark and no 10k-claim scale set.
+  Seconds, and the cache works.
+- `make test/full` — everything: every row REQUIRED, so a row it asks for and
+  cannot open fails; plus the benchmark, the scale set, and the scenarios with
+  their docs. The target CI runs.
+- `make test/matrix` — the matrix alone, verbose, over every row. Narrow the set
+  with `RANKE_ROWS=mem,fs,sqlite` when the services are not up.
+- `make check` — the static gates, vet, and `test/full` in one.
 - Every target runs through `$(GOTEST)`, so one override reaches all of them
   (`make test/integration GOTEST="go test -count=1"` to skip the cache). Packages
-  run in parallel and `-p 1` is not needed (see Tests) — adding it back costs
-  wall-clock and buys nothing.
+  run in parallel — `internal/exclusive` serialises the shared services — and
+  `-p 1` is not needed (see Tests): adding it back costs wall-clock and buys
+  nothing. Do not add a bare `go test` to this file; override the whole thing.
 
 ## services
 
-Infrastructure for the rows that need it. Both scripts have a **`native`** mode
-that compiles and runs in-container — no podman, no root — which is the mode
+Infrastructure for the rows that need it. All three scripts have a **`native`**
+mode that runs the service in-container — no podman, no root — which is the mode
 that works here:
 
 - `services/neo4j.sh native up` — adds the `neo4j/mem` row. Auto-detected once
@@ -48,12 +51,16 @@ that works here:
 - `services/redis.sh native up` — does NOT auto-detect. The row stays skipped
   until you also pass `RANKE_REDIS_ADDR=127.0.0.1:6379
   RANKE_REDIS_PASS=rankeperfpass`.
+- `services/s3.sh native up` — adds the `s3` row, and with the other two the
+  `neo4j/redis/s3` stack. Also needs its env: `RANKE_S3_ENDPOINT=http://127.0.0.1:9000
+  RANKE_S3_KEY=minioadmin RANKE_S3_SECRET=minioadmin`. Each open creates its own
+  bucket, so concurrent runs against one store stay off each other's objects.
 - `services/neo4j.sh query '<cypher>'` — ad-hoc Cypher against the running
   instance. The way to isolate a lowering bug: run the generated statement
   directly and bisect it, rather than inferring from a Go-level error.
-- There is no s3 service script. `minioPod()` needs podman, so the `s3` and
-  `neo4j/redis/s3` rows cannot run without it — expect them to skip, and do not
-  go looking for a way around it.
+- The pod mode of each script, and the pods `minioPod()`/`redisPod()`/`neo4jPod()`
+  spawn, need podman — absent here. The env vars above are the way in without it,
+  and CI uses the same ones against its service containers.
 
 ## brokkr
 
