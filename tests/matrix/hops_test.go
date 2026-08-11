@@ -8,6 +8,7 @@ import (
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -17,7 +18,7 @@ import (
 // TestHopsMinDefaultWalksAnEdge: with Min unset a step walks at least one edge, so
 // only the entities the relation reaches come back.
 func TestHopsMinDefaultWalksAnEdge(t *testing.T) {
-	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyUnwiredEntity(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: m.Relations[0],
 				Path: []ranke.PathStep{{Edges: []string{"relation/*"}, Nodes: []string{"entity/person"}}}},
@@ -30,7 +31,7 @@ func TestHopsMinDefaultWalksAnEdge(t *testing.T) {
 // TestHopsMinZeroAdmitsTheStart: Hops(0) lets a step match its own start, so a
 // walk from an entity returns that entity.
 func TestHopsMinZeroAdmitsTheStart(t *testing.T) {
-	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyUnwiredEntity(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		start := unwired(m)
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: start,
@@ -45,7 +46,7 @@ func TestHopsMinZeroAdmitsTheStart(t *testing.T) {
 // TestHopsMinExcludesTheStart: the same walk with the default floor returns nothing,
 // since the start is the only entity in reach and one hop is required.
 func TestHopsMinExcludesTheStart(t *testing.T) {
-	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyUnwiredEntity(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: unwired(m),
 				Path: []ranke.PathStep{{Edges: []string{"relation/*"}, Nodes: []string{"entity/person"}}}},
@@ -58,7 +59,7 @@ func TestHopsMinExcludesTheStart(t *testing.T) {
 // refuses the query. An empty answer would report the graph holding nothing, which is a
 // different claim about the archive.
 func TestHopsMinAboveMax(t *testing.T) {
-	eachToyBackend(t, generator.ToyUnwiredEntity(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyUnwiredEntity(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		_, err := rql.Run(context.Background(), u, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: m.Relations[0],
 				Path: []ranke.PathStep{{Min: ranke.Hops(3), Max: 1, Edges: []string{"relation/*"}}}},
@@ -77,7 +78,7 @@ func unwired(m *generator.Manifest) ranke.Id {
 // reaches the relation that wires it at one hop and the entity on the far side at
 // two. Single-branch, so the scope is not part of the question.
 func TestConnectionsTwoHops(t *testing.T) {
-	eachToyBackend(t, generator.ToyRelation(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyRelation(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: m.Entities[0],
 				Path: []ranke.PathStep{{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Max: 2}}},

@@ -13,7 +13,9 @@ package matrix
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,9 +35,8 @@ type Config struct {
 	// Reference is the engine every row is compared against; the zero value is
 	// backends.Reference(), the in-memory store on the reference executor.
 	Reference *backends.Backend
-	// Rows are the backends under test; nil means the set the run asks for
-	// (backends.Requested). A row whose name matches the reference is skipped
-	// (nothing is compared to itself).
+	// Rows are the backends under test; nil means the set the run asks for. The row
+	// named like the reference drops out — nothing is compared to itself.
 	Rows []backends.Backend
 	// Size is the generator size knob; 0 means defaultSize.
 	Size int
@@ -62,15 +63,12 @@ func Run(t *testing.T, cfg Config) {
 	if size == 0 {
 		size = defaultSize
 	}
-	spec := generator.SpecForSize(1, size)
+	recipe := FromSpec(generator.SpecForSize(1, size))
 
 	// The reference is the baseline every row is judged against, so its own
-	// failure to open is fatal rather than a skip.
-	refU, refCleanup, err := ref.Open()
-	require.NoErrorf(t, err, "reference backend %q must be available", ref.Name)
-	defer refCleanup()
-
-	refM, refHead := build(t, ctx, refU, spec)
+	// failure to open is fatal.
+	refU, refM := shared(t, recipe, ref)
+	refHead := branchHead(t, ctx, refU, refM)
 	queries := corpus(refM, refHead, cfg.Only)
 	require.NotEmptyf(t, queries, "no corpus entry named %q", cfg.Only)
 
@@ -92,49 +90,147 @@ func Run(t *testing.T, cfg Config) {
 		}
 	})
 
-	compared := 0
+	// Nothing is compared to itself, so the reference drops out of the row set.
+	compared := make([]backends.Backend, 0, len(rows))
 	for _, row := range rows {
-		if row.Name == ref.Name {
-			continue
+		if row.Name != ref.Name {
+			compared = append(compared, row)
 		}
-		t.Run(row.Name, func(t *testing.T) {
-			u, cleanup, err := row.Open()
-			if errors.Is(err, backends.ErrUnavailable) {
-				t.Skipf("unavailable here: %v", err)
-			}
-			require.NoError(t, err)
-			defer cleanup()
-
-			m, head := build(t, ctx, u, spec)
-			// Content addressing makes generation reproducible: one spec yields the
-			// same ids everywhere, which is what makes answers comparable.
-			require.Equalf(t, refHead.String(), head.String(),
-				"branch head differs from the %s reference — the archives are not the same graph", ref.Name)
-
-			compared++
-			for _, nq := range queries {
-				t.Run(nq.Name, func(t *testing.T) {
-					got, err := rql.Run(ctx, u, nq.Q, m.Head)
-					require.NoError(t, err)
-					require.Equalf(t, refAnswers[nq.Name], got,
-						"%s disagrees with %s\n  rql: %s\n  %s returned %d results, %s returned %d",
-						row.Name, ref.Name, rql.Describe(nq.Q),
-						ref.Name, len(refAnswers[nq.Name]), row.Name, len(got))
-				})
-			}
-		})
 	}
+	eachRow(t, compared, recipe, func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		// Content addressing makes generation reproducible: one spec yields the
+		// same ids everywhere, which is what makes answers comparable.
+		require.Equalf(t, refHead.String(), branchHead(t, ctx, u, m).String(),
+			"branch head differs from the %s reference — the archives are not the same graph", ref.Name)
 
-	if compared == 0 {
-		t.Logf("no backend was available to compare against %s — the matrix proved nothing this run "+
-			"(start services: services/neo4j.sh native up)", ref.Name)
+		for _, nq := range queries {
+			t.Run(nq.Name, func(t *testing.T) {
+				got, err := rql.Run(ctx, u, nq.Q, m.Head)
+				require.NoError(t, err)
+				require.Equalf(t, refAnswers[nq.Name], got,
+					"%s disagrees with %s\n  rql: %s\n  %s returned %d results, %s returned %d",
+					t.Name(), ref.Name, rql.Describe(nq.Q),
+					ref.Name, len(refAnswers[nq.Name]), t.Name(), len(got))
+			})
+		}
+	})
+
+	if len(compared) == 0 {
+		t.Logf("the row set holds nothing to compare against %s — the matrix proved nothing this run "+
+			"(name rows with %s, and start their services: services/neo4j.sh native up)", ref.Name, backends.RowsEnv)
 	}
 }
 
-// Rows is the row set this run asks for (RANKE_ROWS, all of them when unset), shared
-// by every test in the package. A name list the Go layer cannot resolve fails the
-// test: a mistyped row would otherwise narrow the run silently, which is the shape of
-// a false green.
+// Recipe builds one archive into a universe. Key is its identity — one key, one
+// instance, shared by every test that asks, so those tests must only READ it.
+type Recipe[T any] struct {
+	Key   string
+	Build func(context.Context, ranke.Universe) (T, error)
+}
+
+// FromSpec is the recipe for a generator spec. The spec is the key: one spec yields one
+// archive, ids included, by the generator's contract.
+func FromSpec(spec generator.Spec) Recipe[*generator.Manifest] {
+	return Recipe[*generator.Manifest]{
+		Key: fmt.Sprintf("spec%+v", spec),
+		Build: func(ctx context.Context, u ranke.Universe) (*generator.Manifest, error) {
+			return generator.Generate(ctx, u, spec)
+		},
+	}
+}
+
+// Each runs check over every row this run asks for, against the archive r builds — the
+// package's one row iteration.
+func Each[T any](t *testing.T, r Recipe[T], check func(*testing.T, ranke.Universe, T)) {
+	t.Helper()
+	eachRow(t, Rows(t), r, check)
+}
+
+// eachRow is Each over an explicit row set — what Run needs, since it drops the
+// reference from the set it compares.
+func eachRow[T any](t *testing.T, rows []backends.Backend, r Recipe[T], check func(*testing.T, ranke.Universe, T)) {
+	t.Helper()
+	for _, row := range rows {
+		t.Run(row.Name, func(t *testing.T) {
+			u, built := shared(t, r, row)
+			check(t, u, built)
+		})
+	}
+}
+
+// fixture is one built archive: the open universe, its cleanup, and whatever the recipe
+// produced. It outlives the test that built it, which is the point.
+type fixture struct {
+	u       ranke.Universe
+	cleanup func()
+	built   any
+}
+
+type fixtureKey struct{ recipe, row string }
+
+var (
+	fixtureMu sync.Mutex
+	fixtures  = map[fixtureKey]*fixture{}
+	opens     atomic.Int64
+)
+
+// shared returns the row's universe with r's archive in it, built on first ask and
+// reused after. A row holding an exclusive service cannot be kept alive, so it is built
+// for this test alone. A requested row that cannot open FAILS: ErrUnavailable is an
+// error like any other, and the row set decides what runs.
+func shared[T any](t *testing.T, r Recipe[T], row backends.Backend) (ranke.Universe, T) {
+	t.Helper()
+	if row.Exclusive != "" {
+		u, cleanup := openRow(t, row)
+		t.Cleanup(cleanup)
+		built, err := r.Build(context.Background(), u)
+		require.NoErrorf(t, err, "row %q: building the archive", row.Name)
+		return u, built
+	}
+
+	fixtureMu.Lock()
+	defer fixtureMu.Unlock()
+	key := fixtureKey{recipe: r.Key, row: row.Name}
+	if f, ok := fixtures[key]; ok {
+		return f.u, f.built.(T)
+	}
+	u, cleanup := openRow(t, row)
+	built, err := r.Build(context.Background(), u)
+	if err != nil {
+		cleanup()
+		require.NoErrorf(t, err, "row %q: building the archive", row.Name)
+	}
+	fixtures[key] = &fixture{u: u, cleanup: cleanup, built: built}
+	return u, built
+}
+
+// openRow opens the row or fails the test, counting the open so a change that reopens
+// a row per test shows up as a number.
+func openRow(t *testing.T, row backends.Backend) (ranke.Universe, func()) {
+	t.Helper()
+	opens.Add(1)
+	u, cleanup, err := row.Open()
+	require.NoErrorf(t, err, "row %q was asked for and could not open", row.Name)
+	return u, cleanup
+}
+
+// Opens counts the backends opened for fixtures so far. A test asserts on it, so a
+// change that reopens a row per test shows up as a number rather than as minutes.
+func Opens() int { return int(opens.Load()) }
+
+// CloseFixtures releases every shared archive. TestMain calls it once the run is over:
+// the instances outlive the tests that built them, so no test can close them.
+func CloseFixtures() {
+	fixtureMu.Lock()
+	defer fixtureMu.Unlock()
+	for key, f := range fixtures {
+		f.cleanup()
+		delete(fixtures, key)
+	}
+}
+
+// Rows is the row set this run asks for (RANKE_ROWS, all of them when unset). An
+// unresolvable name fails the test: a mistyped row would otherwise narrow it silently.
 func Rows(t *testing.T) []backends.Backend {
 	t.Helper()
 	rows, err := backends.Requested()
@@ -157,15 +253,13 @@ func corpus(m *generator.Manifest, root ranke.Id, only string) []rql.NamedQuery 
 	return out
 }
 
-// build writes the archive into an open backend, returning its manifest and the
-// "main" head. A backend needing a preparation call to become correct is the defect.
-func build(t *testing.T, ctx context.Context, u ranke.Universe, spec generator.Spec) (*generator.Manifest, ranke.Id) {
+// branchHead reads the "main" head off a built archive. A backend needing a
+// preparation call to become correct is the defect.
+func branchHead(t *testing.T, ctx context.Context, u ranke.Universe, m *generator.Manifest) ranke.Id {
 	t.Helper()
-	m, err := generator.Generate(ctx, u, spec)
-	require.NoError(t, err)
 	arc, err := ranke.NewArchive(ctx, u, m.Head)
 	require.NoError(t, err)
 	br, err := arc.GetBranch(ctx, rql.Branch)
 	require.NoError(t, err)
-	return m, br.Head()
+	return br.Head()
 }

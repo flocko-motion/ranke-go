@@ -2,7 +2,6 @@ package matrix_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,27 +56,16 @@ func assertInheritedContent(t *testing.T, c ranke.Claim, want uint64, wantEnc, v
 	require.Equalf(t, wantEnc, n.Encoding(), "via %s: and its inherited encoding", via)
 }
 
-// eachBackend builds the toy archive into every backend that can run here, then
-// runs check with the content the delta inherits (read off the base via mem).
+// eachBackend runs check over every row with the content the delta inherits (read off
+// the base via mem) — matrix.Each, plus that expectation.
 func eachBackend(t *testing.T, check func(t *testing.T, u ranke.Universe, want uint64, wantEnc string, delta ranke.Id)) {
 	t.Helper()
 	spec := generator.ToyDiff(1)
 	want, wantEnc, _ := toyExpectation(t, spec)
 
-	for _, row := range matrix.Rows(t) {
-		t.Run(row.Name, func(t *testing.T) {
-			u, cleanup, err := row.Open()
-			if errors.Is(err, backends.ErrUnavailable) {
-				t.Skipf("unavailable here: %v", err)
-			}
-			require.NoError(t, err)
-			defer cleanup()
-
-			m, err := generator.Generate(context.Background(), u, spec)
-			require.NoError(t, err)
-			check(t, u, want, wantEnc, m.DiffChainHead)
-		})
-	}
+	matrix.Each(t, matrix.FromSpec(spec), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		check(t, u, want, wantEnc, m.DiffChainHead)
+	})
 }
 
 // toyExpectation builds the toy into mem — the reference executor — and reads the

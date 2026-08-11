@@ -28,11 +28,11 @@ the targets; each carries a comment saying what it is for.
 - `make test` — the fast gate: one pass over `./...`, the rows that need no
   service (`RANKE_ROWS=mem,fs,sqlite`), no benchmark and no 10k-claim scale set.
   Seconds, and the cache works.
-- `make test/full` — everything: every row REQUIRED, so a row it asks for and
-  cannot open fails; plus the benchmark, the scale set, and the scenarios with
-  their docs. The target CI runs.
-- `make test/matrix` — the matrix alone, verbose, over every row. Narrow the set
-  with `RANKE_ROWS=mem,fs,sqlite` when the services are not up.
+- `make test/full` — everything: every row required, the benchmark, the scale
+  set, the scenarios and their docs. The target CI runs.
+- `make test/matrix` — the matrix alone, verbose, over every row. A row it asks
+  for and cannot open FAILS; narrow the set with `RANKE_ROWS=mem,fs,sqlite` when
+  the services are not up.
 - `make check` — the static gates, vet, and `test/full` in one.
 - Every target runs through `$(GOTEST)`, so one override reaches all of them
   (`make test/integration GOTEST="go test -count=1"` to skip the cache). Packages

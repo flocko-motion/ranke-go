@@ -9,6 +9,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/tests/backends"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -32,7 +33,7 @@ func TestBranchesArePopulated(t *testing.T) {
 // TestBranchIsolation: a branch read returns that branch's members and leaves the
 // others' exclusive claims out.
 func TestBranchIsolation(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		require.Greater(t, len(m.Branches), 1, "needs more than one branch to isolate")
 
 		members := map[string][]string{}
@@ -76,7 +77,7 @@ func branchHeads(t *testing.T, u ranke.Universe, archiveHead ranke.Id) map[strin
 // TestClaimsInBranchesIsBranchScoped: a branch holds its own head alone, which is the
 // whole question the read check asks.
 func TestClaimsInBranchesIsBranchScoped(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		ctx := context.Background()
 		heads := branchHeads(t, u, m.Head)
 		require.Len(t, heads, 2, "needs a second branch to be wrong about")
@@ -101,7 +102,7 @@ func TestClaimsInBranchesIsBranchScoped(t *testing.T) {
 // TestClaimsInBranchesUnionsScopes: several branches at once answer for their union,
 // a caller passing exactly the scopes it may read.
 func TestClaimsInBranchesUnionsScopes(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		heads := branchHeads(t, u, m.Head)
 		ids := make([]ranke.Id, 0, len(heads))
 		for _, h := range heads {
@@ -116,7 +117,7 @@ func TestClaimsInBranchesUnionsScopes(t *testing.T) {
 // TestClaimsInBranchesArchiveCoversTheSpine: $archive is every branch's superset plus
 // the tables, so it holds the archive head itself.
 func TestClaimsInBranchesArchiveCoversTheSpine(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		ctx := context.Background()
 		heads := branchHeads(t, u, m.Head)
 		archive := map[string]ranke.Id{ranke.BranchArchive: m.Head}
@@ -140,7 +141,7 @@ func TestClaimsInBranchesArchiveCoversTheSpine(t *testing.T) {
 // TestClaimsInBranchesRejectsStrangers: a claim the archive never merged is held by
 // nothing, so a reference to it passes no scope.
 func TestClaimsInBranchesRejectsStrangers(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		ctx := context.Background()
 		stranger, err := ranke.HashContent([]byte("never contributed"))
 		require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestClaimsInBranchesRejectsStrangers(t *testing.T) {
 // TestClaimsInBranchesIsPositional: answers are read by index, so a mixed batch has to
 // line up with what was asked.
 func TestClaimsInBranchesIsPositional(t *testing.T) {
-	eachToyBackend(t, generator.ToyBranches(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		var name string
 		var head ranke.Id
 		for n, h := range branchHeads(t, u, m.Head) {
