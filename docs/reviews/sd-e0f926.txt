@@ -1,0 +1,329 @@
+sd-e0f926 — deep spec verification: the R-QC* Cypher-translation rules
+=====================================================================
+
+Scope: R-QCYPHER R-QCCLAUSE R-QCSTEP R-QCFRONTIER R-QCSCOPE, against
+adapter/storage/neo4j. Spec read at docs/papers/spec/ranke-spec.typ lines 613-647
+(ranke-graph main, fetched by `make docs` at the start of this pass). Rules are
+quoted from that text, not paraphrased.
+
+Report only; no code changed.
+
+
+### R-QCYPHER — VERIFIED
+
+Rule:    "A translation MUST deliver the result set `R-QEVAL` defines, in the order
+         `R-QSORT` fixes. Where a translated query and the native engine disagree,
+         the translation is the defect."
+
+Code:    A whole-adapter obligation rather than one site. What discharges it is the
+         cross-backend comparison: tests/matrix/matrix.go:75-79 runs every corpus
+         query on the mem reference, and :108-113 requires each row's answer to
+         equal the reference's.
+
+         The comparison has the two properties the rule needs. It is ORDERED:
+         rql.Answer is []string built in emission order (tests/rql/run.go:20-21,
+         "compared as a sequence since order is contract"), and require.Equalf on a
+         slice fails on a permutation, so an ORDER BY divergence fails as loudly as
+         a membership one. And it is DIRECTIONAL: mem is `ref`, every other row is
+         compared against it, which is R-QCYPHER's "the translation is the defect"
+         encoded as the shape of the test rather than left to a reader's judgement.
+
+Test:    TestMatrix (tests/matrix/matrix_test.go), rows neo4j/mem and
+         neo4j/redis/s3. matrix.go:84-91 additionally fails any corpus entry that
+         matches nothing on the reference, so no row can agree vacuously — the
+         guard that makes the rest of this verdict worth anything.
+
+Note:    Passed with both neo4j rows live earlier in this session (full matrix,
+         6/6 rows, 287s). I could not re-run it at the end of this pass; see
+         "What I did not check".
+
+
+### R-QCCLAUSE — VERIFIED
+
+Rule:    "Block by block: `select` translates to a `MATCH` whose start node is
+         pinned by id where `claim` anchors it and reached from the scope's head
+         otherwise; `where` to a `WHERE` over the endpoint; `order` to an `ORDER BY`
+         carrying the `(created_at, id)` tie-break (`R-QSORT`); `limit.results` to a
+         `LIMIT`; and `output.detail` to the `RETURN` projection — the id alone, or
+         the node with its labels and outgoing edges. A read with no `path`
+         translates to a scan of the scope. The remaining fields stay outside the
+         statement: `output`'s `form` and `content`, `limit.time`, and `execution`
+         (`R-QEVAL`)."
+
+Code:    Seven clauses, each checked separately.
+
+         select → MATCH. query.go:193-202 startClause emits
+         `MATCH (n0 {id: $root})` when Select.Claim is set, else
+         `MATCH (h {id: $head})-[*0..]->(n0)` from the anchor frontierRoot
+         (:179-189) resolves through closureAnchor (:167-178): Select.Head, else the
+         scope head, else nothing. Matches "pinned by id where claim anchors it and
+         reached from the scope's head otherwise" exactly.
+
+         where → WHERE over the endpoint. query.go:307-312: whereClause is applied
+         only at i == len(steps)-1, over nv, the final segment's endpoint. The scan
+         does the same over `n` (:229-231). Intermediate steps get no Where, which is
+         what "over the endpoint" says.
+
+         order → ORDER BY with the tie-break. query.go:568-582 orderLimitClause
+         writes each explicit key, then always appends `<node>.created_at,
+         <node>.id` last. Unconditional, so a query with no `order` still gets the
+         natural order R-QSORT requires.
+
+         limit.results → LIMIT. query.go:576-580 emits `LIMIT results+1`. The extra
+         row is trimmed at query.go:89-93 before anything is returned, so the
+         delivered set is exactly the cap; the +1 exists to detect truncation. A
+         faithful translation of the bound, not a wider one.
+
+         output.detail → RETURN projection. query.go:240-246 returnCols emits either
+         `<v>.id AS id` or `properties(v), labels(v), [(v)-[r]->(t) | ...]` — "the id
+         alone, or the node with its labels and outgoing edges", the rule's two forms
+         and no third.
+
+         no path → scan. query.go:206-211 lowerCypher routes an empty Select.Path to
+         scanCypher.
+
+         Fields that must stay OUTSIDE the statement — the clause the task flagged,
+         because limit.time moved recently. All four confirmed:
+           form, content — do not appear anywhere in the neo4j package. Grepped for
+             Output.Form / Output.Content across adapter/storage/neo4j/*.go: no
+             match in non-test code. They are the stack's business
+             (adapter/storage/stack/query.go, ranke.EncodeResults).
+           limit.time — reaches only neo4j.go:100-107 txTimeout, which returns a
+             driver ExecuteQueryConfigurationOption carrying WithTxTimeout, and
+             query.go:38 boundedByTime for classifying the resulting error. It never
+             reaches lowerCypher and never appears in the statement text.
+           execution — reaches only query.go:27 newReport(q.Execution.Report).
+
+         So on the question asked: the code and the rule AGREE. A transaction
+         timeout is transport configuration handed to the driver alongside the
+         statement, not a clause within it; the statement text is byte-identical
+         whether limit.time is set or not. "Outside the statement" is satisfied on
+         the reading that matters — a translation cannot express a time budget in
+         Cypher, and putting it in the transaction is the only place left that is
+         still not the statement.
+
+Test:    TestMatrix for order, limit and detail (corpus entries order/height-desc-
+         limit, order/height-asc, order/created-at-desc, order/type-lexical,
+         order/multi-key, limit/results-5, output/detail-id, output/detail-claims)
+         and for the scan (closure/branch, closure/universe, closure/archive).
+         adapter/storage/neo4j/query_limit_test.go TestLimitResultsReportsTruncation
+         and TestLimitResultsAtTheAnswerIsNotTruncated pin the LIMIT+1 behaviour at
+         both edges. adapter/storage/neo4j/query_count_test.go:80 TestOneQueryPerRQL
+         pins "one Cypher statement" — every RQL shape in one round-trip, no
+         reconstruction re-fetch.
+
+Note:    returnCols also keys on Output.Encoding, not on Detail alone: idsOnly
+         (query.go:133-138) is `Detail == DetailID || Encoding == ResultCBOR`.
+         R-QCCLAUSE names output.detail as the projection's input and does not list
+         encoding among the fields that stay outside, so the rule simply does not
+         speak to this. It is not a contradiction — both projections the code can
+         emit are in the rule's own menu — and inside a stack it is correct by
+         design: neo4j selects, the RawClaims layer serialises (idsOnly's own
+         comment, and stack/query.go:26-34).
+
+         The residue is a failure mode rather than a translation defect, so I am
+         recording it here rather than as a verdict: a BARE neo4j Universe asked for
+         Encoding: ResultCBOR answers with ids and no bytes, where R-QCANON requires
+         the stored S(v). It declares RawClaims false (neo4j.go:464-474, the field is
+         absent), and stack.Query refuses with errNoRawClaims when no layer holds the
+         bytes, so a correctly assembled deployment cannot reach the bad answer — and
+         the matrix only ever runs neo4j stacked (tests/backends/backends.go:74-75).
+         But the project's own rule is that a layer which cannot serve a request must
+         fail rather than answer with something else, and asked directly this one
+         answers with something else. Worth its own task; out of this family.
+
+
+### R-QCSTEP — VERIFIED
+
+Rule:    "A `PathStep` translates to a variable-length segment in its `dir`,
+         `*min..max`, an absent or `0` `max` leaving it unbounded. Its `edges` and
+         `nodes` globs translate to full-match conditions, `edges` over every
+         relationship of the segment and `nodes` over its endpoint, and an absent
+         list imposes no condition (`R-QSTEPS`)."
+
+Code:    query.go:368-386 segmentPattern. `bound` is set only when step.Max > 0, so
+         an absent or 0 Max renders `*<min>..` with no upper term — unbounded, as
+         the rule says. Direction picks the arrow: DirUses `<-[..]-`,
+         DirConnections `-[..]-`, provenance `-[..]->`.
+
+         The min-0 question the task raised. MinHops (query.go:60-65) defaults an
+         absent Min to 1, so the usual segment is `*1..`; Min 0 renders `*0..`.
+         Cypher's `*0..` admits the zero-length path, so the segment can yield the
+         node it started from — which is precisely R-QSTEPS' "`min: 0` also yields
+         the frontier it starts from". The two engines express it differently and
+         mean the same thing, so there is nothing to reconcile here.
+
+         query.go:390-417 segmentFilters. edges become
+         `all(x IN r_i WHERE type(x) =~ $ep_i)` — quantified over EVERY relationship
+         of the variable-length segment, matching "over every relationship of the
+         segment" literally. nodes become
+         `any(l IN labels(n_i+1) WHERE l =~ $np_i)` over nv, the segment's endpoint
+         only. Endpoint-only is right rather than lax: R-QSTEPS says a step "yields a
+         claim only when its node's `type` is listed, whatever the nodes it crossed
+         to reach it", so filtering intermediates would be the defect. Negative
+         patterns invert each quantifier (`NOT type(x) =~`, `none(l IN labels ...)`).
+         An absent list yields "" from splitPatterns (:423-437) and appends no
+         condition. Full-match is Cypher's `=~` plus globToRegex anchoring.
+
+Test:    tests/matrix/hops_test.go — TestHopsMinDefaultWalksAnEdge,
+         TestHopsMinZeroAdmitsTheStart, TestHopsMinExcludesTheStart,
+         TestHopsMinAboveMax — all through matrix.Each, so each runs on the neo4j
+         row and would fail if `*min..max` were mis-rendered in either direction.
+         adapter/storage/neo4j/query_patterns_test.go covers the glob→regex half:
+         TestSplitPatternsPolarity, TestSplitPatternsAlternation,
+         TestAlternationMatchesEachBranch, TestGlobToRegexEscapesMetacharacters.
+         Corpus entries hops/*, path/*, unanchored/* exercise edges and nodes globs
+         cross-backend.
+
+
+### R-QCFRONTIER — SKIPPED (verified earlier today, per the task)
+
+Not re-checked. The task records it as verified today: the path shape lowers as one
+MATCH per step with the route carried forward, and TestShapePathRecrossesAnEdge
+fires — on the old lowering the neo4j rows return zero routes where every other
+backend returns one. I read pathCypher (query.go:329-364) in the course of checking
+R-QCSCOPE and saw nothing inconsistent with that — one MATCH plus a WITH per step,
+the route accumulated as `route + nodes(p_i)[1..]` — but I did not verify it and this
+is not a verdict.
+
+(No verdict word applies to a rule deliberately not examined; using VERIFIED here
+would launder someone else's finding as mine.)
+
+
+### R-QCSCOPE — UNTESTED
+
+Rule:    "However a translation confines a query — a walk from the scope's head, or
+         an index the backend maintains — the confined set MUST equal the scope's
+         graph (`R-QSCOPE`). The anchor and every claim a step reaches MUST lie
+         inside it, a reverse step included (`R-QANCHOR`, `R-QHEAD`)."
+
+Code:    The confinement is the branch tag, not a walk. tagBounded
+         (query.go:161-163) is true only for a real branch name — false for
+         $universe and $archive, which need no confining.
+
+         The specific thing the task asked me to check — whether the tag condition
+         reaches every node of every segment or only endpoints — holds. query.go:
+         302-306 (frontierCypher) and :342-344 (pathCypher) bind a path variable per
+         segment and add
+
+             all(x IN nodes(p_i) WHERE x[$bkey] <= $height)
+
+         for EVERY step, not just the last. nodes(p_i) is the whole segment
+         including intermediates, so a `*1..` or unbounded segment cannot pass
+         through a non-member, and that is what bounds a reverse step: walking
+         `<-[..]-` from a member cannot arrive at, or cross, another branch's claim.
+         The comment at both sites says so ("confine every node on the segment
+         (bounds reverse steps to members)") and the code does what the comment says.
+
+         The anchor is covered as a consequence rather than by its own clause: n0 is
+         nodes(p_0)[0], so the first segment's predicate confines it. The comparison
+         is meaningful — the tag value is written as a numeric property
+         (tag.go:96-108, int64(height)) and $height is scope.Height, so a member
+         compares numerically and a non-member's missing property yields null, which
+         fails the predicate and drops the row.
+
+         The scan path is weaker but not wrong: scanCypher (:222-226) confines the
+         endpoint `n` only, leaving the `(h)-[*0..]->(n)` intermediates unchecked.
+         That cannot leak, because what a scan returns is the endpoint and the
+         endpoint is confined; an unconfined intermediate can only widen which
+         members are reachable, and a member is in the scope's graph by definition.
+
+Test:    NONE. Not "none for the whole rule" — none that could fail if the
+         confinement above were deleted. Three separate reasons, each checkable:
+
+         1. Every reverse-step entry in the shared corpus runs in a scope where the
+            predicate is never emitted. corpus.go:120-127 (unanchored/…) and
+            :172-180 (path/uses-of-sources, path/connections-relation,
+            path/uses-of-entities) all use BranchArchive or BranchUniverse, and
+            tagBounded is false for both. The lowering for those queries contains no
+            `all(x IN nodes(...))` at all.
+
+         2. The matrix's reverse tests DO use a named branch — hops_test.go:80-84
+            TestConnectionsTwoHops and shapes_test.go:74-82
+            TestShapePathRecrossesAnEdge both pass rql.Branch — but their fixtures
+            are ToyRelation(1) and ToyDiff(1), and toyBase sets Branches: 1
+            (tests/generator/toys.go:21). With a single branch every claim is a
+            member, so the predicate excludes nothing and removing it changes no
+            answer. The fixture satisfies the rule by construction.
+
+         3. The only multi-branch toy, ToyBranches (toys.go:70-76, s.Branches = 2), is
+            used by tests/matrix/branches_test.go, whose reads are forward closure
+            walks via branchMembers. No reverse step meets a second branch anywhere
+            in the suite.
+
+         So the R-QC* clause most likely to hide a leak — "a reverse step included" —
+         is the one clause with no test behind it.
+
+Note:    The missing test is narrow and cheap: ToyBranches, scope a named branch, a
+         step with Dir: DirUses (or DirConnections) anchored at a claim of that
+         branch, positioned so that a claim of the OTHER branch references the
+         anchor and is therefore reachable backwards. Correct behaviour excludes it;
+         the current code excludes it; nothing today would notice if it stopped. It
+         belongs in tests/matrix so every backend is held to it, since the reference
+         executor confines by a different mechanism (query_confine_tag_test.go) and
+         cross-backend agreement is what would catch a neo4j-only leak.
+
+         I did not attempt to demonstrate the removal empirically, because the task
+         forbids changing code and the environment could not run the neo4j row by
+         the time I reached this rule. The claim above rests on the three citations,
+         each of which a reader can check without running anything.
+
+
+Summary
+-------
+
+Verdicts: VERIFIED 3 (R-QCYPHER, R-QCCLAUSE, R-QCSTEP)
+          UNTESTED 1 (R-QCSCOPE)
+          GAP 0, DIVERGENCE 0, OUT OF SCOPE 0
+          SKIPPED 1 (R-QCFRONTIER — verified earlier today, not re-checked)
+
+No rule in this family disagrees with the code. The lowering does what these five
+rules say, including the two clauses most likely to drift: limit.time is still
+outside the statement, and the branch-tag predicate covers every node of every
+segment rather than endpoints alone.
+
+Findings, in the order I would fix them:
+
+1. R-QCSCOPE has no test that could fail. The confinement of reverse steps under a
+   branch scope is correct by reading and unprotected by the suite; a fixture with
+   one branch and a corpus that only walks backwards under $archive between them
+   leave it uncovered. Fix: one matrix test, ToyBranches plus a DirUses step under a
+   named branch. This is first because the code being right today is exactly what
+   makes the absence of a test easy to keep ignoring.
+
+2. A bare neo4j Universe answers an Encoding: ResultCBOR read with ids rather than
+   refusing it (see the R-QCCLAUSE note). Unreachable through a correctly assembled
+   stack, and no rule in this family is violated, but it is answering with something
+   else where the project's own architecture rule says fail. Its own task.
+
+3. Nothing else.
+
+What I did NOT check, and why:
+
+- R-QCFRONTIER. Skipped on the task's instruction, which records it as verified
+  earlier today. I read pathCypher while checking R-QCSCOPE and saw nothing
+  inconsistent, but I did not verify it and have not given it a verdict.
+
+- I could not re-run the matrix against a live neo4j at the end of this pass. The
+  instance died mid-pass: its JVM is <defunct>, the HTTP endpoint stopped answering
+  (curl exit 7 on 127.0.0.1:7474), `services/neo4j.sh native up` reports success but
+  leaves nothing serving, and the container is at ~28 GB of 42 GB used with ~3.9 GB
+  free — the same pressure that OOM-kills `brokkr lint` here. Two restart attempts
+  failed the same way. Everything above is code reading and static coverage
+  analysis, neither of which needs the service; the one thing the service would have
+  added is a fresh confirmation that the neo4j row still agrees with mem, and that
+  did pass earlier in this session on substantively the same lowering (the three
+  commits since were the check/check-full targets, the test/full guard, and a
+  comment-only rename).
+
+- The Cypher SEMANTICS of the emitted statements, as opposed to their text. I read
+  what the lowering produces and judged it against the rules; I did not run
+  hand-written variants through `services/neo4j.sh query` to confirm, for instance,
+  that `all(x IN nodes(p) ...)` behaves as I describe on a reverse segment, for the
+  same reason. Where a claim of mine depends on Cypher semantics rather than on the
+  rule text — `*0..` admitting the zero-length path, a null property failing a
+  comparison — I have said so explicitly above so it can be checked.
+
+- Whether the corpus is adequate for R-QCYPHER beyond the entries it has. I verified
+  the comparison is ordered, directional and guarded against vacuity, not that the
+  corpus covers every shape the rule admits.
