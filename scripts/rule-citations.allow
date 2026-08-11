@@ -54,7 +54,6 @@ R-QANCHOR      citation owed: claim anchors the frontier, query_walk.go
 R-QSTEPS       citation owed: a step's edge/node globs and hop bounds, query_walk.go
 R-QFORM        citation owed: original or materialized field values, query.go
 R-QSORT        citation owed: sort keys over a total order, query_default.go
-R-QLIMIT       citation owed: results and time bounds, query.go
 R-QLAYER       citation owed: layer pinning leaves the result set alone, query.go
 R-QSTREAM      citation owed: tagged elements in order, query_encode.go
 R-QREPORT      citation owed: the report as the final element, query_report.go
