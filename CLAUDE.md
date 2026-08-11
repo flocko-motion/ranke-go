@@ -39,8 +39,10 @@ spending the minutes on it.
 - `make test/matrix` — the matrix alone, verbose, over every row. A row it asks
   for and cannot open FAILS; narrow the set with `RANKE_ROWS=mem,fs,sqlite` when
   the services are not up.
-- `make check` — the static gates, vet, and `test/full` in one, so it costs what
-  `test/full` costs. Release-time, not while working.
+- `make check` — the static gates, vet, and the fast suite in one. Seconds, so it
+  is safe to reach for whenever.
+- `make check/full` — the same with the full suite. The gate CI runs, and guarded
+  like `test/full`.
 - Every target runs through `$(GOTEST)`, so one override reaches all of them
   (`make test/integration GOTEST="go test -count=1"` to skip the cache). Packages
   run in parallel — `internal/exclusive` serialises the shared services — and

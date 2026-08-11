@@ -94,7 +94,7 @@ jobs:
       # internal/exclusive holds a cross-process lock around the shared neo4j, which
       # is what -p 1 was for.
       - name: Test
-        run: make test/full
+        run: make check/full
 
       # A backend row failing reads as a conformance bug, and the service's own log is
       # what separates that from a service that died under the run.

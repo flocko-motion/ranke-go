@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -180,9 +180,10 @@ full-intended:
 		echo "  CI runs test/full on every push, so the slow run happens anyway."; \
 		echo ""; \
 		echo "  Run it yourself ONLY when you touched what the fast gate leaves out —"; \
-		echo "  a service-backed row, the benchmark, the scale set, a scenario bundle:"; \
+		echo "  a service-backed row, the benchmark, the scale set, a scenario bundle."; \
+		echo "  Then say so, on whichever target you meant:"; \
 		echo ""; \
-		echo "      RANKE_FULL=1 make test/full"; \
+		echo "      RANKE_FULL=1 make $(firstword $(MAKECMDGOALS))"; \
 		echo ""; \
 		exit 1; \
 	fi
@@ -378,7 +379,13 @@ rule-citations:
 # now stops here rather than shipping a reference that reproduces nothing.
 verify: build fmt-check lint rule-citations verify-scenarios
 
-# One-shot "is everything green", kept as the name people reach for: the static
-# gates, vet, and the full suite against live services. It therefore costs what
-# test/full costs and carries the same guard — release-time, not while working.
-check: verify vet test/full
+# One-shot "is everything green", and the name people reach for, so it costs what
+# that name promises: the static gates, vet, and the fast suite. Seconds. The full
+# suite against live services is `RANKE_FULL=1 make test/full`, which CI runs on
+# every push.
+check: verify vet test
+
+# check/full — check with the full suite instead of the fast one: the gate CI runs,
+# and what to run by hand before a release. Guarded through test/full, so it needs
+# GITHUB_ACTIONS, CI or RANKE_FULL.
+check/full: verify vet test/full
