@@ -52,6 +52,9 @@ func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error)) error {
 		return enc(c)
 	}
 	for i := range results {
+		if results[i].Kind == KindReport {
+			continue // a report is not a claim, and keeps the tag it travels under
+		}
 		b, err := one(results[i].ClaimNative)
 		if err != nil {
 			return Wrap(errQuery, err)

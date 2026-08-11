@@ -21,16 +21,28 @@ func runReported(t *testing.T, u ranke.Universe, name string, q ranke.Query) {
 		t.Fatal(err)
 	}
 	n := 0
+	var last ranke.QueryResult
 	for rs.Next() {
-		n++
+		last = rs.Result()
+		if last.Kind != ranke.KindReport {
+			n++
+		}
 	}
 	if err := rs.Err(); err != nil {
 		t.Fatal(err)
+	}
+	// The report ends the sequence here as it does natively (`R-QSTREAM`), so a client
+	// reading either engine's stream generically meets it the same way.
+	if last.Kind != ranke.KindReport {
+		t.Fatalf("a reported run ends with its report, got kind %q", last.Kind)
 	}
 	rep := rs.Report()
 	_ = rs.Close()
 	if rep == nil {
 		t.Fatal("report requested")
+	}
+	if rep != last.Report {
+		t.Fatal("Report() and the element disagree, so there are two reports")
 	}
 	t.Logf("── %s: %d results in %s ──", name, n, rep.Elapsed)
 	for _, e := range rep.Events {

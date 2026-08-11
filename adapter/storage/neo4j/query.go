@@ -37,7 +37,9 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		// rows, so the bounded answer here is the empty one, reported as cut short.
 		if boundedByTime(err, q.Limit.Time, ctx.Err()) {
 			rep.log("cypher", "limit", ranke.ReportInfo, time.Since(execStart), q.Limit.Time.String())
-			return &cypherStream{report: rep.finalize(0, true)}, nil
+			// No rows, so the report is the whole sequence where one was asked for, and
+			// the sequence is empty where none was (`R-QREPORT`).
+			return &cypherStream{results: ranke.AppendReport(nil, rep.finalize(0, true))}, nil
 		}
 		return nil, fmt.Errorf("%w: execute: %w", errQuery, err)
 	}
@@ -91,7 +93,9 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		rep.log("neo4j", "limit", ranke.ReportInfo, 0, strconv.Itoa(n)+" results, truncated")
 	}
 	rep.log("neo4j", "reconstruct", ranke.ReportInfo, time.Since(recStart), strconv.Itoa(len(results))+" results")
-	return &cypherStream{results: results, report: rep.finalize(len(results), truncated)}, nil
+	// The report ends the sequence (`R-QSTREAM`), finalised over the results it reports
+	// on — the count after the cap, and whether the cap cut the read short.
+	return &cypherStream{results: ranke.AppendReport(results, rep.finalize(len(results), truncated))}, nil
 }
 
 // reachedPaths assembles one result per record: a claim per route element, last is
@@ -619,10 +623,10 @@ func toFloatVal(v any) float64 {
 // --- result stream, report, content shaping (neo4j-native, no reference reuse) ---
 
 // cypherStream is neo4j's ResultStream over an already-resolved slice: Cypher ran
-// the filter/order/limit, so this hands rows out in order.
+// the filter/order/limit, so this hands rows out in order, the report last where one
+// was asked for.
 type cypherStream struct {
 	results []ranke.QueryResult
-	report  *ranke.QueryReport
 	i       int
 }
 
@@ -634,7 +638,7 @@ func (s *cypherStream) Next() bool {
 	return false
 }
 func (s *cypherStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
-func (s *cypherStream) Report() *ranke.QueryReport { return s.report }
+func (s *cypherStream) Report() *ranke.QueryReport { return ranke.ReportOf(s.results) }
 func (s *cypherStream) Err() error                 { return nil }
 func (s *cypherStream) Close() error               { return nil }
 

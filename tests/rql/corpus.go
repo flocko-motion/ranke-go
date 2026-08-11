@@ -253,5 +253,13 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 				{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc},
 			}}},
 		{"limit/results-5", ranke.Query{Select: sel(), Limit: ranke.Limit{Results: 5}}},
+
+		// ── the report, in band ─────────────────────────────────────────────
+		// A reported run ends with the report as a tagged element (`R-QSTREAM`), so
+		// every backend must end this sequence the same way. The fingerprint reads the
+		// tag, never the timings, so the comparison is the shape and not the clock.
+		{"execution/report-ends-the-stream", ranke.Query{Select: sel(),
+			Limit:     ranke.Limit{Results: 5},
+			Execution: ranke.Execution{Report: ranke.ReportInfo}}},
 	}
 }

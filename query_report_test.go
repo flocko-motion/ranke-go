@@ -34,11 +34,13 @@ func TestReportRecordsExecutionLog(t *testing.T) {
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
-	require.Len(t, got, 1)
+	require.Len(t, got, 2, "the one result, then the report the run asked for")
 	require.True(t, got[0].ClaimNative.ID().Equal(a.ID()))
+	require.Equal(t, KindReport, got[1].Kind)
 
 	rep := rs.Report()
 	require.NotNil(t, rep)
+	require.Same(t, got[1].Report, rep, "Report reads the element, so there is one report")
 	require.False(t, rep.StartedAt.IsZero(), "start time stamped")
 	require.Equal(t, 1, rep.Results)
 	require.NotEmpty(t, rep.Events)
@@ -83,16 +85,21 @@ func TestReportLevelThreshold(t *testing.T) {
 	require.Positive(t, fetchEvents(ReportTrace), "Trace records per-claim fetch events")
 }
 
-// TestReportOffIsNil: without Execution.Report the stream carries no report and
-// the collector path is a no-op (nothing to assert but that Report() is nil).
-func TestReportOffIsNil(t *testing.T) {
+// TestReportOffEmitsNoReportElement: `R-QREPORT` puts a report in the stream when,
+// and only when, one was asked for — so an unreported run ends on a result, and the
+// collector path is a no-op behind it.
+func TestReportOffEmitsNoReportElement(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
 		Select: Select{Branch: BranchUniverse, Head: b.ID()},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	_ = drain(t, rs)
-	require.Nil(t, rs.Report(), "no report when Execution.Report is false")
+	got := drain(t, rs)
+	require.NotEmpty(t, got, "the closure is not empty, so this says something")
+	for i, r := range got {
+		require.NotEqual(t, KindReport, r.Kind, "element %d is a result", i)
+	}
+	require.Nil(t, rs.Report(), "no report when Execution.Report is unset")
 }
 
 // TestReportFilterCounts: the filter event reports input vs kept, so a selective
@@ -106,12 +113,26 @@ func TestReportFilterCounts(t *testing.T) {
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
-	require.Len(t, got, 1)
+	require.Len(t, got, 2, "the surviving result, then the report")
 	require.True(t, got[0].ClaimNative.ID().Equal(a.ID()))
 
 	f := opsOf(rs.Report())["filter"]
 	require.Equal(t, 3, f.Attrs["in"], "closure had 3 claims")
 	require.Equal(t, 1, f.Attrs["kept"], "only the source survived the Where")
+}
+
+// TestResultKindWireValues: a Kind is a wire tag, not a Go name. Another
+// implementation reads a framed sequence by discriminating on these strings —
+// ranke-ts on `report` for the record this stream now ends with — so renaming a
+// constant here must never rename the value.
+func TestResultKindWireValues(t *testing.T) {
+	require.Equal(t, "report", string(KindReport))
+	require.Equal(t, "claim_id", string(KindClaimId))
+	require.Equal(t, "path_id", string(KindPathId))
+	require.Equal(t, "claim_native", string(KindClaimNative))
+	require.Equal(t, "path_native", string(KindPathNative))
+	require.Equal(t, "claim_encoded", string(KindClaimEncoded))
+	require.Equal(t, "path_encoded", string(KindPathEncoded))
 }
 
 // TestReportCarriesWireNames: a report travels a result sequence as its last record,

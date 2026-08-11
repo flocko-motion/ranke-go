@@ -38,7 +38,7 @@ func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ra
 	if err != nil {
 		return nil, err
 	}
-	results, report, err := drain(rs)
+	results, err := drain(rs)
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +52,11 @@ func (s *stack) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ra
 		}
 	}
 	// The top layer's Kind stands for what it produced; EncodeResults restamps the
-	// results it serialises.
+	// results it serialises, and leaves a report element on its own tag.
 	if err := ranke.EncodeResults(results, q.Output); err != nil {
 		return nil, err
 	}
-	return &hydratedStream{results: results, report: report}, nil
+	return &hydratedStream{results: results}, nil
 }
 
 // holdsRawClaims reports whether any layer keeps the canonical claim bytes.
@@ -69,18 +69,19 @@ func (s *stack) holdsRawClaims() bool {
 	return false
 }
 
-// drain reads a stream fully, returning its results and report.
-func drain(rs ranke.ResultStream) ([]ranke.QueryResult, *ranke.QueryReport, error) {
+// drain reads a stream fully, returning every element it emitted — the report
+// among them where the query asked for one (`R-QSTREAM`), so nothing is dropped by
+// reading the sequence rather than the accessor beside it.
+func drain(rs ranke.ResultStream) ([]ranke.QueryResult, error) {
 	var out []ranke.QueryResult
 	for rs.Next() {
 		out = append(out, rs.Result())
 	}
 	if err := rs.Err(); err != nil {
 		_ = rs.Close()
-		return nil, nil, err
+		return nil, err
 	}
-	report := rs.Report()
-	return out, report, rs.Close()
+	return out, rs.Close()
 }
 
 // hydrateClaims refills every claim in results — endpoints and each path's route —
@@ -148,10 +149,10 @@ func (s *stack) hydrateClaims(ctx context.Context, results []ranke.QueryResult, 
 	return nil
 }
 
-// hydratedStream serves an already-assembled result slice.
+// hydratedStream serves an already-assembled element slice, the inner stream's
+// report carried along in it.
 type hydratedStream struct {
 	results []ranke.QueryResult
-	report  *ranke.QueryReport
 	i       int
 }
 
@@ -163,6 +164,6 @@ func (s *hydratedStream) Next() bool {
 	return true
 }
 func (s *hydratedStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
-func (s *hydratedStream) Report() *ranke.QueryReport { return s.report }
+func (s *hydratedStream) Report() *ranke.QueryReport { return ranke.ReportOf(s.results) }
 func (s *hydratedStream) Err() error                 { return nil }
 func (s *hydratedStream) Close() error               { return nil }

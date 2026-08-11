@@ -202,13 +202,17 @@ type Scope struct {
 	Revision int    // archive spine revision (_br)
 }
 
-// ResultStream streams query results one at a time, in the query's order.
+// ResultStream streams a query's elements one at a time, in the query's order:
+// its results, then the report where one was asked for (`R-QSTREAM`).
 type ResultStream interface {
-	// Next advances to the next result, returning false at end of stream or error.
+	// Next advances to the next element, returning false at end of stream or error.
 	Next() bool
-	// Result returns the current result (valid after Next returned true).
+	// Result returns the current element (valid after Next returned true). A reported
+	// run ends with a KindReport element, which is the report itself.
 	Result() QueryResult
-	// Report returns the query's report once Next returns false, if Execution.Report was set.
+	// Report returns the report the stream's last element carries, once Next has
+	// returned false — a convenience over that element rather than a channel beside
+	// it, so the two cannot disagree. nil when Execution.Report asked for none.
 	Report() *QueryReport
 	// Err returns the first error that stopped the stream, if any.
 	Err() error
@@ -216,8 +220,10 @@ type ResultStream interface {
 	Close() error
 }
 
-// QueryResult is one reached claim, shaped per Output. Kind names the one field
-// carrying the payload, so a caller switches once and streams that field.
+// QueryResult is one element of a result stream: a reached claim shaped per Output,
+// or the report a reported run ends with. Kind names the one field carrying the
+// payload, so a caller switches once and streams that field, and a reader learns
+// what an element holds without inspecting it (`R-QSTREAM`).
 type QueryResult struct {
 	Kind         ResultKind
 	ClaimId      Id
@@ -226,10 +232,12 @@ type QueryResult struct {
 	PathNative   []Claim
 	ClaimEncoded []byte
 	PathEncoded  [][]byte
+	Report       *QueryReport // KindReport alone: the run's execution log
 }
 
-// ResultKind names the QueryResult field a result's payload is in — the product of
-// Output.Shape (single | path) and Output.Detail/Encoding (id | native | encoded).
+// ResultKind names the QueryResult field an element's payload is in: for a result,
+// the product of Output.Shape (single | path) and Output.Detail/Encoding (id |
+// native | encoded); for the report a reported run ends with, KindReport.
 type ResultKind string
 
 const (
@@ -239,4 +247,8 @@ const (
 	KindPathNative   ResultKind = "path_native"
 	KindClaimEncoded ResultKind = "claim_encoded"
 	KindPathEncoded  ResultKind = "path_encoded"
+	// KindReport tags the final element of a run that asked for a report
+	// (`R-QREPORT`). The value is the one ranke-ts discriminates its framed report
+	// record under, the wire having carried the report in band all along.
+	KindReport ResultKind = "report"
 )

@@ -216,9 +216,11 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	rc.log("native", "results", ReportInfo, "", map[string]any{"results": len(results)})
 	var report *QueryReport
 	if createdReport {
+		// Finalised before the report joins the sequence, so Results counts the results
+		// it reports on and not itself.
 		report = rc.finalize(len(results), truncated)
 	}
-	return &sliceStream{results: results, report: report}, nil
+	return &sliceStream{results: AppendReport(results, report)}, nil
 }
 
 // --- Where evaluation ------------------------------------------------------
@@ -481,11 +483,11 @@ func compareValues(a, b any, col Collation) int {
 	}
 }
 
-// sliceStream is the reference ResultStream: a materialised slice, one item at a time.
+// sliceStream is the reference ResultStream: a materialised slice, one element at a
+// time, the report among them where one was asked for.
 type sliceStream struct {
 	results []QueryResult
 	i       int
-	report  *QueryReport
 }
 
 func (s *sliceStream) Next() bool {
@@ -496,7 +498,7 @@ func (s *sliceStream) Next() bool {
 	return false
 }
 func (s *sliceStream) Result() QueryResult  { return s.results[s.i-1] }
-func (s *sliceStream) Report() *QueryReport { return s.report }
+func (s *sliceStream) Report() *QueryReport { return ReportOf(s.results) }
 func (s *sliceStream) Err() error           { return nil }
 func (s *sliceStream) Close() error         { return nil }
 
