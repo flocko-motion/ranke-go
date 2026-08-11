@@ -15,6 +15,7 @@ import (
 	"github.com/flocko-motion/ranke-go/tests/backends"
 	"github.com/flocko-motion/ranke-go/tests/generator"
 	"github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -52,7 +53,7 @@ type revisions struct {
 // eachRevisionBackend builds the two-revision toy into every available backend.
 func eachRevisionBackend(t *testing.T, check func(*testing.T, ranke.Universe, revisions)) {
 	t.Helper()
-	for _, row := range backends.All() {
+	for _, row := range matrix.Rows(t) {
 		t.Run(row.Name, func(t *testing.T) {
 			u, cleanup, err := row.Open()
 			if errors.Is(err, backends.ErrUnavailable) {

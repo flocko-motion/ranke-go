@@ -10,6 +10,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/tests/backends"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -98,7 +99,7 @@ func diffPredecessor(t *testing.T, u ranke.Universe, delta ranke.Id) ranke.Id {
 // eachToyBackend builds spec into every available backend and runs check.
 func eachToyBackend(t *testing.T, spec generator.Spec, check func(*testing.T, ranke.Universe, *generator.Manifest)) {
 	t.Helper()
-	for _, row := range backends.All() {
+	for _, row := range matrix.Rows(t) {
 		t.Run(row.Name, func(t *testing.T) {
 			u, cleanup, err := row.Open()
 			if errors.Is(err, backends.ErrUnavailable) {

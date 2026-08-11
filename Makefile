@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall test test/full test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -36,6 +36,15 @@ BINDIR ?= $(HOME)/.local/bin
 # Packages run in parallel — internal/exclusive locks the shared services.
 GOTEST ?= go test
 
+# The rows the fast gate asks for: the backends that need no service, so it has
+# nothing to skip. RANKE_ROWS carries the set to the Go layer
+# (-> tests/backends.Requested); test/full leaves it unset, which means all of them.
+FAST_ROWS ?= mem,fs,sqlite
+
+# The benchmark's size under test/full — the claim count per backend. Bigger is a
+# deliberate run: `make test/performance/2000`.
+FULL_PERF_SIZE ?= 800
+
 # Foundational papers live in the ranke-graph repo. `make docs` pulls a
 # fresh copy into docs/papers/ for local reference; the directory is
 # gitignored and never committed — always fetched, never vendored.
@@ -45,9 +54,10 @@ PAPERS_DIR       := docs/papers
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
-# Default target: build, run unit tests, run every scenario, and
-# assert the scenarios are byte-deterministic + docs are in sync.
-all: build test verify-scenarios verify-docs
+# Default target: the static gates (build, gofmt, lint, rule citations, scenario
+# bundles) plus the fast test gate. The full suite is a deliberate ask —
+# `make test/full` — since it needs every service up.
+all: verify test
 
 # Build all binaries into bin/: the ranke CLI, the ranke-test harness,
 # and the scenariodoc generator.
@@ -99,12 +109,12 @@ test/integration:
 	echo "  $(RANKE_FS_DIR)"
 
 # test/matrix — the cross-backend conformance matrix: build the same
-# deterministic archive into every backend that can run here and assert each
-# one answers the whole RQL corpus exactly as the mem reference does. Rows
-# needing a service that is not up skip themselves, so this is green on a bare
-# checkout and grows teeth as services come up:
-#   services/neo4j.sh native up    # adds the neo4j/mem row
-#   services/redis.sh native up    # adds the redis row
+# deterministic archive into every backend the run asks for and assert each one
+# answers the whole RQL corpus exactly as the mem reference does. RANKE_ROWS names
+# the set (default: all of them), and the services they need come up with:
+#   services/neo4j.sh native up    # the neo4j/mem row
+#   services/redis.sh native up    # the redis row
+#   services/s3.sh native up       # the s3 row, and the neo4j/redis/s3 stack
 # Verbose so the per-row, per-query sub-tests are visible.
 test/matrix:
 	$(GOTEST) ./tests/matrix/ -v -count=1
@@ -127,10 +137,33 @@ test/performance/%:
 test/vectors:
 	go test ./tests/ -run TestPublished -v -count=1
 
-# test — the layers in order of foundation: the datatype, then the spec's artifacts,
-# then the feature suite, then cross-backend agreement (which skips the rows whose
-# services aren't up).
-test: test/core test/vectors test/integration test/matrix
+# test — the fast gate, and one pass over every package: the datatype, the feature
+# suite, every adapter, and cross-backend agreement over the rows that need no
+# service. Each package runs once, so the cache works and an untouched tree re-runs
+# in seconds. It asks for nothing it cannot have — no service rows, so there is
+# nothing to skip and no green covering a backend that never ran.
+#
+# What it deliberately does not do: the performance benchmark, the 10k-claim scale
+# set, and the service rows. `make test/full` is where those live.
+test:
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_ROWS=$(FAST_ROWS) $(GOTEST) ./...
+
+# test/full — everything, and the target CI runs, so the gate and the local run are
+# the same thing. Every backend row is REQUIRED: RANKE_ROWS is unset, so the matrix
+# and the benchmark ask for all of them, and a row that cannot open fails the run
+# rather than skipping. Also the benchmark, the scale set, and the scenario bundles
+# with their docs.
+#
+# Needs the services up (services/{neo4j,redis,s3}.sh native up) and the spec
+# fetched (make docs). The 30m timeout is per package: the matrix and the benchmark
+# are minutes each against live services, well past go test's 10m default.
+#
+# WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
+# which `make clean` owns and .gitignore covers.
+test/full:
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_PERF_SIZE=$(FULL_PERF_SIZE) RANKE_SCALE=1 \
+		$(GOTEST) -timeout 30m ./...
+	@$(MAKE) verify-scenarios verify-docs
 
 test-verbose:
 	$(GOTEST) -v ./tests/...
@@ -303,10 +336,10 @@ lint:
 rule-citations:
 	@./scripts/rule-citations.sh
 
-# Quick quality gate: build the binaries, check formatting, run the lint gate,
-# check rule citations, and reproduce the scenario bundles — the fast "does it
-# compile, is it gofmt-clean, does it pass lint" without vet or the full test
-# suite (-> check). Around 2s on top of the build.
+# The static gates: build the binaries, check formatting, run the lint gate, check
+# rule citations, and reproduce the scenario bundles. Everything that reads the tree
+# rather than running the suite — the tests are `test` (fast) and `test/full`
+# (everything). Around 2s on top of the build.
 #
 # Needs the spec: rule-citations reads $(PAPERS_DIR), which is gitignored, so on
 # a fresh clone `make verify` fails until `make docs` has fetched the papers. A
@@ -323,11 +356,6 @@ rule-citations:
 # now stops here rather than shipping a reference that reproduces nothing.
 verify: build fmt-check lint rule-citations verify-scenarios
 
-# One-shot "is everything green": compile all packages, vet, lint, and
-# run the FULL test suite (feature suite + every adapter's conformance
-# test), not just ./tests/... like `make test`.
-check:
-	go build ./...
-	go vet ./...
-	brokkr lint
-	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) ./...
+# One-shot "is everything green", kept as the name people reach for: the static
+# gates, vet, and the full suite against live services.
+check: verify vet test/full

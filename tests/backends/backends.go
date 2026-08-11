@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -62,6 +63,24 @@ func All() []Backend {
 		{"neo4j/mem", Stacked(openNeo4j, openMem)},
 		{"neo4j/redis/s3", Stacked(openNeo4j, openRedis, openS3)},
 	}
+}
+
+// RowsEnv names the row set a run asks for: comma-separated row names, in any order.
+// It is how the Make layer reaches a Go-level knob — the fast gate asks for the rows
+// needing no service, the full run asks for all of them.
+const RowsEnv = "RANKE_ROWS"
+
+// Requested is the row set this run asks for, per RowsEnv; unset or empty means All.
+// Naming a row is a demand for it, never a hint: an unknown name errors here, and a
+// named row that cannot open is the caller's failure to report, not to skip.
+func Requested() ([]Backend, error) {
+	var names []string
+	for _, n := range strings.Split(os.Getenv(RowsEnv), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	return Select(names)
 }
 
 // Select filters All by name (empty = all) in matrix order; unknown names error.

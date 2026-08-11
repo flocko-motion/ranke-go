@@ -33,8 +33,9 @@ type Config struct {
 	// Reference is the engine every row is compared against; the zero value is
 	// backends.Reference(), the in-memory store on the reference executor.
 	Reference *backends.Backend
-	// Rows are the backends under test; nil means backends.All(). A row whose
-	// name matches the reference is skipped (nothing is compared to itself).
+	// Rows are the backends under test; nil means the set the run asks for
+	// (backends.Requested). A row whose name matches the reference is skipped
+	// (nothing is compared to itself).
 	Rows []backends.Backend
 	// Size is the generator size knob; 0 means defaultSize.
 	Size int
@@ -55,7 +56,7 @@ func Run(t *testing.T, cfg Config) {
 	}
 	rows := cfg.Rows
 	if rows == nil {
-		rows = backends.All()
+		rows = Rows(t)
 	}
 	size := cfg.Size
 	if size == 0 {
@@ -128,6 +129,17 @@ func Run(t *testing.T, cfg Config) {
 		t.Logf("no backend was available to compare against %s — the matrix proved nothing this run "+
 			"(start services: services/neo4j.sh native up)", ref.Name)
 	}
+}
+
+// Rows is the row set this run asks for (RANKE_ROWS, all of them when unset), shared
+// by every test in the package. A name list the Go layer cannot resolve fails the
+// test: a mistyped row would otherwise narrow the run silently, which is the shape of
+// a false green.
+func Rows(t *testing.T) []backends.Backend {
+	t.Helper()
+	rows, err := backends.Requested()
+	require.NoErrorf(t, err, "the row set named by %s", backends.RowsEnv)
+	return rows
 }
 
 // corpus is the query set for a run, narrowed to a single entry in focus mode.

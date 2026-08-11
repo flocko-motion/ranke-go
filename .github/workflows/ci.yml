@@ -50,11 +50,14 @@ jobs:
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
             docker.io/minio/minio:latest server /data
 
-      # The spec the citation test reads (`RANKE_SPEC`, else docs/papers/) lives in
-      # ranke-graph, so it is infrastructure like the services: fetched, not skipped.
+      # The spec the rule-citation gate reads (`RANKE_SPEC`, else docs/papers/) lives
+      # in ranke-graph, so it is infrastructure like the services: fetched, not
+      # skipped. `make verify` fails without it rather than passing blind.
       - name: Fetch the spec
         run: make docs
 
+      # The static gates a runner can run. NOT `make verify`: that includes `make
+      # lint`, which is brokkr — a developer's tool, absent here.
       - name: Build
         run: go build ./...
 
@@ -63,6 +66,10 @@ jobs:
 
       - name: Gofmt
         run: make fmt-check
+
+      # Every rule id the code cites is one the spec declares. Needs the spec above.
+      - name: Rule citations
+        run: make rule-citations
 
       # Neo4j takes tens of seconds to serve, so wait for the wire rather than the
       # container state: a slow boot must not read as a broken backend.
@@ -82,18 +89,12 @@ jobs:
           exit 1
 
       # The full gate, the same target a developer runs locally, so the two cannot
-      # drift apart. Packages run in parallel: internal/exclusive holds a
-      # cross-process lock around the shared neo4j, which is what -p 1 was for.
+      # drift apart: every backend row required, the benchmark, the scale set, and the
+      # scenario bundles with their docs. Packages run in parallel —
+      # internal/exclusive holds a cross-process lock around the shared neo4j, which
+      # is what -p 1 was for.
       - name: Test
         run: make test/full
-
-      # The scenarios' checked-in references must still reproduce byte for byte.
-      - name: Scenario determinism
-        run: make verify-scenarios
-
-      # scenario.md files are generated from main.go comments.
-      - name: Scenario docs in sync
-        run: make verify-docs
 
       # A backend row failing reads as a conformance bug, and the service's own log is
       # what separates that from a service that died under the run.

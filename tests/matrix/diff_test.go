@@ -10,6 +10,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/tests/backends"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 )
 
 // generator.ToyDiff is the smallest archive with a content-inheriting overlay: a
@@ -63,7 +64,7 @@ func eachBackend(t *testing.T, check func(t *testing.T, u ranke.Universe, want u
 	spec := generator.ToyDiff(1)
 	want, wantEnc, _ := toyExpectation(t, spec)
 
-	for _, row := range backends.All() {
+	for _, row := range matrix.Rows(t) {
 		t.Run(row.Name, func(t *testing.T) {
 			u, cleanup, err := row.Open()
 			if errors.Is(err, backends.ErrUnavailable) {
