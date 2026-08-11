@@ -85,12 +85,7 @@ func TestLimitResultsReportsTruncation(t *testing.T) {
 	}, ranke.Scope{Branch: ranke.BranchUniverse})
 	require.NoError(t, err)
 
-	got := 0
-	for rs.Next() {
-		got++
-	}
-	require.NoError(t, rs.Err())
-	require.Equal(t, 3, got, "the cap is honoured, and the extra row never reaches the caller")
+	require.Equal(t, 3, countResults(t, rs), "the cap is honoured, and the extra row never reaches the caller")
 	require.True(t, rs.Report().Truncated)
 	require.NoError(t, rs.Close())
 }
@@ -109,14 +104,24 @@ func TestLimitResultsAtTheAnswerIsNotTruncated(t *testing.T) {
 	}, ranke.Scope{Branch: ranke.BranchUniverse})
 	require.NoError(t, err)
 
-	got := 0
-	for rs.Next() {
-		got++
-	}
-	require.NoError(t, rs.Err())
-	require.Equal(t, len(full), got)
+	require.Equal(t, len(full), countResults(t, rs))
 	require.False(t, rs.Report().Truncated, "a cap exactly at the answer cuts nothing short")
 	require.NoError(t, rs.Close())
+}
+
+// countResults drains rs and returns how many results it carried. The report is an
+// element of the sequence, not a result (`R-QSTREAM`), so a cap on results does not
+// bound it and a count of them does not include it.
+func countResults(t *testing.T, rs ranke.ResultStream) int {
+	t.Helper()
+	n := 0
+	for rs.Next() {
+		if rs.Result().Kind != ranke.KindReport {
+			n++
+		}
+	}
+	require.NoError(t, rs.Err())
+	return n
 }
 
 // readAll runs the universe-scoped closure read at limit and returns the ids.

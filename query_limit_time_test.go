@@ -63,7 +63,7 @@ func TestLimitTimeTruncatesRatherThanErroring(t *testing.T) {
 
 	rs, err := u.Query(context.Background(), q, Scope{Branch: BranchUniverse})
 	require.NoError(t, err, "a read cut short by limit.time is an answer, not an error")
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	rep := rs.Report()
 	require.NotNil(t, rep)
@@ -86,7 +86,7 @@ func TestBoundedReadKeepsWhatItReached(t *testing.T) {
 		Execution: Execution{Report: ReportInfo},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	require.True(t, rs.Report().Truncated)
 	require.NotEmpty(t, got, "50 claims loaded before the deadline must not be discarded")
@@ -106,7 +106,7 @@ func TestBoundedReadFromAnchoredClaimKeepsWhatItReached(t *testing.T) {
 		Execution: Execution{Report: ReportInfo},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	require.True(t, rs.Report().Truncated)
 	require.NotEmpty(t, got, "the hop loop's own load path must keep what it reached")
@@ -130,7 +130,7 @@ func TestBoundedMultiStepYieldsNoIntermediateFrontier(t *testing.T) {
 		Execution: Execution{Report: ReportInfo},
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	require.True(t, rs.Report().Truncated)
 	require.Empty(t, got, "an intermediate frontier is not an answer to this query")
@@ -148,7 +148,7 @@ func TestLimitResultsTruncatesTheSameWay(t *testing.T) {
 
 	rs, err := u.Query(context.Background(), q, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	rep := rs.Report()
 	require.NotNil(t, rep)
@@ -169,7 +169,7 @@ func TestLimitTimeZeroIsUnbounded(t *testing.T) {
 
 	rs, err := u.Query(context.Background(), q, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
-	got := drain(t, rs)
+	got := drainResults(t, rs)
 
 	require.False(t, rs.Report().Truncated, "an unbounded read is not cut short")
 	require.Len(t, got, 202, "the whole chain: 200 links, the base source, the contributor")

@@ -37,8 +37,7 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		// rows, so the bounded answer here is the empty one, reported as cut short.
 		if boundedByTime(err, q.Limit.Time, ctx.Err()) {
 			rep.log("cypher", "limit", ranke.ReportInfo, time.Since(execStart), q.Limit.Time.String())
-			// No rows, so the report is the whole sequence where one was asked for, and
-			// the sequence is empty where none was (`R-QREPORT`).
+			// No rows: the report is the whole sequence, or none of it (`R-QREPORT`).
 			return &cypherStream{results: ranke.AppendReport(nil, rep.finalize(0, true))}, nil
 		}
 		return nil, fmt.Errorf("%w: execute: %w", errQuery, err)
@@ -93,8 +92,7 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 		rep.log("neo4j", "limit", ranke.ReportInfo, 0, strconv.Itoa(n)+" results, truncated")
 	}
 	rep.log("neo4j", "reconstruct", ranke.ReportInfo, time.Since(recStart), strconv.Itoa(len(results))+" results")
-	// The report ends the sequence (`R-QSTREAM`), finalised over the results it reports
-	// on — the count after the cap, and whether the cap cut the read short.
+	// The report ends the sequence (`R-QSTREAM`), finalised over what it counts.
 	return &cypherStream{results: ranke.AppendReport(results, rep.finalize(len(results), truncated))}, nil
 }
 
@@ -623,8 +621,7 @@ func toFloatVal(v any) float64 {
 // --- result stream, report, content shaping (neo4j-native, no reference reuse) ---
 
 // cypherStream is neo4j's ResultStream over an already-resolved slice: Cypher ran
-// the filter/order/limit, so this hands rows out in order, the report last where one
-// was asked for.
+// the filter/order/limit, so this hands rows out in order, the report last.
 type cypherStream struct {
 	results []ranke.QueryResult
 	i       int

@@ -25,6 +25,8 @@ func queryFixture(t *testing.T) (Universe, Contributor, Claim, Claim) {
 	return u, root, a, b
 }
 
+// drain reads every element the stream emits — the report among them, since that is
+// what a generic reader sees (`R-QSTREAM`).
 func drain(t *testing.T, rs ResultStream) []QueryResult {
 	t.Helper()
 	var out []QueryResult
@@ -33,6 +35,21 @@ func drain(t *testing.T, rs ResultStream) []QueryResult {
 	}
 	require.NoError(t, rs.Err())
 	require.NoError(t, rs.Close())
+	return out
+}
+
+// drainResults is the results alone, for a test whose subject is the answer rather
+// than the shape of the sequence carrying it. That shape is asserted where it is the
+// subject — TestQueryReport and TestReportOffEmitsNoReportElement — so dropping the
+// element here hides nothing.
+func drainResults(t *testing.T, rs ResultStream) []QueryResult {
+	t.Helper()
+	var out []QueryResult
+	for _, r := range drain(t, rs) {
+		if r.Kind != KindReport {
+			out = append(out, r)
+		}
+	}
 	return out
 }
 
