@@ -115,15 +115,34 @@ Note: three distinct obligations, none met.
 2. *An empty name is not rejected.* `ValidateQuery` checks `execution.report` but
    never `execution.layer`; I confirmed `Layer: ""` and `Layer: "  "` both validate
    clean, and that the wire form `{"execution":{"layer":""}}` decodes without error.
-3. *The type cannot express the rule.* `Layer string` gives one value to "absent"
-   and "empty", which the rule distinguishes — absent means choose, empty must be
-   rejected. Rejecting `""` at validation would reject every query that simply
-   omits the field. A fix therefore needs `*string` (or an explicit presence flag),
-   which is a wire-shape change, not a validation one-liner.
+3. *The Go type cannot express the rule; the wire schema already does.* This is the
+   half worth separating, because an unrepresentable obligation is a different
+   finding from an unimplemented one.
+
+   In Go, `Layer string` gives one value to "absent" and "empty", which the rule
+   distinguishes — absent means choose, empty must be rejected. Rejecting `""` at
+   validation would reject every query that simply omits the field, so the check
+   cannot be written against the current type at all. Expressing it needs `*string`
+   or an explicit presence flag.
+
+   On the wire the distinction is representable, and the published schema already
+   draws it: `rql.schema.json` gives `$defs/Execution/properties/layer` a
+   `minLength: 1`, so `{"layer":""}` is schema-invalid today. ranke-go does not
+   enforce it — `DecodeQuery` accepts that document, and nothing in the library
+   validates against the schema (`query_codec.go:4` names it as what the codec
+   mirrors, and `query_codec_test.go:14` says the test corpus is checked against it
+   with ajv out of band). So the rejection is specified, unenforced here, and
+   currently inexpressible on the Go side of the same boundary.
 
 Which side should change: the code, on all three. The rule is coherent and the
-identical-result-set clause is exactly what a debugging caller needs. But (3) makes
-this more than a missing check, so it wants its own task rather than a patch.
+identical-result-set clause is exactly what a debugging caller needs.
+
+Sequencing, since the three are not equally ready. (2) is fixable today for wire
+queries alone by honouring the schema's `minLength` in `DecodeQuery` — that closes
+the path a remote caller uses without touching the Go type. (3) is the type decision
+and gates a complete fix. (1) is the feature and should follow the type, since what
+"pinned to layer X" means for a Go caller depends on how absence is spelled. Each
+wants its own task; none belongs in a verification pass.
 
 ---
 
@@ -228,10 +247,13 @@ Ranked by what I would fix first.
 2. **R-QSHAPE's missing route-selection test.** Same shape of fix, same reason.
    Together these two close the case where the reference engine's own tie-breaks are
    verified only by a second engine disagreeing.
-3. **R-QLAYER.** The largest piece of work and the least urgent: nothing today
-   depends on pinning, so it is a missing feature rather than a wrong answer. Needs
-   the `*string` decision before anything else, since the empty-versus-absent
-   distinction cannot be expressed until then.
+3. **R-QLAYER's empty-name rejection, wire side only.** Small and self-contained:
+   the published schema already says `minLength: 1`, so honouring it in
+   `DecodeQuery` closes the remote path without waiting on any type decision.
+4. **R-QLAYER's type and the pinning feature.** The largest piece of work and the
+   least urgent, since nothing today depends on pinning — a missing feature rather
+   than a wrong answer. The `*string` decision comes first: until absence has a
+   spelling, neither the Go-side rejection nor "pinned to layer X" can be stated.
 
 A cross-cutting observation, since two findings share it. The reference executor's
 tie-breaks — sort and route — are today verified *only* by the neo4j rows
@@ -259,3 +281,10 @@ oracle needs exact-answer tests of its own, not just a peer to disagree with it.
   and the matrix agrees the two produce the same sequence — but I did not verify
   independently that Cypher orders `false` before `true` in every version. The
   matrix passing with neo4j live covers this in practice.
+- **Whether the rest of `rql.schema.json` agrees with `ValidateQuery`.** I checked
+  the `layer` property because R-QLAYER sent me there, and found the schema stricter
+  than the code. I did not sweep the other properties for the same divergence, so
+  `minLength` on `layer` may not be the only constraint the schema states and the
+  library does not enforce. That sweep is worth a task: the schema is a projection
+  of the spec, so any gap between it and `ValidateQuery` is a rule going unchecked
+  on the wire path.
