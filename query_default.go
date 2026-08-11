@@ -12,13 +12,13 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// closureOrigin is where the walk starts: Select.Head, else the scope's own head.
-// It says nothing about what the read may reach — a Head narrows a read, so the
-// scope still confines it (-> confinement).
+// closureOrigin is where the walk starts: Select.Head, else the scope's head. It
+// bounds nothing — a Head narrows a read, the scope still confines it.
 func closureOrigin(sel Select, scope Scope) (Id, error) {
 	if sel.Head != nil {
 		return sel.Head, nil
@@ -29,30 +29,48 @@ func closureOrigin(sel Select, scope Scope) (Id, error) {
 	return nil, ErrQueryNoHead
 }
 
-// confinement is the scope's graph as a membership test: closure(root), which for
-// a branch scope is exactly that branch. A nil *confinement admits everything,
-// which is $universe.
+// confinement is the scope's graph as a membership test — closure(root), which for
+// a branch scope is that branch. Nil admits everything, which is $universe.
 //
-// A read is the INTERSECTION of this and closure(Select.Head), so a Head naming a
-// claim in another branch narrows to nothing rather than reading across. Walking
-// from root instead would lose the narrowing; testing each claim keeps both.
+// A read is the INTERSECTION of this and closure(Select.Head): walking from root
+// instead would lose the narrowing. tagKey and members are two tactics for one
+// answer, and neither costs admits any I/O.
 type confinement struct {
 	root    Id
-	members map[string]bool
+	tagKey  string          // branch tag, when tags decide membership
+	height  uint64          // table height the tag is compared against
+	members map[string]bool // swept closure, when they do not
 }
 
-// admits reports whether the scope's graph holds id.
-func (c *confinement) admits(id Id) bool {
-	return c == nil || (id != nil && c.members[id.String()])
+// admits reports whether the scope's graph holds cl. The tag carries the height the
+// claim joined at, so <= height is membership and point-in-time at once.
+func (c *confinement) admits(cl Claim) bool {
+	if c == nil {
+		return true
+	}
+	if cl == nil {
+		return false
+	}
+	if c.tagKey == "" {
+		return c.members[cl.ID().String()]
+	}
+	v := cl.Tag(c.tagKey)
+	if v == "" {
+		return false
+	}
+	at, err := strconv.ParseUint(v, 10, 64)
+	return err == nil && at <= c.height
 }
 
-// confine builds the scope's membership set, or nil when the scope confines
-// nothing. The tagger stamps members with _b_<branch>, but a byte store holds no
-// tags, so the reference sweeps the closure and a native backend uses its tags
-// (-> adapter/storage/neo4j, tagBounded).
+// confine builds the scope's membership test, nil when the scope confines nothing.
+// Tags answer per claim where the Universe keeps them, else the closure is swept.
 func confine(ctx context.Context, u Universe, scope Scope) (*confinement, error) {
 	if scope.Head == nil {
 		return nil, nil
+	}
+	tagged, err := tagConfinement(ctx, u, scope)
+	if err != nil || tagged != nil {
+		return tagged, err
 	}
 	members := map[string]bool{}
 	queue := []Id{scope.Head}
@@ -75,6 +93,23 @@ func confine(ctx context.Context, u Universe, scope Scope) (*confinement, error)
 		}
 	}
 	return &confinement{root: scope.Head, members: members}, nil
+}
+
+// tagConfinement is the branch-tag membership test, nil when tags cannot decide: no
+// tags kept, no named branch, or this branch never tagged. Tagging is an accelerator
+// a read may not depend on and an absent tag reads as non-membership, so the head's
+// own tag — the tagger stamps a branch from there in one pass — is the proof.
+func tagConfinement(ctx context.Context, u Universe, scope Scope) (*confinement, error) {
+	named := scope.Branch != "" && scope.Branch != BranchUniverse && scope.Branch != BranchArchive
+	if !named || !u.Capabilities().Tags {
+		return nil, nil
+	}
+	key := BranchTagKey(scope.Branch)
+	found, _, err := GetTag(ctx, u, scope.Head, key)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &confinement{root: scope.Head, tagKey: key, height: scope.Height}, nil
 }
 
 // DefaultQuery is the reference implementation of Universe.Query, reading only through
