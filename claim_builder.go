@@ -317,7 +317,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 }
 
 // checkDiffEdgeNames requires a unique, non-empty name on every edge of a diff
-// claim beyond the singletons (contributor, diff) — overlay is name-keyed.
+// claim beyond the singletons (contributor, diff) — overlay is name-keyed (`V-DIFFEDGE`).
 func checkDiffEdgeNames(edges []*edge) error {
 	seen := make(map[string]struct{}, len(edges))
 	for _, e := range edges {

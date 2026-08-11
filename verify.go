@@ -273,7 +273,8 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				return // hit the work cap
 			}
 
-			// The delta edges reach the full closure through a diff predecessor.
+			// Every reference is walked, so one that does not resolve fails the load
+			// above (`V-REF`). Delta edges reach the closure through a diff predecessor.
 			if cfg.maxDepth == 0 || cur.depth < cfg.maxDepth {
 				for _, e := range c.Edges() {
 					queue = append(queue, item{e.Reference(), cur.depth + 1})
@@ -382,23 +383,23 @@ type verifyRule struct {
 // verifyRules is the ordered rule set. Register an invariant here; its
 // statement, scope, and implementation all live on this one entry.
 var verifyRules = []verifyRule{
-	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key", claim: ruleSignature},
-	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node", claim: ruleHeight},
-	{name: "content integrity", rule: "content with a content_hash matches it and content_size (inline content is committed by the claim id)", content: ruleContent},
-	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type)", content: ruleContentEncoding},
+	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key (`V-ID`, `V-SIG`)", claim: ruleSignature},
+	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node (`V-HEIGHT`)", claim: ruleHeight},
+	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
+	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim", edge: ruleBranchTableReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
-	{name: "key validity", rule: "a claim is dated within its contributor key's validity window", claim: ruleKeyWindow},
-	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares", edge: ruleDeleteByCopied},
+	{name: "key validity", rule: "a claim is dated within its contributor key's validity window (`R-DEXPIRY`)", claim: ruleKeyWindow},
+	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
 	{name: "structure not deletable", rule: "a contribution/* claim takes no delete_by", claim: ruleStructureNotDeletable},
 }
 
-// ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey.
+// ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey (`V-ID`, `V-SIG`).
 func ruleSignature(_ context.Context, t *claimUnderVerification) error {
 	return t.claim.verifyID(t.pubkey, t.raw)
 }
 
-// ruleKeyWindow: a signature proves who signed, and the window proves they still could.
+// ruleKeyWindow: a signature proves who signed, the window that they still could (`R-DEXPIRY`).
 func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
 	return verifyKeyWindow(t.claim, t.signer)
 }
@@ -440,7 +441,7 @@ func keyBound(signer Claim, field string) (*time.Time, error) {
 	return &t, nil
 }
 
-// ruleHeight: §4.1 committed height matches the reference structure.
+// ruleHeight: §4.1 committed height matches the reference structure (`V-HEIGHT`).
 func ruleHeight(ctx context.Context, t *claimUnderVerification) error {
 	return verifyHeight(ctx, t.claim, t.u)
 }
@@ -482,7 +483,7 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 	return nil
 }
 
-// ruleDeleteByCopied (per edge) is `R-DELBY`: every edge referencing a claim that
+// ruleDeleteByCopied (per edge) is `R-DPLANNED`: every edge referencing a claim that
 // carries delete_by copies that date, so once the bytes are deleted the gap stays
 // explained wherever the claim is reached. The contributor signs the copy; this is where
 // it is held to it, while the referenced bytes are still there to compare against.
@@ -533,9 +534,9 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 }
 
 // verifyID checks that this claim's id is a valid signature by pubkey over
-// H(S(node)), the preimage extracted from the stored raw CBOR. Hashing stored
-// bytes keeps verification stable as the alias taxonomy grows: a newer encoder
-// emits the same claim more compactly, so a re-encode would shift the hash.
+// H(S(node)), the preimage extracted from the stored raw CBOR (`V-ID`, `V-SIG`).
+// Hashing stored bytes keeps verification stable as the alias taxonomy grows: a newer
+// encoder emits the same claim more compactly, so a re-encode would shift the hash.
 func (c *claim) verifyID(pubkey, raw []byte) error {
 	preimage, err := nodePreimage(raw)
 	if err != nil {
@@ -549,8 +550,8 @@ func (c *claim) verifyID(pubkey, raw []byte) error {
 }
 
 // verifyHeight re-derives the claim's generation number from its committed
-// references and enforces §4.1: height == 1 + max(reference heights), 0 for an
-// initial node. The closure walk makes this single-level check transitive.
+// references and enforces §4.1 (`V-HEIGHT`): height == 1 + max(reference heights),
+// 0 for an initial node. The closure walk makes this single-level check transitive.
 func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	edges := c.Edges()
 	var want uint64
@@ -577,9 +578,9 @@ func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	return nil
 }
 
-// resolveSigner returns the claim whose content is the key that signed c's id (§5.7):
-// c itself for an initial node, else the contributor its contribution/contributor edge
-// names. The claim comes back, since its fields bound the key's validity too.
+// resolveSigner returns the claim whose content is the key that signed c's id (§5.7,
+// `V-ROOT`, `V-SIG`): c itself for an initial node, else the contributor its
+// contribution/contributor edge names. The claim's fields bound the key's validity too.
 func resolveSigner(ctx context.Context, c Claim, u Universe) (Claim, error) {
 	if len(c.Edges()) == 0 {
 		return c, nil // an initial node carries its own key
@@ -601,7 +602,7 @@ func resolveSigner(ctx context.Context, c Claim, u Universe) (Claim, error) {
 	return cc, nil
 }
 
-// resolveClaimPubkey reads the signing key off the claim that carries it.
+// resolveClaimPubkey reads the signing key off the claim that carries it (`V-SIG`).
 func resolveClaimPubkey(ctx context.Context, signer Claim, own bool, u Universe) ([]byte, error) {
 	rdr, err := signer.GetContent(ctx, u)
 	if err != nil {
@@ -626,8 +627,8 @@ type contentCarrier interface {
 	Encoding() string
 }
 
-// verifyContentRef checks external content integrity for one node/edge, when the
-// run opts into it. The claim id already commits inline content.
+// verifyContentRef checks external content integrity for one node/edge (`V-CONTENT`),
+// when the run opts into it. The claim id already commits inline content.
 func verifyContentRef(ctx context.Context, cc contentCarrier, cfg *verifyConfig, u Universe) error {
 	hash := cc.GetContentHash()
 	if hash == nil {

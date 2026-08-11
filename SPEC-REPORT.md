@@ -1,121 +1,82 @@
-# Spec report — V-DIFFEDGE
+# Spec report — rule/code binding
 
-From td-0636a5, which checked V-DIFF and V-DIFFEDGE against `computeDiffFields`,
-`computeDiffEdges` and `contentSource`. One disagreement, and one item that was
-investigated and is not one.
+From sd-924c13, which cited rule ids through verification. Findings in both
+directions: checks with no rule, and rules with no check.
 
 A courier, not an artifact: delete it once the spec team has it.
 
-## Finding — V-DIFFEDGE describes a tolerance the implementation does not have
+## Corrected in this change — `R-DELBY` is not a rule
 
-### The rule
+Four sites cited `R-DELBY`, which the spec does not define: `verify.go`,
+`edge.go` (twice), `contribution.go`. The rule those comments state —
+"every edge referencing that claim MUST copy the date, so the gap stays explained
+wherever the claim is reached" — is `R-DPLANNED`, word for word. Corrected to
+`R-DPLANNED` at all four.
 
-> Its own unnamed edges — its `contribution/contributor` and `contribution/diff`
-> among them — are its alone and never inherit.
+This is the failure mode the task names: an id pointing confidently at nothing. It
+survived because nothing checked citations against the spec. `TestCitedRuleIdsExist`
+(`spec_citation_test.go`) now does, and fails naming the id and the file.
 
-### The code
+## Findings — checks with no rule
 
-`checkDiffEdgeNames` (`claim_builder.go:321`) refuses every unnamed edge on a diff
-claim except two, matched by type rather than by name:
+Three checks in `verifyRules` (`verify.go:385`) enforce invariants the spec does not
+state. Left uncited and unchanged.
 
-```go
-if e.typeClass == EdgeClassContribution &&
-    (e.typeSub == "contributor" || e.typeSub == string(EdgeSubtypeDiff)) {
-    continue
-}
-name, ok := e.fields[FieldName]
-if !ok || name == "" {
-    return errDiffEdgeUnnamed
-}
-```
+**1. Branch-table reference layering** — `ruleBranchTableReference`, `verify.go:469`.
+Enforces: a `contribution/branches` claim may be referenced only by another
+branch-table claim. Nothing in the spec says this. `R-C6MERGE` is adjacent — every
+branch table holds its predecessor in provenance — but it constrains what a table
+references, not what may reference a table. **I think the spec owes a rule.** The
+check protects a real property: without it any claim could reference a branch table
+and pull the archive spine into an ordinary closure, which is a layering violation a
+reader of the spec alone would not know to avoid.
 
-Anything else lacking a non-empty name fails at construction with
-`errDiffEdgeUnnamed` (`errors.go:60`). The exempt set has exactly two members and
-is hard-coded.
+**2. Archive head is a branch table** — `ruleArchiveHead`, `verify.go:529`.
+Enforces: an archive's head claim is `contribution/branches`. `R-C6MERGE` implies it
+("the chain from the archive's head reaches the initial table unbroken") without
+stating it as a verification rule. **I think the spec owes a rule**, or `R-C6MERGE`
+should say it outright — the implication is only visible to someone who already
+knows the answer.
 
-### The mismatch
+**3. Structure takes no delete_by** — `ruleStructureNotDeletable`, `verify.go:519`.
+Enforces: a `contribution/*` claim carries no `delete_by`. The deletion rules
+(`R-DPLANNED`, `R-DREQUEST`, `R-DGAP`) say nothing about which classes may be
+scheduled for deletion. **I think the spec owes a rule.** The property matters:
+deleting a contributor or a branch table would remove the record its edges depend
+on, so exempting `contribution/*` is what keeps a scheduled deletion from taking
+the structure with it.
 
-"Among them" reads as two examples drawn from a larger set, so the rule describes a
-diff claim that may carry arbitrary unnamed edges which then never inherit. The
-implementation admits exactly two, and no third is possible.
+## Finding — a rule with no check
 
-The properties the rule states for a diff claim's *own* unnamed edges are therefore
-unreachable in practice. The branch in `computeDiffEdges` (`claim.go:145`) that
-appends self's unnamed edges runs only for the contributor and diff edges.
+**`V-MONO` is not enforced anywhere.** The rule requires every claim to carry
+`created_at` and not to predate what it references:
+`created_at(v) ≥ max created_at(u)` over every reference `u`.
 
-### Recommendation — narrow the rule
+No check derives this. `verify.go` reads `created_at` only for the
+`WithCreatedAfter` walk bound (`verify.go:249`) and the key-validity window, neither
+of which compares a claim against its references. The generator produces monotone
+timestamps and several comments mention the rule, but nothing verifies it.
 
-The restriction is load-bearing, so the rule is the side to change. Suggested
-wording:
+**I think this library owes the check**, not the spec a retraction. `V-MONO` is
+FORCED and foundation-paper-derived, it is per-claim and local — the references are
+already loaded for `V-HEIGHT`, which walks the same edges — and the closure walk
+makes a single-level check transitive, exactly as `verifyHeight` documents for
+height. A claim dated before its own source is precisely the kind of thing an
+archive exists to make impossible.
 
-> A diff claim carries no unnamed edges beyond its `contribution/contributor` and
-> `contribution/diff` edges, which are its alone and never inherit.
+Not added here: this task cites rules, and adding enforcement would change
+behaviour and need its own tests.
 
-That states the closed set rather than implying an open one.
+## Coverage
 
-Two reasons the code should keep the restriction.
+All 17 `V-*` rules are accounted for. Sixteen are cited in the code:
 
-**Overlay is name-keyed, so an unnamed edge would be unrevisable.**
-`computeDiffEdges` inherits, omits and overlays through a `map[string]*edge` keyed
-by the `name` field. An unnamed edge has no key, so no successor delta could
-replace it, omit it, or restate it. Admitting one would create an edge that is
-permanently fixed from the moment it is written — in a format whose whole purpose
-is revision by successive deltas.
+`V-ALIAS` `V-CONTENT` `V-DIFF` `V-DIFFEDGE` `V-HASH` `V-HEIGHT` `V-ID` `V-PROV`
+`V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TIME` `V-TYPE`
 
-**The two exemptions are principled, and the reasoning does not extend.**
-`checkEdgeCardinality` (`claim_builder.go:342`) caps a claim at one
-`contribution/contributor` and one `contribution/diff` edge. Those two therefore
-take their identity from their type: "the contributor edge" names exactly one edge
-without a `name` field. No other edge type carries that cap, so no other type could
-be identified without a name. The closed set is not an arbitrary limit; it is the
-set of edges that can work under name-keyed overlay.
+`V-MONO` is the seventeenth, uncited because unenforced — see above.
 
-Against relaxing the code: an unnamed edge on a delta might look convenient for
-adding provenance without inventing a name — a `derivation/*` edge citing a new
-source, say. Naming it costs a single field, and the unnamed form buys a
-write-once edge no later revision can touch. There is no case for it that
-naming does not serve better.
-
-One consequence worth noting, since it shows the restriction is workable rather
-than merely tolerable. A `derivation/*` claim must carry at least one
-`derivation/*` edge (the §3.5 provenance invariant), so a diff delta of a
-derivation claim must carry a *named* derivation edge. That combination is
-reachable and is what `TestDiffEdgeUnnamedDoesNotInherit` builds.
-
-### Evidence
-
-`TestDiffClaimRefusesUnnamedEdge` (`claim_diff_rules_test.go:219`) asserts the
-refusal, expecting `errDiffEdgeUnnamed`.
-
-`TestDiffEdgeOmitCannotReachTheStructuralEdges` shows the two exempt edges survive
-an `edges_diff_omit` list that names them, since omission deletes from the by-name
-map they are absent from.
-
-## Investigated and not a finding — the omit list
-
-An earlier draft of this work reported the omit list's inheritance as a second
-disagreement. **It is not one, and no rule change is called for.** It is recorded
-here so the item is closed rather than reaching the spec team secondhand.
-
-V-DIFF reads:
-
-> An omit list is an ordinary field, inherited as data, and applies only where the
-> claim itself states it.
-
-Both halves hold in `computeDiffFields` (`node.go:102`):
-
-- *inherited as data* — the merged map is seeded from `n.diffNode.fieldMap()`, so a
-  claim stating no omit of its own still reports its predecessor's list.
-- *applies only where the claim itself states it* — the drop reads
-  `n.fields[FieldFieldsDiffOmit]`, the claim's own fields, never the merged map. An
-  inherited list drops nothing.
-
-The earlier report came from a paraphrase whose closing clause said the list does
-not inherit down a chain. The rule as written says the opposite and is correct.
-
-Both halves are pinned by tests: `TestDiffOmitListIsItselfAnInheritedField` and
-`TestDiffOmitEffectDoesNotInheritDownAChain`.
-
-The behaviour is worth knowing even though it needs no change. A materialised claim
-reports an omit list it never stated, so a client reading `fields_diff_omit` off one
-learns nothing about what was dropped at that link.
+Two of the sixteen are cited where they are implemented rather than verified, which
+is worth knowing if the citation set is ever read as a verification inventory:
+`V-ALIAS` at the alias tables (`field_taxonomy.go`), `V-SER` at the codec
+(`codec.go`). Both were already cited before this change.

@@ -125,8 +125,9 @@ func (c *claim) Edges(filters ...Filter) []Edge {
 	return out
 }
 
-// computeDiffEdges builds diffEdges keyed by name: inherit the predecessor's named
-// edges, drop edges_diff_omit, overlay self's named, append self's unnamed singletons.
+// computeDiffEdges builds diffEdges keyed by name (`V-DIFFEDGE`): inherit the
+// predecessor's named edges, drop edges_diff_omit, overlay self's named, append
+// self's unnamed singletons.
 func (c *claim) computeDiffEdges() {
 	named := map[string]*edge{}
 	for _, e := range c.diffClaim.effectiveEdges() {

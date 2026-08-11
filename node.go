@@ -98,7 +98,8 @@ func (n *node) flattened() *node {
 	return &out
 }
 
-// computeDiffFields builds diffFields: inherit diffNode → drop fields_diff_omit → overlay self.
+// computeDiffFields builds diffFields (`V-DIFF`): inherit diffNode → drop
+// fields_diff_omit → overlay self.
 func (n *node) computeDiffFields() {
 	m := make(map[string]string, len(n.diffNode.fieldMap())+len(n.fields))
 	for k, v := range n.diffNode.fieldMap() {
@@ -114,7 +115,7 @@ func (n *node) computeDiffFields() {
 }
 
 // contentSource is the node supplying this node's content: self when it sets its own
-// (inline or content_hash), else the diff predecessor's source — content is inherited.
+// (inline or content_hash), else the predecessor's — content inherits whole (`V-DIFF`).
 func (n *node) contentSource() *node {
 	if n.content != nil || n.contentHash != nil || n.diffNode == nil {
 		return n

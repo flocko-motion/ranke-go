@@ -132,7 +132,7 @@ func HeightOf(refs ...Claim) uint64 {
 }
 
 // requiresProvenance reports whether claims of this class need at least
-// one derivation/* edge (§3.5).
+// one derivation/* edge (§3.5, `V-PROV`).
 func requiresProvenance(c NodeClass) bool {
 	switch c {
 	case NodeClassDerivation, NodeClassEntity, NodeClassRelation:

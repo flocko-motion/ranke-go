@@ -155,7 +155,7 @@ var reservedTypes = map[string]bool{
 }
 
 // StrandedByDeletion reports which of own a walk from heads reaches only through a
-// claim carrying delete_by (`R-DELBY`): deleting one removes the record its edges lived
+// claim carrying delete_by (`R-DPLANNED`): deleting one removes the record its edges lived
 // in, so a walk stops at the gap while what lay behind stays present.
 //
 // The search stays inside own — a claim is referenced only by claims made after it, so

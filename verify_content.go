@@ -17,7 +17,7 @@ import (
 // verification is a property of the bytes alone, wherever an adapter read them.
 
 // VerifyContent checks data against the content hash addresses and the expected
-// size, answering ErrIntegrity on either mismatch.
+// size, answering ErrIntegrity on either mismatch (`V-CONTENT`, `V-HASH`).
 func VerifyContent(hash Id, size uint64, data []byte) error {
 	if hash == nil {
 		return errNilHash
