@@ -263,7 +263,7 @@ func TestProvenanceSatisfied(t *testing.T) {
 // (it is an external artifact, not an interpretation of other claims), but
 // it is NOT provenance-free — it still carries a contribution/contributor
 // edge naming who ingested it. Provenance is universal (§4.5); only the
-// initial node is exempt (see TestInitialNodeMayLackProvenance).
+// initial claim is exempt (see TestInitialClaimMayLackProvenance).
 func TestSourceCarriesProvenance(t *testing.T) {
 	ctr := contributor(t)
 	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte("x")).WithEncoding(EncodingPlain).WithHeight(HeightOf(ctr)).Sign()
@@ -272,15 +272,15 @@ func TestSourceCarriesProvenance(t *testing.T) {
 		"a source claim still carries its contribution/contributor edge — its provenance")
 }
 
-// TestInitialNodeMayLackProvenance: a contribution/contributor claim MAY
-// have no edges — it is an initial node, provenance-free and valid (§4.5).
+// TestInitialClaimMayLackProvenance: a contribution/contributor claim MAY
+// have no edges — it is an initial claim, provenance-free and valid (§4.5).
 // This is a datatype property, not a uniqueness rule: a closure may hold
-// several initial nodes (e.g. two merged archives), and all verify. The
+// several initial claims (e.g. two merged archives), and all verify. The
 // "only the first founding claim" restriction is a write-path concern
 // enforced by the Sequencer, not here.
-func TestInitialNodeMayLackProvenance(t *testing.T) {
+func TestInitialClaimMayLackProvenance(t *testing.T) {
 	root := contributor(t)
-	require.Empty(t, root.Edges(), "an initial node (root contributor) has no edges")
+	require.Empty(t, root.Edges(), "an initial claim (root contributor) has no edges")
 	require.True(t, root.IsContributor())
 }
 
@@ -545,9 +545,9 @@ func TestBuilderHeightRequiredWhenReferencing(t *testing.T) {
 	require.ErrorIs(t, err, errHeightRequired)
 }
 
-// TestBuilderHeightRejectedOnInitialNode: an initial node (no edges) may not
+// TestBuilderHeightRejectedOnInitialClaim: an initial claim (no edges) may not
 // carry a nonzero height.
-func TestBuilderHeightRejectedOnInitialNode(t *testing.T) {
+func TestBuilderHeightRejectedOnInitialClaim(t *testing.T) {
 	_, err := NewClaim(NodeContributor, nil).
 		WithInlineContent([]byte("pubkey-ish")).
 		WithEncoding(EncodingOctetStream).
@@ -595,7 +595,7 @@ func TestHeightOf(t *testing.T) {
 	a := srcClaim(t, root, "a")                 // height 1
 	b := entityClaim(t, root, "person", "b", a) // height 2
 	require.Equal(t, uint64(0), HeightOf(), "no references → 0")
-	require.Equal(t, uint64(1), HeightOf(root), "over an initial node → 1")
+	require.Equal(t, uint64(1), HeightOf(root), "over an initial claim → 1")
 	require.Equal(t, uint64(3), HeightOf(a, b), "1 + max(1, 2)")
 }
 

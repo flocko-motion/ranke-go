@@ -185,7 +185,7 @@ func (b *builder) add(c ranke.Claim, err error) ranke.Claim {
 	return c
 }
 
-// contributors builds the operator plus spec.Contributors-1 more initial nodes
+// contributors builds the operator plus spec.Contributors-1 more initial claims
 // carrying keys. The Sequencer stores the operator, so only the others batch.
 func (b *builder) contributors(op ranke.Contributor) {
 	b.contribs = []ranke.Contributor{op}

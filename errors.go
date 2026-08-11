@@ -62,7 +62,7 @@ var (
 	errTwoContributors          = errors.New("ranke.NewClaim: a claim may carry only one contribution/contributor edge")
 	errTwoDiffEdges             = errors.New("ranke.NewClaim: a claim may carry only one contribution/diff edge")
 	errHeightRequired           = errors.New("ranke.NewClaim: a claim with references must declare its height (use WithHeight or WithAutoHeight)")
-	errHeightOnInitial          = errors.New("ranke.NewClaim: an initial node (no references) must have height 0")
+	errHeightOnInitial          = errors.New("ranke.NewClaim: an initial claim (no references) must have height 0")
 	errHeightWithAuto           = errors.New("ranke.NewClaim: WithHeight and WithAutoHeight are mutually exclusive")
 
 	// --- Graph ---

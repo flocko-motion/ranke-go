@@ -113,7 +113,7 @@ func isTypedNil(i any) bool {
 }
 
 // HeightOf returns the generation number a new claim referencing refs must
-// carry: 1 + max(refs' heights), or 0 for an initial node. Pass every claim the
+// carry: 1 + max(refs' heights), or 0 for an initial claim. Pass every claim the
 // new one references — contributor and predecessor edges count too.
 func HeightOf(refs ...Claim) uint64 {
 	var max uint64

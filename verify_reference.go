@@ -23,7 +23,7 @@ func referenceIds(c Claim) []Id {
 
 // verifyHeight re-derives the claim's generation number from its committed
 // references and enforces §4.1 (`V-HEIGHT`): height == 1 + max(reference heights),
-// 0 for an initial node. The closure walk makes this single-level check transitive.
+// 0 for an initial claim. The closure walk makes this single-level check transitive.
 func verifyHeight(ctx context.Context, c Claim, u Universe) error {
 	var want uint64
 	if ids := referenceIds(c); len(ids) > 0 {

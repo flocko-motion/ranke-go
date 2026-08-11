@@ -14,7 +14,7 @@ import (
 // purely as a datatype.
 
 // newGraph builds an in-memory Graph and, when root is non-nil, seeds it with
-// that initial claim — adding the initial node is optional and done via
+// that initial claim — adding the initial claim is optional and done via
 // AddClaims, not NewGraph. A nil Universe makes the Graph fall back to its own
 // in-process memory store, so these white-box tests need nothing external.
 func newGraph(t *testing.T, root Contributor) Graph {
@@ -104,16 +104,16 @@ func TestAddClaimStoresWithoutValidating(t *testing.T) {
 	require.True(t, contains(t, g, ent.ID()), "the added claim is an open head, reachable")
 }
 
-// TestAddClaimAllowsMultipleInitialNodes: the frontier tracker does not forbid
-// several edge-less initial nodes — a multi-root graph (§Validity, the merged-
+// TestAddClaimAllowsMultipleInitialClaims: the frontier tracker does not forbid
+// several edge-less initial claims — a multi-root graph (§Validity, the merged-
 // archive case) is representable, both roots standing as open heads.
-func TestAddClaimAllowsMultipleInitialNodes(t *testing.T) {
+func TestAddClaimAllowsMultipleInitialClaims(t *testing.T) {
 	ctx := context.Background()
 	a := contributor(t)
 	b := contributor(t)
 	g := newGraph(t, a)
-	require.NoError(t, g.AddClaims(ctx, b), "a second initial node is accepted")
-	require.ElementsMatch(t, []Id{a.ID(), b.ID()}, g.Heads(), "both initial nodes are open heads")
+	require.NoError(t, g.AddClaims(ctx, b), "a second initial claim is accepted")
+	require.ElementsMatch(t, []Id{a.ID(), b.ID()}, g.Heads(), "both initial claims are open heads")
 }
 
 // TestAddClaimIdempotent: adding the same claim twice is a no-op (§5.4).

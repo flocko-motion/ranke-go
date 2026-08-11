@@ -383,7 +383,7 @@ type verifyRule struct {
 // statement, scope, and implementation all live on this one entry.
 var verifyRules = []verifyRule{
 	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key (`V-ID`, `V-SIG`)", claim: ruleSignature},
-	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node (`V-HEIGHT`)", claim: ruleHeight},
+	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial claim (`V-HEIGHT`)", claim: ruleHeight},
 	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
@@ -559,11 +559,11 @@ func (c *claim) verifyID(pubkey, raw []byte) error {
 }
 
 // resolveSigner returns the claim whose content is the key that signed c's id (§5.7,
-// `V-ROOT`, `V-SIG`): c itself for an initial node, else the contributor its
+// `V-ROOT`, `V-SIG`): c itself for an initial claim, else the contributor its
 // contribution/contributor edge names. The claim's fields bound the key's validity too.
 func resolveSigner(ctx context.Context, c Claim, u Universe) (Claim, error) {
 	if len(c.Edges()) == 0 {
-		return c, nil // an initial node carries its own key
+		return c, nil // an initial claim carries its own key
 	}
 	var target Id
 	for _, e := range c.Edges() {

@@ -43,7 +43,7 @@ func main() {
 	s := helpers.New("01 - personal knowledge graph",
 		time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC))
 
-	// --- 1. Alice as initial node, signed by her Ed25519 key. Her content
+	// --- 1. Alice as initial claim, signed by her Ed25519 key. Her content
 	// is her multikey-encoded public key (§5.7). She is the Sequencer's
 	// self, stored at bootstrap, so she does not join the contribution batch. ---
 	aliceKey := must(ranke.LoadPrivateKey(helpers.KeyPath("alice.pem")))

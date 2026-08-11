@@ -43,7 +43,7 @@ type Node interface {
 	EncodingClass() EncodingClass
 	EncodingSub() string
 	CreatedAt() time.Time
-	// Height is the claim's generation number: 0 for an initial node, else 1 + max
+	// Height is the claim's generation number: 0 for an initial claim, else 1 + max
 	// over referenced heights (§4.1). In the node hash, so the id commits to it.
 	Height() uint64
 	// Edges returns the ids of edges created with this claim, in canonical order.
@@ -64,7 +64,7 @@ type node struct {
 	content       []byte // inline content bytes, kept with the node; nil when external or none
 	contentSize   uint64 // paired with content/contentHash to defend against truncation/extension
 	createdAt     time.Time
-	height        uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
+	height        uint64 // generation number: 0 for an initial claim, else 1 + max(reference heights)
 	edges         []Id   // edge ids, sorted canonically
 	fields        map[string]string
 	id            Id // = Sign(H(S(node))); also the claim id
