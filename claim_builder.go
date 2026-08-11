@@ -149,7 +149,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err := checkFields(cfg.Fields); err != nil {
 		return nil, err
 	}
-	if err := CheckDeletable(cfg.TypeClass, cfg.Fields); err != nil {
+	if err := CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields); err != nil {
 		return nil, err
 	}
 

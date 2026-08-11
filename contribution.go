@@ -203,18 +203,27 @@ func scheduledForDeletion(c Claim) bool {
 	return err == nil
 }
 
-// CheckDeletable reports whether a claim of this class may schedule its own removal.
-// The contribution/* family may not: the branch tables and head claims are the
-// structure a read walks, a contributor claim is the key its signatures are checked
-// against, and a limiting claim is the restriction that must outlast its target.
-func CheckDeletable(class NodeClass, fields map[string]string) error {
-	if class != NodeClassContribution {
+// CheckDeletable reports whether a claim of this type may schedule its own removal
+// (`R-DSTRUCT`). Four subtypes may not, each being what another rule reads: a
+// contributor's pubkey (`V-SIG`), the chain to the initial table (`V-ARCHIVE`), a
+// gap's explanation (`R-DGAP`), a key's window (`R-DEXPIRY`). Subtypes beyond them
+// are open vocabulary (`V-TYPE`), so any other claim MAY.
+func CheckDeletable(class NodeClass, sub string, fields map[string]string) error {
+	if class != NodeClassContribution || !undeletableSubtype[sub] {
 		return nil
 	}
 	if _, ok := fields[FieldDeleteBy]; ok {
-		return WithDetail(ErrStructureNotDeletable, string(class))
+		return WithDetail(ErrStructureNotDeletable, string(class)+"/"+sub)
 	}
 	return nil
+}
+
+// undeletableSubtype is R-DSTRUCT's closed set, by subtype.
+var undeletableSubtype = map[string]bool{
+	string(NodeSubtypeContributor): true,
+	string(NodeSubtypeBranches):    true,
+	"delete":                       true,
+	"expiry":                       true,
 }
 
 // AdmitCreatedAt applies step 2's timestamp rule: a claim is dated at or before the

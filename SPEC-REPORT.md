@@ -17,34 +17,38 @@ This is the failure mode the task names: an id pointing confidently at nothing. 
 survived because nothing checked citations against the spec. `TestCitedRuleIdsExist`
 (`spec_citation_test.go`) now does, and fails naming the id and the file.
 
-## Findings — checks with no rule
+## Closed — three checks with no rule, now ruled
 
-Three checks in `verifyRules` (`verify.go:385`) enforce invariants the spec does not
-state. Left uncited and unchanged.
+Reported as checks enforcing invariants the spec did not state. ranke-graph 0.16.2
+added a rule for each. Two landed **more specific than the report asked**, so the
+verifiers diverged from the new rules in opposite directions; both are corrected
+here, each with a test that fires.
 
-**1. Branch-table reference layering** — `ruleBranchTableReference`, `verify.go:469`.
-Enforces: a `contribution/branches` claim may be referenced only by another
-branch-table claim. Nothing in the spec says this. `R-C6MERGE` is adjacent — every
-branch table holds its predecessor in provenance — but it constrains what a table
-references, not what may reference a table. **I think the spec owes a rule.** The
-check protects a real property: without it any claim could reference a branch table
-and pull the archive spine into an ordinary closure, which is a layering violation a
-reader of the spec alone would not know to avoid.
+**1. Archive head — `V-ARCHIVE`, exact match.** "An archive's head MUST be a
+`contribution/branches` claim." That is `ruleArchiveHead` word for word. Cited, no
+change.
 
-**2. Archive head is a branch table** — `ruleArchiveHead`, `verify.go:529`.
-Enforces: an archive's head claim is `contribution/branches`. `R-C6MERGE` implies it
-("the chain from the archive's head reaches the initial table unbroken") without
-stating it as a verification rule. **I think the spec owes a rule**, or `R-C6MERGE`
-should say it outright — the implication is only visible to someone who already
-knows the answer.
+**2. Branch-table reference — `V-TABLEREF`, the code was looser.** The rule permits a
+table to reach a table "only through its `contribution/diff` or
+`contribution/branches` edge (`R-C6MERGE`)". `ruleBranchTableReference` exempted the
+referencing claim wholesale, so a table reached another through any edge type at all.
+The exemption is now those two lineage edges, and the registry statement — which read
+only "may be referenced only by another branch-table claim" — says so too.
+`TestTableRefThroughOtherEdgeFails` covers it.
 
-**3. Structure takes no delete_by** — `ruleStructureNotDeletable`, `verify.go:519`.
-Enforces: a `contribution/*` claim carries no `delete_by`. The deletion rules
-(`R-DPLANNED`, `R-DREQUEST`, `R-DGAP`) say nothing about which classes may be
-scheduled for deletion. **I think the spec owes a rule.** The property matters:
-deleting a contributor or a branch table would remove the record its edges depend
-on, so exempting `contribution/*` is what keeps a scheduled deletion from taking
-the structure with it.
+**3. Structure not deletable — `R-DSTRUCT`, the code was stricter.** The rule names
+four subtypes and says "Any other claim MAY". `CheckDeletable` refused by class, so
+every `contribution/*` claim was refused, including an application's own — whose
+subtype is open vocabulary (`V-TYPE`). The check is now those four subtypes, and its
+comment carries the rule's reasoning for why the set is closed: each is what another
+rule reads — a contributor's pubkey (`V-SIG`), the chain to the initial table
+(`V-ARCHIVE`), a gap's explanation (`R-DGAP`), a key's window (`R-DEXPIRY`).
+`TestOpenContributionSubtypeMayScheduleDeletion` covers it, bounded by
+`TestNamedContributionSubtypesRefuseDeletion`.
+
+Neither divergence was reachable from a generated archive — the generator produces
+neither a table linked by a derivation edge nor an open `contribution/*` subtype — so
+the matrix could not have caught either. That is how both sat unnoticed.
 
 ## Finding — a rule with no check
 
@@ -64,19 +68,21 @@ makes a single-level check transitive, exactly as `verifyHeight` documents for
 height. A claim dated before its own source is precisely the kind of thing an
 archive exists to make impossible.
 
-Not added here: this task cites rules, and adding enforcement would change
-behaviour and need its own tests.
+Still open, filed as sd-334cf7. Not implemented here: enforcement changes behaviour
+and needs its own tests.
 
 ## Coverage
 
-All 17 `V-*` rules are accounted for. Sixteen are cited in the code:
+Against ranke-graph 0.16.2, which took the `V-*` set from 17 to 19. All 19 are
+accounted for. Eighteen are cited in the code:
 
-`V-ALIAS` `V-CONTENT` `V-DIFF` `V-DIFFEDGE` `V-HASH` `V-HEIGHT` `V-ID` `V-PROV`
-`V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TIME` `V-TYPE`
+`V-ALIAS` `V-ARCHIVE` `V-CONTENT` `V-DIFF` `V-DIFFEDGE` `V-HASH` `V-HEIGHT` `V-ID`
+`V-PROV` `V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TABLEREF` `V-TIME`
+`V-TYPE`
 
-`V-MONO` is the seventeenth, uncited because unenforced — see above.
+`V-MONO` is the nineteenth, uncited because unenforced — see above.
 
-Two of the sixteen are cited where they are implemented rather than verified, which
-is worth knowing if the citation set is ever read as a verification inventory:
-`V-ALIAS` at the alias tables (`field_taxonomy.go`), `V-SER` at the codec
-(`codec.go`). Both were already cited before this change.
+Two of the eighteen are cited where they are implemented rather than verified, worth
+knowing if the citation set is ever read as a verification inventory: `V-ALIAS` at the
+alias tables (`field_taxonomy.go`), `V-SER` at the codec (`codec.go`). Both were
+already cited before this change.

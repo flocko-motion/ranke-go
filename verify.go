@@ -387,11 +387,11 @@ var verifyRules = []verifyRule{
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node (`V-HEIGHT`)", claim: ruleHeight},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
-	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim", edge: ruleBranchTableReference},
-	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches)", archive: ruleArchiveHead},
+	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
+	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches) (`V-ARCHIVE`)", archive: ruleArchiveHead},
 	{name: "key validity", rule: "a claim is dated within its contributor key's validity window (`R-DEXPIRY`)", claim: ruleKeyWindow},
 	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
-	{name: "structure not deletable", rule: "a contribution/* claim takes no delete_by", claim: ruleStructureNotDeletable},
+	{name: "structure not deletable", rule: "a contribution/{contributor,branches,delete,expiry} claim takes no delete_by (`R-DSTRUCT`)", claim: ruleStructureNotDeletable},
 }
 
 // ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey (`V-ID`, `V-SIG`).
@@ -464,11 +464,14 @@ func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVeri
 	return nil
 }
 
-// ruleBranchTableReference (per edge): only a branch-table claim may reference
-// a contribution/branches claim, keeping that lineage its own layer.
+// ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch-table claim may
+// reference a contribution/branches claim, and only through its lineage edges.
 func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
-	if t.claim.Node().Type() == NodeBranches {
-		return nil // a branch table may reference branch tables (its lineage)
+	// A table reaches its predecessor through the chain `R-C6MERGE` builds, and
+	// through nothing else: any other edge would take the spine off its own layer.
+	if t.claim.Node().Type() == NodeBranches &&
+		(e.Type() == EdgeTypeDiff || e.Type() == EdgeTypeBranches) {
+		return nil
 	}
 	ref, err := GetClaim(ctx, t.u, e.Reference())
 	if errors.Is(err, ErrNotFound) {
@@ -514,18 +517,19 @@ func quoteOrNone(s string) string {
 	return s
 }
 
-// ruleStructureNotDeletable: the contribution/* family is what a read walks and what
-// signatures are checked against, so none of it schedules its own removal.
+// ruleStructureNotDeletable (`R-DSTRUCT`): the four subtypes another rule reads do
+// not schedule their own removal. An application's own contribution/* claim may.
 func ruleStructureNotDeletable(_ context.Context, t *claimUnderVerification) error {
 	n := t.claim.Node()
 	fields := map[string]string{}
 	if due, err := n.GetField(FieldDeleteBy); err == nil {
 		fields[FieldDeleteBy] = due
 	}
-	return CheckDeletable(NodeClass(n.TypeClass()), fields)
+	return CheckDeletable(NodeClass(n.TypeClass()), n.TypeSub(), fields)
 }
 
-// ruleArchiveHead (per archive): an archive's head is a contribution/branches claim.
+// ruleArchiveHead (per archive): an archive's head is a contribution/branches
+// claim (`V-ARCHIVE`).
 func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 	if t.claim.Node().Type() != NodeBranches {
 		return WithDetail(errNotBranchTable, "got "+t.claim.Node().Type())
