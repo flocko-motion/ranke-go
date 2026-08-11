@@ -153,7 +153,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 	// of routing: a path coming back to a frontier node still yields a result.
 	reach := func(c Claim, hop int) {
 		k := c.ID().String()
-		if hop < minHops || collected[k] || !conf.admits(c.ID()) || !matchTypeList(step.Nodes, c.Node().Type()) {
+		if hop < minHops || collected[k] || !conf.admits(c) || !matchTypeList(step.Nodes, c.Node().Type()) {
 			return
 		}
 		collected[k] = true
