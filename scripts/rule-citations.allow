@@ -28,11 +28,6 @@ R-ABRANCH      another layer's: per-branch rights are checked before the library
 R-ATABLE       another layer's: rights over $branches are the server's to check
 R-AUNIVERSE    another layer's: the privileged $universe read is the server's to grant
 
-# ADT rules — one left. The closure verifier has a rule per invariant
-# (VerifyRuleSet) and no monotonicity rule among them: created_at is defaulted and
-# normalised at build time, never compared against a reference's.
-V-MONO         nothing to cite: no rule holds a claim to its references' created_at
-
 # Contribution rules — the six-step procedure, whose write path is the Sequencer
 # in adapter/sequencer.
 R-C1BASE       citation owed: base (k, t) at open, adapter/sequencer
@@ -43,7 +38,6 @@ R-C3LIMIT      citation owed: a branch holds every limiting claim against what i
 R-C4KEY        citation owed: claim dated inside its key's window, verify.go ruleKeyWindow
 R-C4SEAL       citation owed: sealed once verified, adapter/sequencer
 R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequencer
-R-C6REQUEST    citation owed: a request becomes its limiting claim in the same merge
 R-C6SIGN       citation owed: Sequencer claims name its own contributor, adapter/sequencer
 
 # Deletion — the requested form, which the Sequencer carries out.
