@@ -4,9 +4,14 @@ Task sd-4465f2. Nineteen FORCED ADT rules, checked against `docs/papers/spec/ran
 (fetched by `make docs` at the start of this task) and against the code as it stands on the
 branch. Report only; no code changed.
 
-Seven were verified earlier today and are recorded here as OUT OF SCOPE with the site that
-covers them, rather than re-checked: V-SER, V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF,
-V-ARCHIVE, V-MONO.
+Seven were verified earlier today and the task said to say so rather than redo them: V-SER,
+V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF, V-ARCHIVE, V-MONO. They are marked SKIPPED, which is
+not one of the task's five verdicts, because none of the five fits a rule deliberately not
+examined. OUT OF SCOPE means another layer's rule, and these are FORCED ADT rules — portable
+to every implementation, the opposite of another layer's concern — so labelling them that way
+would tell a reader skimming the counts exactly the wrong thing about the most important
+family in the spec. Each SKIPPED entry names the site that covers it and the rule text I
+re-read, so it can be checked without being re-verified here.
 
 One structural observation governs several verdicts and is stated once here. The library has
 three doors a claim can come in by:
@@ -159,7 +164,7 @@ Note: distinct from V-SIGN, as the task warns. V-SIGN (the Ed25519 choice and th
 framing) is `sign_test.go`, verified earlier today; what is checked here is only that the
 signature answers to the contributor's key.
 
-### V-MONO — OUT OF SCOPE (verified earlier today)
+### V-MONO — SKIPPED (verified earlier today)
 
 Rule: "Every claim MUST carry `created_at`, the UTC time it was added, and MUST NOT predate
 what it references: created_at(v) >= max created_at(u) over every reference u of v."
@@ -179,22 +184,35 @@ the layout ends in a literal `Z` rather than `Z07:00`, `time.Parse` rejects an o
 UTC is enforced rather than assumed; the fixed-width `.000000000` likewise rejects a
 timestamp with fewer digits. Per field:
 
-- `created_at` — encoded at `codec.go:159`, parsed at `codec.go:406` on every decode. Held.
+- `created_at` — encoded at `codec.go:159`, parsed at `codec.go:406` on every decode. Held: a
+  timestamp that will not parse fails the decode, so no such claim reaches a verifier at all.
 - `pubkey_valid_from` / `pubkey_expires_after` — parsed by `keyBound` (`verify.go:431`), which
-  answers `errKeyWindowField` on anything unparsable. Held, with the caveat below.
+  answers `errKeyWindowField` on anything unparsable. Held only along one path; see below.
 - `delete_by` — never parsed anywhere. It is read as an opaque string at `verify.go:506-507`
   (compared for equality between claim and edge), copied as a string at `edge.go:151-157`, and
   tested only for presence at `contribution.go:202,215`. `delete_by: "whenever"` is accepted by
   construction, by decode, and by every verifier rule.
 
 Test: `verify_test.go:123` `TestVerifyKeyWindowRejectsUnparsableBound` covers the pubkey
-bounds. NONE for `delete_by`.
+bounds along the path that is checked. NONE for `delete_by`.
 
-Note: two sub-findings. The `delete_by` gap is the substantive one — a scheduled deletion
-whose date no reader can parse is a deletion nobody can carry out, and `R-DPLANNED` leans on
-that date. Secondly, `keyBound` runs only inside `ruleKeyWindow`, which runs against a claim's
-SIGNER; a contributor claim that signs nothing inside the closure never has its own bounds
-parsed. Separately and cosmetically, `codec.go:159` repeats the layout as a literal instead of
+Note: the gap has two paths, and they are one finding rather than a finding and an aside —
+whoever fixes the first should fix the second in the same pass, since both are a declared
+timestamp that no code ever reads as a time.
+
+The first is `delete_by`, and it is the substantive one: a scheduled deletion whose date no
+reader can parse is a deletion nobody can carry out, and `R-DPLANNED` leans on that date.
+
+The second is the pubkey window. `keyBound` runs only inside `ruleKeyWindow`, and
+`ruleKeyWindow` judges a claim against its SIGNER — so a contributor claim's own bounds are
+parsed when it signs something inside the closure, and never otherwise. A contributor claim
+carrying `pubkey_expires_after: "soon"` that signs nothing in the walk is verified without
+its bounds being looked at, and the same claim becomes a hard failure later, the moment it
+signs. The rule says the timestamp MUST be RFC 3339 wherever it appears, not merely wherever
+it is currently consulted; both fields want validating where they are written or decoded,
+rather than where they happen to be read.
+
+Separately and cosmetically, `codec.go:159` repeats the layout as a literal instead of
 using `iso8601Nano` three lines up, and `adapter/storage/neo4j/convert.go:206` declares its
 own copy of the same constant — three definitions of one contractual format.
 
@@ -212,7 +230,7 @@ Test: `verify_test.go:514` `TestVerifyRejectsWrongHeight` builds a claim with he
 only reference is the height-0 contributor and asserts `errHeightMismatch`;
 `TestPublishedClaimVectors` carries `height_wrong`.
 
-### V-SER — OUT OF SCOPE (verified earlier today)
+### V-SER — SKIPPED (verified earlier today)
 
 Rule: "S MUST be CBOR Deterministic Encoding (RFC 8949 §4.2) … A key MUST only be added, never
 reassigned."
@@ -235,7 +253,7 @@ algorithm is pinned rather than assumed; `verify_content.go:29` additionally ref
 multihash whose code is not SHA2-256 at verification time, exercised by
 `verify_content_test.go`. `TestPublishedClaimVectors` carries `content_hash_mismatch`.
 
-### V-SIGN — OUT OF SCOPE (verified earlier today)
+### V-SIGN — SKIPPED (verified earlier today)
 
 Rule: "Sign MUST be Ed25519 (RFC 8032). A `pubkey` is framed as the multicodec varint `0xed`
 … a signature as `0xd0ed` …"
@@ -279,23 +297,23 @@ the 62 single-character slots are taken") but by nothing in this repo — no tes
 to a name for @tbl:encsub the way `TestRecordKeysMatchTheTable` pins the record keys. I did
 not audit all 56 encoding subtype letters; see "What I did not check".
 
-### V-DIFF — OUT OF SCOPE (verified earlier today)
+### V-DIFF — SKIPPED (verified earlier today)
 
 Covered by `claim_diff_rules_test.go` — four properties, each with a test that fires.
 Re-reading the rule text confirmed the wording the earlier round settled on. Not re-checked.
 
-### V-DIFFEDGE — OUT OF SCOPE (verified earlier today)
+### V-DIFFEDGE — SKIPPED (verified earlier today)
 
 Covered by `claim_diff_rules_test.go:194,215`. Not re-checked. Note that `SPEC-REPORT.md` at
 the repo root still carries an open recommendation to narrow V-DIFFEDGE's wording; the spec
 text I read today is unchanged, so that courier document is still awaiting the spec team.
 
-### V-ARCHIVE — OUT OF SCOPE (verified earlier today)
+### V-ARCHIVE — SKIPPED (verified earlier today)
 
 Rule: "An archive's head MUST be a `contribution/branches` claim."
 Covered by `ruleArchiveHead` (`verify.go`) and `verify_spec_rules_test.go`. Not re-checked.
 
-### V-TABLEREF — OUT OF SCOPE (verified earlier today)
+### V-TABLEREF — SKIPPED (verified earlier today)
 
 Rule: "Only a `contribution/branches` claim may reference a `contribution/branches` claim, and
 only through its `contribution/diff` or `contribution/branches` edge."
@@ -339,7 +357,8 @@ needs only the claim's own edges, so it is as cheap as V-REL to add.
 
 ## Summary
 
-Counts over the twelve rules in scope (seven others are OUT OF SCOPE, verified earlier today):
+Counts over the twelve rules examined (the seven verified earlier today are SKIPPED, not
+given a verdict here):
 
 | verdict | count | rules |
 | --- | --- | --- |
@@ -347,7 +366,8 @@ Counts over the twelve rules in scope (seven others are OUT OF SCOPE, verified e
 | UNTESTED | 4 | V-TYPE, V-CONTENT, V-REL, V-PROV |
 | GAP | 1 | V-TIME |
 | DIVERGENCE | 0 | — |
-| OUT OF SCOPE | 7 | V-SER, V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF, V-ARCHIVE, V-MONO |
+| OUT OF SCOPE | 0 | — (no ADT rule belongs to another layer; every one of the nineteen is this library's) |
+| SKIPPED (not a task verdict) | 7 | V-SER, V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF, V-ARCHIVE, V-MONO |
 
 ### Findings, in the order I would fix them
 
@@ -359,10 +379,15 @@ Counts over the twelve rules in scope (seven others are OUT OF SCOPE, verified e
    are single-function verifier rules of the `ruleContentEncoding` kind. V-TYPE is as cheap.
    Each needs a deliberately-violating fixture, since nothing the generator emits breaks them.
 
-2. **`delete_by` is never parsed as a timestamp** (V-TIME). It is compared, copied and
-   presence-checked as an opaque string. A claim scheduling its own deletion for `"whenever"`
-   is accepted everywhere, and `R-DPLANNED` depends on that date being readable. The fix is a
-   parse where the field is read, plus a fixture carrying an unparsable date.
+2. **Two declared timestamps are never read as times** (V-TIME), and they are one fix.
+   `delete_by` is compared, copied and presence-checked as an opaque string, so a claim
+   scheduling its own deletion for `"whenever"` is accepted everywhere — and `R-DPLANNED`
+   depends on that date being readable. `pubkey_valid_from` / `pubkey_expires_after` are
+   parsed only inside `ruleKeyWindow`, which judges a claim against its signer, so a
+   contributor claim that signs nothing in the closure never has its own bounds parsed and
+   turns into a hard failure the moment it signs. Both want validating where the field is
+   written or decoded rather than where it happens to be consulted, plus a fixture carrying
+   an unparsable date for each.
 
 3. **`decodeNode` silently drops `content_hash` when a record carries both slots** (V-CONTENT).
    The rule says MUST NOT carry both; the decoder resolves the ambiguity instead of refusing
