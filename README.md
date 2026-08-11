@@ -131,10 +131,11 @@ make docs       # fetch the spec and papers into docs/papers/ (gitignored)
 make verify     # build, gofmt, lint, rule citations — needs `make docs` first
 ```
 
-`make verify` checks the rule ids in comments against the spec's own
-declarations, so it reads `docs/papers/`. That directory is fetched rather than
-committed, and a gate that cannot see the spec fails rather than passing: run
-`make docs` once on a fresh clone.
+`make verify` checks the rule ids comments cite — a backticked `V-…` or `R-…` —
+against the spec's own declarations, so it reads `docs/papers/`. That directory
+is fetched rather than committed, and a gate that cannot see the spec fails
+rather than passing: run `make docs` once on a fresh clone, or set `RANKE_SPEC`
+to a copy of your own.
 
 The shared black-box suite in `adapter/adaptertest` runs against any
 `Universe`; `adapter/fs` and `adapter/mem` each wrap it, and `fs` adds

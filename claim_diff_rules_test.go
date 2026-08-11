@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// V-DIFF and V-DIFFEDGE checked against the code they were read from. The rules
+// `V-DIFF` and `V-DIFFEDGE` checked against the code they were read from. The rules
 // were written by reading computeDiffFields, computeDiffEdges and contentSource,
 // so a bug there would have been written into the spec — these assert the rules as
 // stated, and disagreements are reported rather than reconciled.
@@ -46,7 +46,7 @@ func noteWith(t *testing.T, ctr Contributor, prev Claim, body string, fields map
 	return c
 }
 
-// TestDiffOmitThenRestateKeepsRestated is V-DIFF's precedence: inherit → omit →
+// TestDiffOmitThenRestateKeepsRestated is `V-DIFF`'s precedence: inherit → omit →
 // overlay. A name in both the omit list and the claim's own fields keeps the
 // RESTATED value, because the overlay runs after the drop. Reverse the two and this
 // field would read as absent.
@@ -76,7 +76,7 @@ func TestDiffOmitDropsWhenNotRestated(t *testing.T) {
 	require.False(t, got.Node().HasField("colour"), "an omitted name with no restatement is gone")
 }
 
-// TestDiffContentInheritsWholeAndCannotBeOmitted is V-DIFF's content half: content
+// TestDiffContentInheritsWholeAndCannotBeOmitted is `V-DIFF`'s content half: content
 // is inherited entire, and there is no omit for it. contentSource never reads the
 // omit list, so naming content in one changes nothing.
 func TestDiffContentInheritsWholeAndCannotBeOmitted(t *testing.T) {
@@ -110,7 +110,7 @@ func TestDiffContentInheritsAcrossTwoLinks(t *testing.T) {
 	require.Equal(t, "the payload", string(body))
 }
 
-// TestDiffOmitEffectDoesNotInheritDownAChain is V-DIFF's third property: the omit
+// TestDiffOmitEffectDoesNotInheritDownAChain is `V-DIFF`'s third property: the omit
 // list applies only where the claim itself states it. The middle link omits and
 // restates "x", so "x" is present in its view and its omit list names a live field;
 // the last link states no omit of its own and must keep "x".
@@ -132,7 +132,7 @@ func TestDiffOmitEffectDoesNotInheritDownAChain(t *testing.T) {
 	require.Equal(t, "from mid", v)
 }
 
-// TestDiffOmitListIsItselfAnInheritedField is V-DIFF's "inherited as data" half, and
+// TestDiffOmitListIsItselfAnInheritedField is `V-DIFF`'s "inherited as data" half, and
 // the surprising one: a materialised claim reports an omit list it never stated. So
 // reading fields_diff_omit off a materialised claim says nothing about what was
 // dropped there — that is the predecessor's list, and its effect stayed behind
@@ -152,7 +152,7 @@ func TestDiffOmitListIsItselfAnInheritedField(t *testing.T) {
 	require.Equal(t, "x", v)
 }
 
-// --- V-DIFFEDGE ---
+// --- `V-DIFFEDGE` ---
 
 // namedEdge builds a derivation edge to ref carrying a name, so it has an identity
 // to inherit under.
@@ -191,7 +191,7 @@ func refs(c Claim) map[string]bool {
 	return out
 }
 
-// TestDiffEdgeUnnamedDoesNotInherit is V-DIFFEDGE: a name is an edge's identity for
+// TestDiffEdgeUnnamedDoesNotInherit is `V-DIFFEDGE`: a name is an edge's identity for
 // inheritance, so only named edges cross the diff. The predecessor's unnamed edge is
 // not inherited; its named one is.
 func TestDiffEdgeUnnamedDoesNotInherit(t *testing.T) {
@@ -212,7 +212,7 @@ func TestDiffEdgeUnnamedDoesNotInherit(t *testing.T) {
 	require.True(t, r[other.ID().String()], "the delta's own named edge is there")
 }
 
-// TestDiffClaimRefusesUnnamedEdge is where the other half of V-DIFFEDGE is actually
+// TestDiffClaimRefusesUnnamedEdge is where the other half of `V-DIFFEDGE` is actually
 // enforced: a diff claim may not carry an unnamed edge at all, so the builder
 // refuses one before computeDiffEdges is ever reached. Only the contributor and the
 // diff edge itself take that path.

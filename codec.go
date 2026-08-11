@@ -46,7 +46,7 @@ type encNode struct {
 	// Content holds inline content bytes; exclusive with ContentHash (§Content)
 	Content []byte `cbor:"6,keyasint,omitempty"`
 	// ContentSize is mandatory whenever the node carries content (§Content). It stands
-	// alone where a read withheld the bytes (R-QCONTENT) or a cache dropped them.
+	// alone where a read withheld the bytes (`R-QCONTENT`) or a cache dropped them.
 	ContentSize uint64 `cbor:"7,keyasint,omitempty"`
 	// Fields is a map under tag 8, key-sorted by CBOR Deterministic.
 	Fields    map[string]string `cbor:"8,keyasint,omitempty"`
@@ -161,7 +161,7 @@ func buildEncNode(n *node, edges []*edge, b *contentBudget) (encNode, error) {
 		Fields:        aliasFieldKeys(n.fields),
 	}
 	// The edges first, the node's own content last: that is the order a budget spends
-	// the claim's content sequence in (R-QCONTENT).
+	// the claim's content sequence in (`R-QCONTENT`).
 	if len(edges) > 0 {
 		en.Edges = make([]cbor.RawMessage, len(edges))
 		for i, e := range edges {
@@ -242,8 +242,8 @@ type encClaimFile struct {
 // resolved.
 func (c *claim) EncodeCBOR(form Form) ([]byte, error) { return c.encodeCBOR(form, nil) }
 
-// encodeCBOR is EncodeCBOR carrying the inline content b affords (R-QCONTENT). Content
-// in full keeps the stored bytes, which is what lets that form be S(v) (R-QCANON).
+// encodeCBOR is EncodeCBOR carrying the inline content b affords (`R-QCONTENT`). Content
+// in full keeps the stored bytes, which is what lets that form be S(v) (`R-QCANON`).
 func (c *claim) encodeCBOR(form Form, b *contentBudget) ([]byte, error) {
 	node, edges := c.node, c.edges
 	if form == FormMaterialized && c.diffClaim != nil {
@@ -319,7 +319,7 @@ func jsonCarry(m map[string]any, cc jsonCarrier, budget *contentBudget) {
 // (§Output `content`).
 func (c *claim) EncodeJSON(form Form) ([]byte, error) { return c.encodeJSON(form, nil) }
 
-// encodeJSON is EncodeJSON carrying the inline content b affords (R-QCONTENT).
+// encodeJSON is EncodeJSON carrying the inline content b affords (`R-QCONTENT`).
 func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 	n, edges := c.node, c.edges
 	if form == FormMaterialized {
@@ -331,7 +331,7 @@ func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 		"created_at": n.CreatedAt().UTC().Format(iso8601Nano),
 		"height":     n.Height(),
 	}
-	// The edges before the node, spending the budget in the order R-QCONTENT fixes for
+	// The edges before the node, spending the budget in the order `R-QCONTENT` fixes for
 	// the claim's content sequence — the same order the CBOR record is built in.
 	if len(edges) > 0 {
 		list := make([]map[string]any, 0, len(edges))

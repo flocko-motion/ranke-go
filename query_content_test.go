@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A cap bounds the claim, not each record (R-QCONTENT), and is spent along the claim's
+// A cap bounds the claim, not each record (`R-QCONTENT`), and is spent along the claim's
 // content sequence: its edges' content in S(v)'s order, then the node's. Edges first is
 // what keeps the smaller values whole, so the order is pinned here.
 func TestContentBudgetSpendsAcrossTheClaim(t *testing.T) {
@@ -85,7 +85,7 @@ func TestContentBudgetSpendsAcrossTheClaim(t *testing.T) {
 }
 
 // The budget applies to the JSON projection as it does to CBOR, the two carrying the
-// same information (R-QENCODING).
+// same information (`R-QENCODING`).
 func TestContentBudgetAppliesToJSON(t *testing.T) {
 	root := contributor(t)
 	const body = "json content"
@@ -222,7 +222,7 @@ func TestWithheldContentKeepsItsSize(t *testing.T) {
 	require.Equal(t, uint64(len(body)), twice.Node().GetContentSize())
 }
 
-// The budget's own arithmetic, R-QCONTENT case by case.
+// The budget's own arithmetic, `R-QCONTENT` case by case.
 func TestContentBudgetTake(t *testing.T) {
 	content := []byte("abcdefgh")
 
@@ -256,7 +256,7 @@ func TestContentBudgetTake(t *testing.T) {
 			"what arrives is a prefix, so a later value that fits is still left out")
 	})
 
-	// An absent overflow is omit (R-QCONTENT), so a cap alone is a whole answer.
+	// An absent overflow is omit (`R-QCONTENT`), so a cap alone is a whole answer.
 	t.Run("an absent overflow is omit", func(t *testing.T) {
 		b := newContentBudget(&OutputContent{Max: 3})
 		require.Empty(t, b.take(content), "no partial value at the cap")

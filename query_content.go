@@ -1,9 +1,9 @@
 // package: ranke / query
 // type:    logic
-// job:     R-QCONTENT — how many bytes of inline content an encoded claim carries, read off
+// job:     `R-QCONTENT` — how many bytes of inline content an encoded claim carries, read off
 // Output.Content and spent by the codec across the claim's content sequence
 // limits:  inline content only, per §Content the bytes a record holds; external content stays in
-// the Universe, which is what lets content in full be S(v) (R-QCANON)
+// the Universe, which is what lets content in full be S(v) (`R-QCANON`)
 package ranke
 
 // contentBudget is the inline content one encoded claim may still carry, spent along the
@@ -16,7 +16,7 @@ type contentBudget struct {
 	stopped bool // the prefix has ended
 }
 
-// newContentBudget reads Output.Content per R-QCONTENT: Max 0 inlines in full, an absent
+// newContentBudget reads Output.Content per `R-QCONTENT`: Max 0 inlines in full, an absent
 // Content inlines none, an absent Overflow is omit. One budget per claim.
 func newContentBudget(oc *OutputContent) *contentBudget {
 	switch {

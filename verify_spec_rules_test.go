@@ -28,7 +28,7 @@ func verifyOne(t *testing.T, head Claim, cs ...Claim) []Failure {
 }
 
 // table builds a contribution/branches claim reaching prev through edge, which is
-// how a spine link is made — and, with any other edge type, how V-TABLEREF is broken.
+// how a spine link is made — and, with any other edge type, how `V-TABLEREF` is broken.
 func table(t *testing.T, ctr Contributor, prev Claim, edgeType string) Claim {
 	t.Helper()
 	e, err := NewEdge(EdgeConfig{Reference: prev.ID(), Type: edgeType})
@@ -42,7 +42,7 @@ func table(t *testing.T, ctr Contributor, prev Claim, edgeType string) Claim {
 }
 
 // TestTableRefThroughLineageEdgePasses is the control: a table reaching its
-// predecessor through contribution/diff is the chain R-C6MERGE builds.
+// predecessor through contribution/diff is the chain `R-C6MERGE` builds.
 func TestTableRefThroughLineageEdgePasses(t *testing.T) {
 	ctr := contributor(t)
 	base, err := NewClaim(NodeBranches, ctr).WithHeight(HeightOf(ctr)).Sign()
@@ -52,7 +52,7 @@ func TestTableRefThroughLineageEdgePasses(t *testing.T) {
 	require.Empty(t, verifyOne(t, next, ctr, base, next))
 }
 
-// TestTableRefThroughOtherEdgeFails is the tightening: V-TABLEREF permits a table to
+// TestTableRefThroughOtherEdgeFails is the tightening: `V-TABLEREF` permits a table to
 // reach a table through its contribution/diff or contribution/branches edge and
 // nothing else. Exempting the referencing claim wholesale let any edge type through,
 // which took the spine off its own layer.
@@ -67,10 +67,10 @@ func TestTableRefThroughOtherEdgeFails(t *testing.T) {
 	require.ErrorIs(t, fs[0].Err, errRefsBranchTable)
 }
 
-// TestOpenContributionSubtypeMayScheduleDeletion is the loosening: R-DSTRUCT names
+// TestOpenContributionSubtypeMayScheduleDeletion is the loosening: `R-DSTRUCT` names
 // four subtypes and says any other claim MAY carry delete_by. Refusing by class
 // refused an application's own contribution/* claim, whose subtype is open
-// vocabulary (V-TYPE).
+// vocabulary (`V-TYPE`).
 func TestOpenContributionSubtypeMayScheduleDeletion(t *testing.T) {
 	ctr := contributor(t)
 	c, err := NewClaim("contribution/annotation", ctr).
@@ -84,7 +84,7 @@ func TestOpenContributionSubtypeMayScheduleDeletion(t *testing.T) {
 }
 
 // TestNamedContributionSubtypesRefuseDeletion is that loosening's bound: the four
-// R-DSTRUCT names are still refused, each being what another rule reads.
+// `R-DSTRUCT` names are still refused, each being what another rule reads.
 func TestNamedContributionSubtypesRefuseDeletion(t *testing.T) {
 	ctr := contributor(t)
 	for _, sub := range []string{"contributor", "branches", "delete", "expiry"} {

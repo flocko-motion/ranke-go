@@ -1,83 +1,72 @@
-# Rules the spec declares that no Go source cites — the ratchet half of
+# Rules the spec declares that no Go comment cites — the ratchet half of
 # scripts/rule-citations.sh. One rule per line: the id, then a reason.
 #
 # THE LIST MAY ONLY SHRINK. Cite a rule and its line goes; the script fails on a
 # listed rule that has since been cited, so the list cannot rot into a permanent
-# exemption that silences the "uncited and unlisted" failure.
+# exemption that silences the "uncited and unlisted" failure. It started at 48
+# entries; sd-924c13's sweep bound the verification family to code and took 16
+# of them, which is the mechanism working.
 #
-# Two shapes of reason, and no third:
+# What a reason says, and it says one of these three:
 #
-#   another layer's — the rule governs something this library never does. It
-#                     stands as long as that holds, and a line moves out of this
-#                     shape only when the library takes the rule on.
-#   sweep sd-924c13 — this library enforces the rule and no comment says so. The
-#                     line names where the citation belongs, so the sweep adds
-#                     it at the enforcing site rather than anywhere convenient.
+#   another layer's  — the rule governs something this library never does. It
+#                      stands as long as that holds.
+#   citation owed    — this library enforces the rule and no comment says so. The
+#                      line names the site, so the citation lands where the rule
+#                      is enforced rather than anywhere convenient.
+#   nothing to cite  — the rule is unimplemented here, so there is no site. The
+#                      line goes when the check does, not before.
 #
-# A reason that says only "not yet" says nothing: it neither justifies the
+# A reason that says only "not yet" says none of that: it neither justifies the
 # exemption nor names what removes it.
 
 # Access — accounts, targets, and the letters they hold. Grants are server
 # configuration resolved before a call reaches the library, which sees only the
 # constraints it is handed (Constraints, contribution.go).
-R-AGRANT      another layer's: grants and accounts are the server's configuration
-R-ABRANCH     another layer's: per-branch rights are checked before the library is called
-R-ATABLE      another layer's: rights over $branches are the server's to check
-R-AUNIVERSE   another layer's: the privileged $universe read is the server's to grant
+R-AGRANT       another layer's: grants and accounts are the server's configuration
+R-ABRANCH      another layer's: per-branch rights are checked before the library is called
+R-ATABLE       another layer's: rights over $branches are the server's to check
+R-AUNIVERSE    another layer's: the privileged $universe read is the server's to grant
 
-# ADT rules — the definition of valid, enforced in the root package.
-V-TYPE        sweep sd-924c13: type vocabulary, node_taxonomy.go + edge_taxonomy.go
-V-REF         sweep sd-924c13: every edge reference resolves, verify.go closure walk
-V-ROOT        sweep sd-924c13: initial claim or contributor edge, claim.go
-V-CONTENT     sweep sd-924c13: size + encoding, inline xor hash, verify.go ruleContent
-V-ID          sweep sd-924c13: id over stored bytes, verify.go verifyID
-V-SIG         sweep sd-924c13: signature under the signer's pubkey, verify.go ruleSignature
-V-MONO        sweep sd-924c13: created_at at or after every reference's, verify.go
-V-HEIGHT      sweep sd-924c13: height = 1 + max(refs), verify.go verifyHeight
-V-HASH        sweep sd-924c13: multihash framing, id.go + verify_content.go
-V-ALIAS       sweep sd-924c13: alias forms, field_taxonomy.go + encoding_taxonomy.go
-V-DIFF        sweep sd-924c13: overlay to a base claim, node.go computeDiffFields
-V-DIFFEDGE    sweep sd-924c13: edge inheritance by name, claim_assemble.go
-V-REL         sweep sd-924c13: relation_direction on relation/*, edge.go
-V-PROV        sweep sd-924c13: derivation/entity/relation nodes carry a reference, verify.go
+# ADT rules — one left. The closure verifier has a rule per invariant
+# (VerifyRuleSet) and no monotonicity rule among them: created_at is defaulted and
+# normalised at build time, never compared against a reference's.
+V-MONO         nothing to cite: no rule holds a claim to its references' created_at
 
-# Contribution rules — the six-step procedure. Steps 1, 4 (sealing), 5, and 6
-# are the write path in adapter/sequencer; the rest are the contribution itself.
-R-C1BASE      sweep sd-924c13: base (k, t) at open, adapter/sequencer
-R-C2DATE      sweep sd-924c13: no claim dated after the base time, adapter/sequencer
-R-C2TYPE      sweep sd-924c13: reserved types, contribution.go reservedTypes
-R-C3CLOSE     sweep sd-924c13: closing over references, contribution.go
-R-C3LIMIT     sweep sd-924c13: a branch holds every limiting claim against what it holds
-R-C4KEY       sweep sd-924c13: claim dated inside its key's window, verify.go ruleKeyWindow
-R-C4SEAL      sweep sd-924c13: sealed once verified, adapter/sequencer
-R-C5PERSIST   sweep sd-924c13: closure durable before the merge, adapter/sequencer
-R-C6MERGE     sweep sd-924c13: branch-table chain to the initial table, adapter/sequencer
-R-C6REQUEST   sweep sd-924c13: a request becomes its limiting claim in the same merge
-R-C6SIGN      sweep sd-924c13: Sequencer claims name its own contributor, adapter/sequencer
+# Contribution rules — the six-step procedure, whose write path is the Sequencer
+# in adapter/sequencer.
+R-C1BASE       citation owed: base (k, t) at open, adapter/sequencer
+R-C2DATE       citation owed: no claim dated after the base time, adapter/sequencer
+R-C2TYPE       citation owed: reserved types, contribution.go reservedTypes
+R-C3CLOSE      citation owed: closing over references, contribution.go
+R-C3LIMIT      citation owed: a branch holds every limiting claim against what it holds
+R-C4KEY        citation owed: claim dated inside its key's window, verify.go ruleKeyWindow
+R-C4SEAL       citation owed: sealed once verified, adapter/sequencer
+R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequencer
+R-C6REQUEST    citation owed: a request becomes its limiting claim in the same merge
+R-C6SIGN       citation owed: Sequencer claims name its own contributor, adapter/sequencer
 
-# Deletion rules — planned and requested, and the gaps they explain.
-R-DREQUEST    sweep sd-924c13: contribution/delete naming its target, contribution.go
-R-DGAP        sweep sd-924c13: verification passes over an explained gap, verify.go
-R-DEXPIRY     sweep sd-924c13: the key's closed window, verify.go verifyKeyWindow
+# Deletion — the requested form, which the Sequencer carries out.
+R-DREQUEST     citation owed: contribution/delete naming its target, contribution.go
 
 # Field syntax.
-R-FIELDS      sweep sd-924c13: field-name form and limit, field_taxonomy.go
+R-FIELDS       citation owed: field-name form and limit, field_taxonomy.go
 
 # RQL — the query type and the native engine that is the conformance oracle.
-R-QEVAL       sweep sd-924c13: fixed evaluation order, query.go
-R-QSCOPE      sweep sd-924c13: branch defines the graph read, query.go
-R-QHEAD       sweep sd-924c13: head narrows to its closure, query.go
-R-QANCHOR     sweep sd-924c13: claim anchors the frontier, query_walk.go
-R-QSTEPS      sweep sd-924c13: a step's edge/node globs and hop bounds, query_walk.go
-R-QFORM       sweep sd-924c13: original or materialized field values, query.go
-R-QSORT       sweep sd-924c13: sort keys over a total order, query_default.go
-R-QLIMIT      sweep sd-924c13: results and time bounds, query.go
-R-QLAYER      sweep sd-924c13: layer pinning leaves the result set alone, query.go
-R-QSTREAM     sweep sd-924c13: tagged elements in order, query_encode.go
-R-QREPORT     sweep sd-924c13: the report as the final element, query_report.go
+R-QEVAL        citation owed: fixed evaluation order, query.go
+R-QSCOPE       citation owed: branch defines the graph read, query.go
+R-QHEAD        citation owed: head narrows to its closure, query.go
+R-QANCHOR      citation owed: claim anchors the frontier, query_walk.go
+R-QSTEPS       citation owed: a step's edge/node globs and hop bounds, query_walk.go
+R-QFORM        citation owed: original or materialized field values, query.go
+R-QSORT        citation owed: sort keys over a total order, query_default.go
+R-QLIMIT       citation owed: results and time bounds, query.go
+R-QLAYER       citation owed: layer pinning leaves the result set alone, query.go
+R-QSTREAM      citation owed: tagged elements in order, query_encode.go
+R-QREPORT      citation owed: the report as the final element, query_report.go
 
 # Translation to Cypher — the neo4j backend's own chapter.
-R-QCYPHER     sweep sd-924c13: the translation answers what the native engine does
-R-QCCLAUSE    sweep sd-924c13: block-by-block clause mapping, adapter/storage/neo4j
-R-QCSTEP      sweep sd-924c13: a step as a variable-length segment, adapter/storage/neo4j
-R-QCSCOPE     sweep sd-924c13: the confined set equals the scope, adapter/storage/neo4j
+R-QCYPHER      citation owed: the translation answers what the native engine does
+R-QCCLAUSE     citation owed: block-by-block clause mapping, adapter/storage/neo4j
+R-QCSTEP       citation owed: a step as a variable-length segment, adapter/storage/neo4j
+R-QCSCOPE      citation owed: the confined set equals the scope, adapter/storage/neo4j

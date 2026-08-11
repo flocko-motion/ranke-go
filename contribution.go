@@ -218,7 +218,7 @@ func CheckDeletable(class NodeClass, sub string, fields map[string]string) error
 	return nil
 }
 
-// undeletableSubtype is R-DSTRUCT's closed set, by subtype.
+// undeletableSubtype is `R-DSTRUCT`'s closed set, by subtype.
 var undeletableSubtype = map[string]bool{
 	string(NodeSubtypeContributor): true,
 	string(NodeSubtypeBranches):    true,

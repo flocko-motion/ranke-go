@@ -289,11 +289,13 @@ docs-clean:
 lint:
 	brokkr lint
 
-# Rule-citation gate: every `V-…`/`R-…` id a comment cites is one the spec
-# declares, and every declared rule is either cited or listed in
-# scripts/rule-citations.allow with a reason. It reads $(PAPERS_DIR), so it says
-# nothing about whether a citation is TRUE — only that the ids exist and are
-# accounted for.
+# Rule-citation gate: every backticked `V-…`/`R-…` id a comment cites is one the
+# spec declares, and every declared rule is either cited or listed in
+# scripts/rule-citations.allow with a reason. It says nothing about whether a
+# citation is TRUE — only that the ids exist and are accounted for.
+#
+# The spec comes from $(PAPERS_DIR), or from RANKE_SPEC when you are working
+# against a copy of your own:  make rule-citations RANKE_SPEC=path/to/spec.typ
 rule-citations:
 	@./scripts/rule-citations.sh
 

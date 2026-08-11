@@ -20,24 +20,41 @@
 #                           rule fails, and so does a listed rule that has since
 #                           been cited.
 #
+# It is the only gate for this: the Go test that checked direction 1 was folded in
+# here, since two gates for one job with two definitions of a citation — one
+# backticked, one a bare word — is worse than either alone.
+#
 # It needs the spec, which `make docs` fetches into docs/papers/ (gitignored), so
 # it fails on a bare checkout rather than passing blind — as does `make verify`
-# through it.
+# through it. RANKE_SPEC points it at a copy of your own, for working offline or
+# against a spec not published yet.
 #
 # Usage: scripts/rule-citations.sh   (from any directory; `make verify` runs it)
+#   RANKE_SPEC=<path>  a spec to read instead; a relative path is repo-relative.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-spec="docs/papers/spec/ranke-spec.typ"
 allow="scripts/rule-citations.allow"
 
-# A rule id as the spec declares it, and as a comment cites it.
-declared_re='#rule\("[A-Z0-9-]+"'
-cited_re='\b[VR]-[A-Z][A-Z0-9]{1,12}\b'
+# A citation is a rule id in backticks — one definition, both directions. Prose
+# reaching for a word of the same shape (a V-SHAPED curve) is not a citation, and
+# a bare-word match reads it as one: see spec_citation_canary_test.go.
+id_re='[VR]-[A-Z0-9]+'
+declared_re="#rule\\(\"$id_re\""
+cited_re="\`$id_re\`"
 
-if [ ! -f "$spec" ]; then
-	echo "rule citations: $spec is absent — run 'make docs' to fetch the papers" >&2
+# The spec: RANKE_SPEC, the copy `make docs` fetches, else the local one
+# .gitignore reserves at the repo root.
+spec=""
+for candidate in "${RANKE_SPEC:-}" "docs/papers/spec/ranke-spec.typ" "specification.typ"; do
+	if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+		spec="$candidate"
+		break
+	fi
+done
+if [ -z "$spec" ]; then
+	echo "rule citations: no spec found — run 'make docs', or point RANKE_SPEC at a copy" >&2
 	exit 1
 fi
 if [ ! -f "$allow" ]; then
@@ -50,7 +67,7 @@ trap 'rm -rf "$work"' EXIT
 
 # 1. Declared: the ids of the spec's #rule() declarations. An empty set means the
 #    declaration format moved and every comparison below is vacuous.
-grep -oE "$declared_re" "$spec" | grep -oE '[A-Z][A-Z0-9-]+' | sort -u > "$work/declared" || true
+grep -oE "$declared_re" "$spec" | grep -oE "$id_re" | sort -u > "$work/declared" || true
 if [ ! -s "$work/declared" ]; then
 	echo "rule citations: no #rule declarations in $spec — the extraction is blind, not passing" >&2
 	exit 1
@@ -67,6 +84,7 @@ done < <(find . -mindepth 2 -name go.mod -not -path './.worktrees/*' -print)
 
 find . "${prune[@]}" -o -name '*.go' -print0 \
 	| xargs -0 --no-run-if-empty grep -hoE "$cited_re" \
+	| grep -oE "$id_re" \
 	| sort -u > "$work/cited" || true
 
 # 3. Listed: the allowlist, one rule per line as "<id> <reason>". A comment line
@@ -90,7 +108,7 @@ if [ -n "$unknown" ]; then
 	echo "rule citations: cited but not declared by the spec —" >&2
 	for id in $unknown; do
 		echo "  $id" >&2
-		grep -rn "$id" --include='*.go' --exclude-dir=.worktrees . >&2 || true
+		grep -rnF --include='*.go' --exclude-dir=.worktrees -- "\`$id\`" . >&2 || true
 	done
 	status=1
 fi

@@ -242,7 +242,7 @@ func TestArchiveQueryResolvesBranch(t *testing.T) {
 	require.Equal(t, idsOf(bth, em, root), idSet(drain(t, rs)))
 }
 
-// A read serves the content Output.Content asks for (R-QCONTENT), through the archive
+// A read serves the content Output.Content asks for (`R-QCONTENT`), through the archive
 // rather than only in the codec — the rule was stated for a whole query.
 func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	ctx := context.Background()
@@ -278,7 +278,7 @@ func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	stored, err := em.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
 
-	// R-QCANON: content in full is the stored bytes, so this form and only this form
+	// `R-QCANON`: content in full is the stored bytes, so this form and only this form
 	// hashes back to the id.
 	t.Run("in full is S(v)", func(t *testing.T) {
 		require.Equal(t, stored, read(t, &OutputContent{Max: 0, Overflow: OverflowOmit}))
