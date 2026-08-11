@@ -193,12 +193,16 @@ scenarios:
 
 # Run each scenario fresh and diff the produced bundle against the committed
 # reference: same claims under the same ids, same branch heads at the same heights.
+# Wired into `verify`, so anything that moves an id fails here first — the ids are
+# signatures, and the reference bundle is the only thing holding them to a value.
 #
 # B_h is compared on its id and height columns only. Its third column is the wall
 # clock at which a head was committed, so a byte diff of it can never pass — the
 # timeline records when, which is exactly the part that does not reproduce.
 #
-# Update after an intentional change: `make update-references`.
+# Update after an intentional change: `make update-references`. Regenerating is
+# not the same as checking: the bundle is self-generated, so promote it only
+# after reading what changed and confirming each scenario still verifies clean.
 verify-scenarios:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
@@ -300,14 +304,24 @@ rule-citations:
 	@./scripts/rule-citations.sh
 
 # Quick quality gate: build the binaries, check formatting, run the lint gate,
-# and check rule citations — the fast "does it compile, is it gofmt-clean, does
-# it pass lint" without vet or the full test suite (-> check).
+# check rule citations, and reproduce the scenario bundles — the fast "does it
+# compile, is it gofmt-clean, does it pass lint" without vet or the full test
+# suite (-> check). Around 2s on top of the build.
 #
 # Needs the spec: rule-citations reads $(PAPERS_DIR), which is gitignored, so on
 # a fresh clone `make verify` fails until `make docs` has fetched the papers. A
 # gate that cannot see the spec cannot check it, and a skip would turn green
 # exactly where it is blind.
-verify: build fmt-check lint rule-citations
+#
+# WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
+# which `make clean` owns and .gitignore covers — no hand-written file is touched,
+# but a bundle you were reading is rebuilt under you. It is here because the
+# scenario references are checked nowhere a change is made: CI checks them
+# (.github/workflows/ci.yml), which is a verdict arriving after the work has left
+# the desk, and that is how the 0.18.0 signature framing landed against a bundle
+# it had invalidated. `release` depends on this target, so an id-moving release
+# now stops here rather than shipping a reference that reproduces nothing.
+verify: build fmt-check lint rule-citations verify-scenarios
 
 # One-shot "is everything green": compile all packages, vet, lint, and
 # run the FULL test suite (feature suite + every adapter's conformance
