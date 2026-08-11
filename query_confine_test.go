@@ -59,6 +59,39 @@ func TestConfineHeadOutsideBranchReadsNothing(t *testing.T) {
 	require.Empty(t, got, "a head outside the branch must not read the branch it lives in")
 }
 
+// TestConfineClaimOutsideBranchReadsNothing covers the other anchor. Select.Claim
+// takes an arbitrary id just as Head does, and walkStart fetches it without a
+// membership test, so the endpoint gate in reach is the only thing holding the
+// door. Min 0 makes the anchor itself a candidate, so a gate that missed hop 0
+// would return it.
+//
+// It is load-bearing for the obvious optimisation — skipping confine when
+// Select.Head is nil — which would reopen the leak here while every Head test
+// stayed green.
+func TestConfineClaimOutsideBranchReadsNothing(t *testing.T) {
+	u, a := twoBranches(t)
+	q := Query{Select: Select{
+		Branch: "a", Claim: a["sB"].ID(),
+		Path: []PathStep{{Min: Hops(0), Max: 3}},
+	}}
+
+	got := reachedUnder(t, u, q, confinedTo("a", a["sA"]))
+	require.Empty(t, got, "a claim anchor outside the branch must not read the branch it lives in")
+}
+
+// TestConfineClaimInsideBranchStillReads is that anchor's control: the same walk
+// from a claim the branch holds still returns it.
+func TestConfineClaimInsideBranchStillReads(t *testing.T) {
+	u, a := twoBranches(t)
+	q := Query{Select: Select{
+		Branch: "a", Claim: a["sA"].ID(),
+		Path: []PathStep{{Min: Hops(0), Max: 3}},
+	}}
+
+	got := reachedUnder(t, u, q, confinedTo("a", a["sA"]))
+	require.Equal(t, idsOf(a["sA"], a["rootA"]), got)
+}
+
 // TestConfineHeadInsideBranchStillReads is the control: the same scope with a Head
 // the branch does hold returns that head's closure. Without it, confinement could
 // pass by returning nothing for every query.
