@@ -136,6 +136,7 @@ var (
 	ErrDeleteByNotCopied     = errors.New("ranke.verify: an edge must carry exactly the delete_by its referenced claim declares")
 	ErrStructureNotDeletable = errors.New("ranke: a contribution/* claim carries the graph's structure and its own identity, so it takes no delete_by")
 	errHeightMismatch        = errors.New("ranke.verify: claim height ≠ 1 + max(reference heights)")
+	ErrCreatedAtNotMonotone  = errors.New("ranke.verify: claim is dated before a claim it references")
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errRefsBranchTable       = errors.New("ranke.verify: claim references a branch table")
 	errEncodeClaim           = errors.New("ranke: encode claim")

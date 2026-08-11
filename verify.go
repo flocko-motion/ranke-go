@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -385,6 +384,7 @@ type verifyRule struct {
 var verifyRules = []verifyRule{
 	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key (`V-ID`, `V-SIG`)", claim: ruleSignature},
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial node (`V-HEIGHT`)", claim: ruleHeight},
+	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
@@ -444,6 +444,11 @@ func keyBound(signer Claim, field string) (*time.Time, error) {
 // ruleHeight: §4.1 committed height matches the reference structure (`V-HEIGHT`).
 func ruleHeight(ctx context.Context, t *claimUnderVerification) error {
 	return verifyHeight(ctx, t.claim, t.u)
+}
+
+// ruleCreatedAtMonotone: `V-MONO` — created_at runs forward along every reference.
+func ruleCreatedAtMonotone(ctx context.Context, t *claimUnderVerification) error {
+	return verifyCreatedAtMonotone(ctx, t.claim, t.u)
 }
 
 // ruleContent (per content carrier): content that carries a content_hash must
@@ -551,35 +556,6 @@ func (c *claim) verifyID(pubkey, raw []byte) error {
 		return WrapDetail(errVerify, "hash", err)
 	}
 	return verifySignature(pubkey, recomputed.raw, idBytes(c.node.id))
-}
-
-// verifyHeight re-derives the claim's generation number from its committed
-// references and enforces §4.1 (`V-HEIGHT`): height == 1 + max(reference heights),
-// 0 for an initial node. The closure walk makes this single-level check transitive.
-func verifyHeight(ctx context.Context, c Claim, u Universe) error {
-	edges := c.Edges()
-	var want uint64
-	if len(edges) > 0 {
-		ids := make([]Id, len(edges))
-		for i, e := range edges {
-			ids[i] = e.Reference()
-		}
-		heights, err := u.GetClaimHeights(ctx, ids)
-		if err != nil {
-			return WrapDetail(errVerify, "resolve reference heights", err)
-		}
-		var max uint64
-		for _, h := range heights {
-			if h > max {
-				max = h
-			}
-		}
-		want = max + 1
-	}
-	if got := c.Node().Height(); got != want {
-		return WithDetail(errHeightMismatch, "got "+strconv.FormatUint(got, 10)+", want "+strconv.FormatUint(want, 10))
-	}
-	return nil
 }
 
 // resolveSigner returns the claim whose content is the key that signed c's id (§5.7,
