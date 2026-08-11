@@ -54,21 +54,54 @@ func TestNodeClassAliases(t *testing.T) {
 func TestNodeSubtypeAliases(t *testing.T) {
 	checkAliasRoundTrip(t, map[NodeSubtype]NodeSubtype{
 		NodeSubtypeContributor: NodeSubtypeContributorAlias,
-		NodeSubtypeBranch:      NodeSubtypeBranchAlias,
 		NodeSubtypeBranches:    NodeSubtypeBranchesAlias,
-		NodeSubtypeDiff:        NodeSubtypeDiffAlias,
 		NodeSubtypeHead:        NodeSubtypeHeadAlias,
 		NodeSubtypeDelete:      NodeSubtypeDeleteAlias,
 		NodeSubtypeExpiry:      NodeSubtypeExpiryAlias,
 	}, nodeSubtypeToAlias, nodeSubtypeFromAlias, NodeSubtype("email")) // open vocabulary
 }
 
-// TestLimitingSubtypesAgreeAcrossTables: a limiting claim and the edge naming its
-// target share a type string, so the two alias tables must abbreviate it the same
-// way — otherwise one claim's node and edge disagree on what "delete" is called.
-func TestLimitingSubtypesAgreeAcrossTables(t *testing.T) {
-	require.Equal(t, string(nodeSubtypeToAlias(NodeSubtypeDelete)), string(edgeSubtypeToAlias(EdgeSubtypeDelete)))
-	require.Equal(t, string(nodeSubtypeToAlias(NodeSubtypeExpiry)), string(edgeSubtypeToAlias(EdgeSubtypeExpiry)))
+// TestSubtypeAliasTablesAgree: @tbl:aliases is ONE "type subtype" column that nodes
+// and edges share, which ranke-go splits across node_taxonomy.go and
+// edge_taxonomy.go. Wherever both halves know a name or a letter they must say the
+// same thing, or one claim's node and edge abbreviate the same subtype differently.
+//
+// A subtype only one half knows is legitimate — the caption names those exceptions,
+// and "branch" and "diff" are edge-only — so the check applies where they overlap.
+// It catches a letter reused for two meanings, which is what splitting one table
+// into two makes possible.
+func TestSubtypeAliasTablesAgree(t *testing.T) {
+	// Every subtype either table declares, so a name added to one and forgotten in
+	// the other is still probed here.
+	names := []string{"contributor", "head", "branches", "branch", "diff", "prune", "delete", "expiry"}
+	for _, name := range names {
+		nodeAlias := string(nodeSubtypeToAlias(NodeSubtype(name)))
+		edgeAlias := string(edgeSubtypeToAlias(EdgeSubtype(name)))
+		if nodeAlias == name || edgeAlias == name {
+			continue // one half does not declare it, and passes the name through
+		}
+		require.Equalf(t, nodeAlias, edgeAlias, "subtype %q is abbreviated two ways", name)
+	}
+
+	// The same agreement read back: a letter both halves decode must decode alike.
+	for c := byte('A'); c <= 'z'; c++ {
+		letter := string(c)
+		nodeName := string(nodeSubtypeFromAlias(NodeSubtype(letter)))
+		edgeName := string(edgeSubtypeFromAlias(EdgeSubtype(letter)))
+		if nodeName == letter || edgeName == letter {
+			continue
+		}
+		require.Equalf(t, nodeName, edgeName, "alias %q means two things", letter)
+	}
+}
+
+// TestEdgeOnlySubtypesKeepTheirLetters: removing the node-side "branch" and "diff"
+// left @tbl:aliases untouched, so the edge side must still hold b and d.
+func TestEdgeOnlySubtypesKeepTheirLetters(t *testing.T) {
+	require.Equal(t, "b", string(edgeSubtypeToAlias(EdgeSubtypeBranch)))
+	require.Equal(t, "d", string(edgeSubtypeToAlias(EdgeSubtypeDiff)))
+	require.Equal(t, "branch", string(edgeSubtypeFromAlias(EdgeSubtypeBranchAlias)))
+	require.Equal(t, "diff", string(edgeSubtypeFromAlias(EdgeSubtypeDiffAlias)))
 }
 
 // TestNodeAliasesAreSingleCharacter: node aliases are one character — the size

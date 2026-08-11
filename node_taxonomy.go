@@ -64,15 +64,15 @@ func nodeClassFromAlias(c NodeClass) NodeClass {
 // NodeSubtype is the second-level node-type vocabulary (the "/sub" part).
 type NodeSubtype string
 
+// "branch" and "diff" are absent: both are edge subtypes alone. A branch is named
+// by a contribution/branch edge on the table, and diff-ness lives in the
+// contribution/diff edge, so no node carries either. @tbl:aliases still assigns
+// them b and d — one table shared by nodes and edges — which the edge side holds.
 const (
-	NodeSubtypeBranch           NodeSubtype = "branch"
-	NodeSubtypeBranchAlias      NodeSubtype = "b"
 	NodeSubtypeBranches         NodeSubtype = "branches"
 	NodeSubtypeBranchesAlias    NodeSubtype = "B"
 	NodeSubtypeContributor      NodeSubtype = "contributor"
 	NodeSubtypeContributorAlias NodeSubtype = "c"
-	NodeSubtypeDiff             NodeSubtype = "diff"
-	NodeSubtypeDiffAlias        NodeSubtype = "d"
 	NodeSubtypeHead             NodeSubtype = "head"
 	NodeSubtypeHeadAlias        NodeSubtype = "h"
 	// The limiting claims (paper 1 §Type Vocabulary). Each takes the letter its
@@ -89,12 +89,8 @@ func nodeSubtypeToAlias(s NodeSubtype) NodeSubtype {
 	switch s {
 	case NodeSubtypeContributor:
 		return NodeSubtypeContributorAlias
-	case NodeSubtypeBranch:
-		return NodeSubtypeBranchAlias
 	case NodeSubtypeBranches:
 		return NodeSubtypeBranchesAlias
-	case NodeSubtypeDiff:
-		return NodeSubtypeDiffAlias
 	case NodeSubtypeHead:
 		return NodeSubtypeHeadAlias
 	case NodeSubtypeDelete:
@@ -110,12 +106,8 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 	switch s {
 	case NodeSubtypeContributorAlias:
 		return NodeSubtypeContributor
-	case NodeSubtypeBranchAlias:
-		return NodeSubtypeBranch
 	case NodeSubtypeBranchesAlias:
 		return NodeSubtypeBranches
-	case NodeSubtypeDiffAlias:
-		return NodeSubtypeDiff
 	case NodeSubtypeHeadAlias:
 		return NodeSubtypeHead
 	case NodeSubtypeDeleteAlias:
