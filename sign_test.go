@@ -203,3 +203,52 @@ func TestLoadEd25519PEMErrors(t *testing.T) {
 	_, err = LoadPrivateKey(bad)
 	require.Error(t, err, "LoadPrivateKey propagates the load error")
 }
+
+// TestSignatureAndPubkeyCarryDistinctCodes: the leading code alone says which a byte
+// string is (`V-SIGN`). Sharing one left payload length as the only difference, which is
+// a fact about Ed25519 rather than about the framing.
+func TestSignatureAndPubkeyCarryDistinctCodes(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	pubkey, err := EncodePublicKey(pub)
+	require.NoError(t, err)
+	hash, err := HashContent([]byte("a claim's canonical bytes"))
+	require.NoError(t, err)
+	sig, err := signHash(priv, idBytes(hash))
+	require.NoError(t, err)
+
+	pubCode, _, err := DecodePublicKey(pubkey)
+	require.NoError(t, err)
+	sigCode, raw, err := splitCode(sig)
+	require.NoError(t, err)
+
+	require.Equal(t, multicodec.Ed25519Pub, pubCode)
+	require.Equal(t, multicodec.Eddsa, sigCode, "an EdDSA signature, not a public key")
+	require.NotEqual(t, pubCode, sigCode, "the code alone tells them apart")
+	require.Len(t, raw, ed25519.SignatureSize, "the payload survives the reframing")
+
+	// And the pairing is what verification checks, so a signature framed as a pubkey is
+	// refused rather than verified on the strength of its length.
+	require.NoError(t, verifySignature(pubkey, idBytes(hash), sig))
+	mislabelled := prependCode(multicodec.Ed25519Pub, raw)
+	require.Error(t, verifySignature(pubkey, idBytes(hash), mislabelled),
+		"a signature under the pubkey's code is not a signature")
+}
+
+// TestAlgorithmNamesTheSignatureScheme: an id's leading code names what produced it, so
+// a reader can tell a signed id from an identity-signed one (a bare multihash).
+func TestAlgorithmNamesTheSignatureScheme(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	hash, err := HashContent([]byte("some bytes"))
+	require.NoError(t, err)
+
+	require.Equal(t, "sha2-256", hash.Algorithm(), "an identity-signed id is the multihash")
+
+	sig, err := signHash(priv, idBytes(hash))
+	require.NoError(t, err)
+	signed, err := idFromBytes(sig)
+	require.NoError(t, err)
+	require.Equal(t, multicodec.Eddsa.String(), signed.Algorithm())
+}

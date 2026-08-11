@@ -121,7 +121,7 @@ func TestBuilderSignedRootContributor(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 	require.True(t, c.IsContributor())
-	require.Equal(t, "ed25519-pub", c.ID().Algorithm())
+	require.Equal(t, "eddsa", c.ID().Algorithm())
 }
 
 // TestContributorExternalPubkey: a contributor's pubkey IS its content
@@ -150,7 +150,7 @@ func TestContributorExternalPubkey(t *testing.T) {
 		WithEncoding(EncodingOctetStream).
 		Sign(priv)
 	require.NoError(t, err, "external pubkey + matching key signs")
-	require.Equal(t, "ed25519-pub", claim.ID().Algorithm(), "the contributor is signed")
+	require.Equal(t, "eddsa", claim.ID().Algorithm(), "the contributor is signed")
 
 	u := newStubUniverse()
 	require.NoError(t, u.PutContents(ctx, []ContentBlob{{Hash: hash, Content: pubkey}}))
@@ -180,7 +180,7 @@ func TestContributorExternalPubkey(t *testing.T) {
 		WithHeight(HeightOf(c)).
 		Sign() // no explicit key, no Universe — both come from c
 	require.NoError(t, err, "child of an external-pubkey contributor signs from the cached pubkey")
-	require.Equal(t, "ed25519-pub", child.ID().Algorithm(), "signed by the contributor's key")
+	require.Equal(t, "eddsa", child.ID().Algorithm(), "signed by the contributor's key")
 	require.True(t, child.Edges(EdgeFilterType{Type: EdgeTypeContributor})[0].Reference().Equal(c.ID()),
 		"attributed to the external-pubkey contributor")
 }

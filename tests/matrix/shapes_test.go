@@ -67,6 +67,30 @@ func TestShapeUnanchoredTraversal(t *testing.T) {
 	})
 }
 
+// TestShapePathRecrossesAnEdge: a step may re-traverse an edge an earlier step used
+// (`R-QFRONTIER`). Two steps in opposing directions is the smallest case, and a lowering
+// that spans one pattern over the whole route drops it — only under Shape: path.
+func TestShapePathRecrossesAnEdge(t *testing.T) {
+	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		delta := m.DiffChainHead
+		base := diffPredecessor(t, u, delta)
+
+		answer, err := rql.Run(context.Background(), u, ranke.Query{
+			Select: ranke.Select{Branch: rql.Branch, Claim: delta, Path: []ranke.PathStep{
+				{Edges: []string{"contribution/diff"}, Min: ranke.Hops(1), Max: 1},
+				{Edges: []string{"contribution/diff"}, Dir: ranke.DirUses, Min: ranke.Hops(1), Max: 1},
+			}},
+			Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailID},
+		}, m.Head)
+		require.NoError(t, err)
+
+		require.Len(t, answer, 1, "one route: out to the base along the diff edge, then back")
+		require.Contains(t, answer[0],
+			"path["+delta.String()+" "+base.String()+" "+delta.String()+"]",
+			"the route re-crosses the edge, which the boundary between steps permits")
+	})
+}
+
 // idStrings renders ids for comparison against a reached set.
 func idStrings(ids []ranke.Id) []string {
 	out := make([]string, 0, len(ids))

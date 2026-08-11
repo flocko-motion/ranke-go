@@ -17,12 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetBranchAbsenceIsMatchable: GetBranch's not-found answers to both readings —
-// ErrBranchNotFound for a caller telling a missing branch from a missing claim, and
-// ErrNotFound for one that treats every absence alike. Without this a caller had to
-// ask the store a second time (HasBranch) to classify an error it already held, which
-// cost a round trip per miss and could disagree with itself when the head moved
-// between the two calls.
+// TestGetBranchAbsenceIsMatchable: the not-found answers to both readings —
+// ErrBranchNotFound to tell a missing branch from a missing claim, ErrNotFound to treat
+// every absence alike. Unmatchable, a caller had to ask the store a second time.
 func TestGetBranchAbsenceIsMatchable(t *testing.T) {
 	ctx := context.Background()
 	clock := generator.NewClock(fixtureBase, time.Second)

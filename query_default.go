@@ -16,7 +16,9 @@ import (
 	"time"
 )
 
-// closureOrigin heads the closure a read sees: Select.Head, else the scope's own.
+// closureOrigin is where the walk starts: Select.Head, else the scope's own head.
+// It says nothing about what the read may reach — a Head narrows a read, so the
+// scope still confines it (-> confinement).
 func closureOrigin(sel Select, scope Scope) (Id, error) {
 	if sel.Head != nil {
 		return sel.Head, nil
@@ -25,6 +27,54 @@ func closureOrigin(sel Select, scope Scope) (Id, error) {
 		return scope.Head, nil
 	}
 	return nil, ErrQueryNoHead
+}
+
+// confinement is the scope's graph as a membership test: closure(root), which for
+// a branch scope is exactly that branch. A nil *confinement admits everything,
+// which is $universe.
+//
+// A read is the INTERSECTION of this and closure(Select.Head), so a Head naming a
+// claim in another branch narrows to nothing rather than reading across. Walking
+// from root instead would lose the narrowing; testing each claim keeps both.
+type confinement struct {
+	root    Id
+	members map[string]bool
+}
+
+// admits reports whether the scope's graph holds id.
+func (c *confinement) admits(id Id) bool {
+	return c == nil || (id != nil && c.members[id.String()])
+}
+
+// confine builds the scope's membership set, or nil when the scope confines
+// nothing. The tagger stamps members with _b_<branch>, but a byte store holds no
+// tags, so the reference sweeps the closure and a native backend uses its tags
+// (-> adapter/storage/neo4j, tagBounded).
+func confine(ctx context.Context, u Universe, scope Scope) (*confinement, error) {
+	if scope.Head == nil {
+		return nil, nil
+	}
+	members := map[string]bool{}
+	queue := []Id{scope.Head}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == nil || members[cur.String()] {
+			continue
+		}
+		members[cur.String()] = true
+		c, err := GetClaim(ctx, u, cur)
+		if err != nil {
+			return nil, WrapDetail(errQuery, "scope closure "+cur.String(), err)
+		}
+		for _, e := range c.Edges() {
+			queue = append(queue, e.Reference())
+		}
+	}
+	return &confinement{root: scope.Head, members: members}, nil
 }
 
 // DefaultQuery is the reference implementation of Universe.Query, reading only through
@@ -43,6 +93,10 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	if err != nil {
 		return nil, err
 	}
+	conf, err := confine(ctx, u, scope)
+	if err != nil {
+		return nil, err
+	}
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
 	if len(sel.Path) == 0 {
@@ -52,7 +106,7 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 		sel.Path = []PathStep{{Min: Hops(0)}}
 		needPaths = false
 	}
-	reached, routes, err := queryTraverse(ctx, u, sel, origin, needPaths, rc)
+	reached, routes, err := queryTraverse(ctx, u, sel, origin, conf, needPaths, rc)
 	if err != nil {
 		return nil, err
 	}

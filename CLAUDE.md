@@ -8,11 +8,51 @@ Agents tend to forget details from the papers. The papers specify all details, s
 
 # Rules for Tooling
 
+Before hand-rolling anything, look for the thing that already does it. In order:
+`Makefile` (how to build, test, lint), `services/*` (how to get infrastructure
+up), `brokkr` (how to read the code). Each has a mode for what you want; a long
+bespoke `go test` incantation or a hand-written Cypher dump means you skipped a
+step. Read a script's `usage()`, not just its top comment — the top comment is
+routinely the shorter list.
+
 - use jq, not pyton, to work with json
 - use brokkr instead of grep (brokkr --help)
 - use gopls instead of hand rolled mechanic refactoring with sed/python 
-- use `services/neo4j.sh query {q}` for querying neo4j — `--params '{json}'` binds
-  `$`-parameters, so a lowering can be run exactly as the adapter emits it
+- use `services/neo4j.sh query {q}` for querying neo4j
+
+## Makefile
+
+The entry point for building and testing. `grep -E '^[a-z].*:' Makefile` lists
+the targets; each carries a comment saying what it is for.
+
+- `make test` — the three layers in order: `test/core` (datatype, no
+  infrastructure), `test/integration` (`./tests/...`), `test/matrix`
+  (cross-backend agreement).
+- `make test/matrix` — the matrix alone, verbose. Rows whose service is down
+  skip themselves, so it is green on a bare checkout and grows teeth as
+  services come up.
+- `make check` — build, vet, lint, and the full suite in one.
+- Every target runs through `$(GOTEST)`, which pins `-p 1`. Do not add a bare
+  `go test` to this file; override the whole thing instead
+  (`make test/integration GOTEST="go test -p 1 -count=1"` to skip the cache).
+
+## services
+
+Infrastructure for the rows that need it. Both scripts have a **`native`** mode
+that compiles and runs in-container — no podman, no root — which is the mode
+that works here:
+
+- `services/neo4j.sh native up` — adds the `neo4j/mem` row. Auto-detected once
+  serving; no env var needed.
+- `services/redis.sh native up` — does NOT auto-detect. The row stays skipped
+  until you also pass `RANKE_REDIS_ADDR=127.0.0.1:6379
+  RANKE_REDIS_PASS=rankeperfpass`.
+- `services/neo4j.sh query '<cypher>'` — ad-hoc Cypher against the running
+  instance. The way to isolate a lowering bug: run the generated statement
+  directly and bisect it, rather than inferring from a Go-level error.
+- There is no s3 service script. `minioPod()` needs podman, so the `s3` and
+  `neo4j/redis/s3` rows cannot run without it — expect them to skip, and do not
+  go looking for a way around it.
 
 ## brokkr
 
@@ -68,6 +108,9 @@ Agents tend to forget details from the papers. The papers specify all details, s
   this: each package is its own process.
 - A new test that wipes a shared service takes `exclusive.Lock` too, or it will wipe
   another package's data.
+- Reproduce before diagnosing, and trust the failure over the ticket. A title
+  saying every query diverges may mean one query errors; the corpus tells you
+  which. Fixing the described bug rather than the observed one wastes the run.
 
 # Generator
 

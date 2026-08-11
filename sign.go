@@ -18,8 +18,18 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
-// Multikey framing (§4.1): pubkey and signature bytes each lead with a
-// multicodec varint naming the scheme, payload length telling the two apart.
+// Multikey framing (§4.1): pubkey and signature bytes each lead with a multicodec
+// varint naming the scheme (`V-SIGN`), and the two schemes differ, so the code alone
+// says which a byte string is.
+
+// signatureCodeFor is the signature scheme a pubkey scheme signs with. Distinct codes
+// are what keep the two apart; a shared one leaves only payload length to tell them by.
+func signatureCodeFor(pubCode multicodec.Code) (multicodec.Code, bool) {
+	if pubCode == multicodec.Ed25519Pub {
+		return multicodec.Eddsa, true
+	}
+	return 0, false
+}
 
 // EncodePublicKey wraps a Go public key as a multikey:
 // <multicodec varint><raw key bytes>.
@@ -62,7 +72,7 @@ func signHash(signingKey crypto.Signer, hash []byte) ([]byte, error) {
 		if err != nil {
 			return nil, WrapDetail(errSignHash, "ed25519 sign", err)
 		}
-		return prependCode(multicodec.Ed25519Pub, sig), nil
+		return prependCode(multicodec.Eddsa, sig), nil
 	default:
 		return nil, WithDetail(errSignHash, "unsupported signer public key type "+reflect.TypeOf(pub).String())
 	}
@@ -86,8 +96,13 @@ func verifySignature(pubkey, hash, idPayload []byte) error {
 	if err != nil {
 		return WrapDetail(errVerifySig, "decode signature", err)
 	}
-	if pubCode != sigCode {
-		return WithDetail(errVerifySig, "scheme mismatch (pubkey="+pubCode.String()+", sig="+sigCode.String()+")")
+	want, paired := signatureCodeFor(pubCode)
+	if !paired {
+		return WithDetail(errVerifySig, "unsupported scheme "+pubCode.String())
+	}
+	if sigCode != want {
+		return WithDetail(errVerifySig, "scheme mismatch (pubkey="+pubCode.String()+
+			" signs with "+want.String()+", sig="+sigCode.String()+")")
 	}
 	switch pubCode {
 	case multicodec.Ed25519Pub:

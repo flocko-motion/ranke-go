@@ -3,10 +3,9 @@
 // job:     the concurrent Sequencer — the paper's six steps with 2–5 run in parallel off the
 // sequencing thread, and step 6 a serialised group commit folding a whole batch of
 // contributions into ONE branch-table advance
-// limits:  single-process (the sequencing thread is a mutex, not a consensus protocol); holds its
-// committed-id set in memory, so that set grows with the archive; does NOT propagate
-// changes between branches (paper 2's cross-branch merge) and mints no limiting/expiry
-// claims
+// limits:  single-process (the sequencing thread is a mutex, not consensus); its committed-id set
+// grows with the archive; step 6 costs one closure test per contributed head, so a
+// slow backend serialises there; no cross-branch merge, no limiting/expiry claims
 package concurrent
 
 import (
@@ -220,13 +219,25 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	sort.Strings(changed) // a deterministic branch order → a deterministic table id
 
 	newHeads := make(map[string]ranke.Id, len(changed))
+	advanced := make([]string, 0, len(changed))
 	for _, b := range changed {
-		h, err := s.foldBranch(ctx, b, byBranch[b])
+		h, moved, err := s.foldBranch(ctx, b, byBranch[b])
 		if err != nil {
 			return err
 		}
+		if !moved {
+			continue
+		}
 		newHeads[b] = h
+		advanced = append(advanced, b)
 	}
+	// Nothing new: RG_k' = RG_k, so there is no advance to make (§Idempotency).
+	// Idempotent, not an error — the state asked for already holds.
+	if len(advanced) == 0 {
+		s.markBatch(batch)
+		return nil
+	}
+	changed = advanced
 
 	bt, err := s.mintBranchTable(ctx, changed, newHeads)
 	if err != nil {
@@ -246,26 +257,51 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	}
 	s.head = bt.ID()
 	s.markCommitted(bt.ID())
-	for _, p := range batch {
-		s.markCommitted(p.ids...)
-		for _, hs := range p.heads { // the per-branch heads step 4 consolidated
-			s.markCommitted(hs...)
-		}
-	}
+	s.markBatch(batch)
 	return nil
 }
 
-// foldBranch computes a branch's new head from its CURRENT head plus the heads the
-// batch contributes, deduplicated and ordered so one set yields one claim.
-func (s *Sequencer) foldBranch(ctx context.Context, branch string, contributed []ranke.Id) (ranke.Id, error) {
-	set := map[string]ranke.Id{}
-	if prior, ok := s.heads[branch]; ok {
-		set[prior.String()] = prior
-	}
-	for _, h := range contributed {
-		if h != nil {
-			set[h.String()] = h
+// markBatch records what a batch put in the archive, so later contributions prune
+// their walks there. Also on the no-op path — those claims were already in.
+func (s *Sequencer) markBatch(batch []*pending) {
+	for _, p := range batch {
+		s.markCommitted(p.ids...)
+		for _, hs := range p.heads {
+			s.markCommitted(hs...)
 		}
+	}
+}
+
+// foldBranch returns a branch's new head — its current head folded with the heads
+// the batch contributes — and false when the branch already reached them all.
+// Dropping a head already reached avoids minting a consolidating claim over an
+// unchanged closure, and makes two writers of the same claims converge.
+func (s *Sequencer) foldBranch(ctx context.Context, branch string, contributed []ranke.Id) (ranke.Id, bool, error) {
+	prior, hasPrior := s.heads[branch]
+	set := map[string]ranke.Id{}
+	for _, h := range contributed {
+		if h == nil {
+			continue
+		}
+		if hasPrior {
+			held, err := ranke.InClosure(ctx, s.u, ranke.BranchUniverse, []ranke.Id{prior}, h)
+			if err != nil {
+				return nil, false, fmt.Errorf("%w: branch %q closure test: %w", errSequencer, branch, err)
+			}
+			if held {
+				continue
+			}
+		}
+		set[h.String()] = h
+	}
+	if len(set) == 0 {
+		if !hasPrior {
+			return nil, false, fmt.Errorf("%w: branch %q advanced with no heads", errSequencer, branch)
+		}
+		return prior, false, nil
+	}
+	if hasPrior {
+		set[prior.String()] = prior
 	}
 	keys := make([]string, 0, len(set))
 	for k := range set {
@@ -273,18 +309,15 @@ func (s *Sequencer) foldBranch(ctx context.Context, branch string, contributed [
 	}
 	sort.Strings(keys)
 
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("%w: branch %q advanced with no heads", errSequencer, branch)
-	}
 	if len(keys) == 1 {
-		return set[keys[0]], nil
+		return set[keys[0]], true, nil
 	}
 
 	edges := make([]ranke.Edge, 0, len(keys))
 	for _, k := range keys {
 		e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: set[k], Type: ranke.EdgeTypeHead})
 		if err != nil {
-			return nil, fmt.Errorf("%w: head edge: %w", errSequencer, err)
+			return nil, false, fmt.Errorf("%w: head edge: %w", errSequencer, err)
 		}
 		edges = append(edges, e)
 	}
@@ -295,12 +328,12 @@ func (s *Sequencer) foldBranch(ctx context.Context, branch string, contributed [
 		WithAutoHeight(ctx, s.u).
 		Sign()
 	if err != nil {
-		return nil, fmt.Errorf("%w: fold heads: %w", errSequencer, err)
+		return nil, false, fmt.Errorf("%w: fold heads: %w", errSequencer, err)
 	}
 	if err := s.u.PutClaims(ctx, []ranke.Claim{head}); err != nil {
-		return nil, fmt.Errorf("%w: store folded head: %w", errSequencer, err)
+		return nil, false, fmt.Errorf("%w: store folded head: %w", errSequencer, err)
 	}
-	return head.ID(), nil
+	return head.ID(), true, nil
 }
 
 // mintBranchTable stores the next contribution/branches claim, the new archive

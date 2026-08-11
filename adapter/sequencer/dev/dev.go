@@ -113,11 +113,32 @@ func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (r
 		return nil, errForeign
 	}
 
+	advanced := make([]string, 0, len(m.branches))
+	newHeads := make(map[string]ranke.Id, len(m.branches))
 	for _, branch := range m.branches {
+		prior, hasPrior := s.heads[branch]
+		// Drop what the branch already reaches: identical claims carry identical ids
+		// (§Idempotency), so re-offering them cannot change RG_k.
+		fresh := make([]ranke.Id, 0, len(m.heads[branch]))
+		for _, h := range m.heads[branch] {
+			if hasPrior {
+				held, err := ranke.InClosure(ctx, s.u, ranke.BranchUniverse, []ranke.Id{prior}, h)
+				if err != nil {
+					return nil, fmt.Errorf("%w: branch %q closure test: %w", errSequencer, branch, err)
+				}
+				if held {
+					continue
+				}
+			}
+			fresh = append(fresh, h)
+		}
+		if len(fresh) == 0 {
+			continue // the branch holds it all already
+		}
 		// Fold the branch's previous head in so its closure accumulates across merges.
-		folded := m.heads[branch]
-		if prior, ok := s.heads[branch]; ok {
-			folded = append(append([]ranke.Id{}, folded...), prior)
+		folded := fresh
+		if hasPrior {
+			folded = append(append([]ranke.Id{}, fresh...), prior)
 		}
 		newHead := folded[0]
 		if len(folded) > 1 {
@@ -130,10 +151,19 @@ func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (r
 			}
 			newHead = hc.ID()
 		}
-		s.heads[branch] = newHead
+		newHeads[branch] = newHead
+		advanced = append(advanced, branch)
+	}
+	// Nothing new: RG_k' = RG_k, so there is no advance to make. Idempotent, not an
+	// error — the caller asked for a state that already holds.
+	if len(advanced) == 0 {
+		return receipt{head: s.head}, nil
+	}
+	for branch, h := range newHeads {
+		s.heads[branch] = h
 	}
 
-	bt, err := s.mintBranchTable(ctx, m.branches)
+	bt, err := s.mintBranchTable(ctx, advanced)
 	if err != nil {
 		return nil, err
 	}
