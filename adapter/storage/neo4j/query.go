@@ -646,12 +646,12 @@ func boundedByTime(err error, budget time.Duration, ctxErr error) bool {
 }
 
 // isTxTimeout reports whether err is the server ending the transaction on its
-// timeout, which is how limit.time arrives back here.
+// timeout, which is how limit.time arrives back here. Only the TransactionTimedOut
+// codes count: the driver normalises every transient termination — an operator's
+// killTransaction, a leader switch, a lock manager stopping — into a bare
+// Transaction.Terminated, and reading those as a bounded answer would turn each of
+// them into a silent empty success.
 func isTxTimeout(err error) bool {
 	var nerr *neo4jdriver.Neo4jError
-	if errors.As(err, &nerr) {
-		return strings.Contains(nerr.Code, "TransactionTimedOut") ||
-			strings.Contains(nerr.Code, "Terminated")
-	}
-	return false
+	return errors.As(err, &nerr) && strings.Contains(nerr.Code, "TransactionTimedOut")
 }

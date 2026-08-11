@@ -59,6 +59,13 @@ func TestBoundedByTimeDecision(t *testing.T) {
 		"the caller cancelling is a failed read, whatever the server said")
 	require.False(t, boundedByTime(other, time.Second, nil), "an unrelated error is still an error")
 	require.False(t, boundedByTime(errors.New("dial tcp: refused"), time.Second, nil))
+
+	// The driver normalises every transient termination into a bare Terminated — an
+	// operator's killTransaction, a leader switch, a lock manager stopping. Reading
+	// those as a bounded answer would turn each into a silent empty success.
+	killed := &neo4jdriver.Neo4jError{Code: "Neo.ClientError.Transaction.Terminated"}
+	require.False(t, boundedByTime(killed, time.Second, nil),
+		"a bare Terminated is the failure it is, not limit.time being spent")
 }
 
 // TestLimitResultsReportsTruncation: the cap is served by the statement, and the
