@@ -32,9 +32,10 @@ the targets; each carries a comment saying what it is for.
   skip themselves, so it is green on a bare checkout and grows teeth as
   services come up.
 - `make check` — build, vet, lint, and the full suite in one.
-- Every target runs through `$(GOTEST)`, which pins `-p 1`. Do not add a bare
-  `go test` to this file; override the whole thing instead
-  (`make test/integration GOTEST="go test -p 1 -count=1"` to skip the cache).
+- Every target runs through `$(GOTEST)`, so one override reaches all of them
+  (`make test/integration GOTEST="go test -count=1"` to skip the cache). Packages
+  run in parallel and `-p 1` is not needed (see Tests) — adding it back costs
+  wall-clock and buys nothing.
 
 ## services
 
