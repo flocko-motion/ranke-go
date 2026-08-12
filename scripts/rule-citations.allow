@@ -48,9 +48,7 @@ R-FIELDS       citation owed: field-name form and limit, field_taxonomy.go
 
 # RQL — the query type and the native engine that is the conformance oracle.
 R-QEVAL        citation owed: fixed evaluation order, query.go
-R-QSCOPE       citation owed: branch defines the graph read, query.go
 R-QFORM        citation owed: original or materialized field values, query.go
-R-QSORT        citation owed: sort keys over a total order, query_default.go
 R-QLAYER       citation owed: layer pinning leaves the result set alone, query.go
 
 # Translation to Cypher — the neo4j backend's own chapter.

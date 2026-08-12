@@ -22,6 +22,10 @@ type Answer []string
 
 // Run executes q through the Archive at archiveHead, so the query meets the
 // library's own scope resolution rather than a hand-rolled Scope.
+//
+// Every answer passes VerifyAnswer on the way out, so each rule there is checked on
+// every corpus query and every row without a test asking for it. A violation is the
+// error, since an answer breaking a rule is not an answer.
 func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke.Id) (Answer, error) {
 	arc, err := ranke.NewArchive(ctx, u, archiveHead)
 	if err != nil {
@@ -31,9 +35,9 @@ func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke
 	if err != nil {
 		return nil, err
 	}
-	var out Answer
+	var elements []ranke.QueryResult
 	for rs.Next() {
-		out = append(out, Fingerprint(rs.Result()))
+		elements = append(elements, rs.Result())
 	}
 	if err := rs.Err(); err != nil {
 		_ = rs.Close()
@@ -41,6 +45,13 @@ func Run(ctx context.Context, u ranke.Universe, q ranke.Query, archiveHead ranke
 	}
 	if err := rs.Close(); err != nil {
 		return nil, err
+	}
+	if vs := VerifyAnswer(ctx, arc, u, q, elements, skipEnvRules()...); len(vs) > 0 {
+		return nil, violationsError(q, vs)
+	}
+	out := make(Answer, 0, len(elements))
+	for _, el := range elements {
+		out = append(out, Fingerprint(el))
 	}
 	return out, nil
 }
