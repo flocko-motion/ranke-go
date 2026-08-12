@@ -27,6 +27,9 @@ var (
 	errIO       = errors.New("adapter/sqlite: io")
 )
 
+// maxConns bounds the pool: one connection writes while the rest read.
+const maxConns = 4
+
 // New opens a sqlite-backed Universe at dsn, creating its schema if absent. In
 // memory, use "file:mem?mode=memory&cache=shared" — bare ":memory:" gives each
 // pooled connection a database of its own.
@@ -34,10 +37,14 @@ func New(dsn string) (ranke.Universe, error) {
 	if dsn == "" {
 		return nil, errEmptyDSN
 	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", concurrentDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("%w: open %s: %w", errNew, dsn, err)
 	}
+	// SQLite takes one writer whatever the pool offers, so an unbounded pool turns
+	// waiting-in-Go into contending-in-SQLite — SQLITE_BUSY once busy_timeout runs
+	// out. A narrow pool queues in database/sql instead, where queueing cannot fail.
+	db.SetMaxOpenConns(maxConns)
 	ctx := context.Background()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
@@ -80,6 +87,24 @@ func probeWritable(ctx context.Context, db *sql.DB) bool {
 	}
 	_, _ = conn.ExecContext(ctx, "ROLLBACK")
 	return true
+}
+
+// concurrentDSN adds the pragmas a pooled writer needs, unless the caller states
+// their own. SQLite locks between connections: busy_timeout makes a second writer
+// wait rather than fail, and WAL keeps readers going while one writes. A pragma is
+// per-connection, so it travels in the DSN — the driver applies it as each opens.
+func concurrentDSN(dsn string) string {
+	if strings.Contains(dsn, "_pragma=") {
+		return dsn // the caller is tuning it themselves
+	}
+	const pragmas = "_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)"
+	if !strings.HasPrefix(dsn, "file:") {
+		return "file:" + dsn + "?" + pragmas
+	}
+	if strings.Contains(dsn, "?") {
+		return dsn + "&" + pragmas
+	}
+	return dsn + "?" + pragmas
 }
 
 // persistentDSN reports whether the DSN names durable storage rather than an
