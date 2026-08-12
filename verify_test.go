@@ -118,19 +118,8 @@ func TestVerifyKeyWindow(t *testing.T) {
 	}
 }
 
-// TestVerifyKeyWindowRejectsUnparsableBound: a bound that is not RFC 3339 states no
-// window, so it fails rather than being read as absent.
-func TestVerifyKeyWindowRejectsUnparsableBound(t *testing.T) {
-	at := time.Now().UTC()
-	who, _ := windowedContributor(t, "", "whenever", at)
-	g := newGraph(t, who)
-	require.NoError(t, g.AddClaims(context.Background(), signedAt(t, who, at)))
-
-	run := g.Verify()
-	run.Wait()
-	require.NoError(t, run.Err())
-	require.Len(t, run.Failures(), 1, "an unreadable bound is a failure, not a free pass")
-}
+// An unparsable bound is `V-TIME`'s subject rather than the window's, so
+// TestVerifyKeyWindowRejectsUnparsableBound lives in verify_time_test.go.
 
 // deletableSource stages a source claim scheduled for deletion, so a later claim has
 // something whose schedule it must carry.

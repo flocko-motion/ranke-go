@@ -416,6 +416,10 @@ func decodeNode(en encNode) (*node, error) {
 		height:        en.Height,
 		fields:        unaliasFieldKeys(en.Fields),
 	}
+	// `V-TIME` covers delete_by and the two pubkey bounds as well as created_at above.
+	if err := checkTimestampFields(n.fields); err != nil {
+		return nil, err
+	}
 	// `V-CONTENT` forbids both slots. Refused rather than resolved: taking one would
 	// hand back a claim whose view denies what the record says.
 	if len(en.Content) > 0 && len(en.ContentHash) > 0 {
@@ -452,6 +456,9 @@ func decodeEdge(ee encEdge) (*edge, error) {
 		encodingSub:       string(aliasFromWire(ee.EncodingSub, encodingSubFromAlias)),
 		relationDirection: RelationDirection(ee.RelationDirection),
 		fields:            unaliasFieldKeys(ee.Fields),
+	}
+	if err := checkTimestampFields(e.fields); err != nil {
+		return nil, err // `V-TIME` — an edge carries the copied delete_by
 	}
 	if len(ee.Content) > 0 && len(ee.ContentHash) > 0 {
 		return nil, ErrContentBothSlots // `V-CONTENT`, as for a node

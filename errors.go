@@ -170,6 +170,7 @@ var (
 	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
 	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
 	ErrProvenanceMissing = errors.New("ranke.verify: a derivation/*, entity/* or relation/* node carries at least one derivation/* edge")
+	ErrTimestampForm     = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

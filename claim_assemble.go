@@ -62,6 +62,11 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if len(parts.InlineContent) > 0 && parts.ContentHash != nil {
 		return nil, WrapDetail(errAssemble, "content", ErrContentBothSlots)
 	}
+	// `V-TIME`: these fields arrive as an unparsed string map, and this door is the
+	// only one a graph-native rebuild passes through.
+	if err := checkTimestampFields(parts.Fields); err != nil {
+		return nil, WrapDetail(errAssemble, "fields", err)
+	}
 	n := &node{
 		typeClass:   NodeClass(nClass),
 		typeSub:     nSub,
@@ -92,6 +97,9 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		}
 		if len(ep.InlineContent) > 0 && ep.ContentHash != nil {
 			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" content", ErrContentBothSlots)
+		}
+		if err := checkTimestampFields(ep.Fields); err != nil {
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" fields", err)
 		}
 		e := &edge{
 			reference:         ep.Reference,
