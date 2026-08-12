@@ -1,0 +1,269 @@
+# R-D* deletion rules and R-FIELDS — verification
+
+Task sd-2276f6. Rules quoted from `docs/papers/spec/ranke-spec.typ`, read in full
+rather than summarised.
+
+Five rules examined. R-DSTRUCT was verified earlier today and is recorded as SKIPPED
+at the end rather than redone.
+
+No code changed, and no test run: every verdict below comes from reading the code and
+the tests. Where I say a test fires, I read the assertion; I did not need a mutation
+run for any of these, and say so per rule rather than implying it.
+
+---
+
+### R-DPLANNED — VERIFIED
+
+Rule: "A *planned* deletion is a `delete_by` date carried in a claim's signed content
+from creation. Every edge referencing that claim MUST copy the date, so the gap stays
+explained wherever the claim is reached."
+
+Code: `verify.go:498` `ruleDeleteByCopied` loads each edge's referenced claim, reads
+`delete_by` off both, and requires them equal. Registered at `verify.go:393`, so it
+runs per edge on every claim the closure walk reaches.
+
+Test: `verify_test.go:153` `TestVerifyDeleteByMustBeCarried` — a claim citing a
+deletable source *without* the copy produces exactly one failure, asserted
+`ErrorIs ErrDeleteByNotCopied`. The paired positive control follows it.
+
+Note on the four citing sites, since the task asked for the code rather than the
+citation. `verify.go:498` is the only one that *enforces*; `edge.go:66,151` and
+`contribution.go:158` cite the rule where they carry or propagate the date, and
+`contribution.go:163` `StrandedByDeletion` is a write-path check that refuses a
+contribution whose own claims would be reachable only through a deleted one. None of
+the four asserts anything the rule does not say.
+
+Note on strictness: the check is equality both ways, so an edge carrying a date the
+referenced claim never declared also fails. That is stronger than "MUST copy",
+literally read. I think it is right and would not raise it — a false schedule
+announces a gap that will never come, which defeats the purpose the rule gives for
+the copy — but it is a deliberate widening and the comment at `verify.go:508` says so.
+
+---
+
+### R-DREQUEST — GAP
+
+Rule: "A *requested* deletion is documented by a `contribution/delete` claim: a node
+of that class carrying a `contribution/delete` edge to its *target*, the deleted
+claim. A system account requests a deletion (`R-C2TYPE`); the Sequencer carries it
+out (`R-C6REQUEST`)."
+
+Code: `node.go:256` declares `NodeDelete`, `edge_taxonomy.go:141` declares
+`EdgeTypeDelete`, and `contribution.go:153` puts
+`NodeDelete` in `reservedTypes` so only a lifted contribution may carry one. That is
+the whole of it: **nothing verifies the shape the rule defines.** No check requires a
+`contribution/delete` claim to carry a `contribution/delete` edge, or to name a
+target at all.
+
+Test: NONE for the shape.
+
+Note: a `contribution/delete` claim with no delete edge — or with a `derivation/*`
+edge in its place — is constructible and verifies clean. The type is reserved to the
+Sequencer, so the claim is not forgeable by an ordinary contributor, which limits the
+blast radius to a Sequencer bug rather than an attack. But R-DGAP leans on this shape
+("a `contribution/delete` mark against it"), so a malformed mark is a gap that reads
+as explained to a human and is invisible to verification.
+
+The generator builds the shape correctly (`tests/generator/generate.go:454`), which
+is why nothing has noticed: every delete claim in every fixture is well formed by
+construction. That is the same pattern the task names — a rule the fixtures satisfy
+by construction is a rule nothing tests.
+
+Which side should change: the code. The rule is a definition and a reasonable one;
+the check is a few lines (a `contribution/delete` node carries at least one
+`contribution/delete` edge) and belongs in `verifyRules`.
+
+---
+
+### R-DGAP — GAP
+
+Rule: "Verification MUST pass over a graph holding a physically deleted claim when —
+and only when — an *explained gap* covers it: a `contribution/delete` mark against it
+(`R-DREQUEST`), or a copied `delete_by` (`R-DPLANNED`). Without such a gap, the
+missing claim fails `V-REF`."
+
+Code: `verify.go:230` — the walk fetches every reachable id with `GetClaimsRaw` and,
+on any error including `ErrNotFound`, records a failure and moves on. There is **no
+explained-gap exemption anywhere in the verifier**: no lookup for a
+`contribution/delete` mark, and no check of a citing edge's `delete_by` before
+failing. `ruleDeleteByCopied` returns early when the referenced claim is already gone
+(`verify.go:500`), but that only stops the *copy* rule from firing on an absent
+claim; the walk has already failed it.
+
+Test: NONE. No test deletes bytes.
+
+Note: this is the load-bearing rule of the family, and the two directions land
+differently.
+
+- *Only-when* (reject an unexplained gap) — satisfied, though incidentally: every
+  missing claim fails, so an unexplained one does too.
+- *When* (pass over an explained gap) — unimplemented. A correctly deleted claim,
+  with its schedule copied onto every citing edge exactly as R-DPLANNED requires,
+  still fails verification once its bytes are gone. The archive's own lawful
+  deletion path therefore produces a graph the verifier rejects.
+
+A structural note that explains why this has gone unnoticed, and which I think
+matters more than the missing check. **The Universe port has no delete operation.**
+`Capabilities.Delete` is declared at `universe.go:36` — "a stored key can be removed,
+for lawful deletion (R6) and eviction" — but the interface at `universe.go:111-172`
+exposes no method that removes a claim or a blob. So:
+
+1. Nothing in the library can physically delete a claim through its own API.
+2. No test can construct R-DGAP's scenario without going behind the port.
+3. The rule governs a state the library can reach only out of band.
+
+So the honest reading is that lawful deletion is unimplemented end to end, not merely
+unverified: the capability is advertised, the operation is absent, and the rule
+covering the resulting graph is unenforced. I would rank the missing verifier
+exemption *below* that, because implementing the exemption first would produce a
+verifier that tolerates gaps nothing in the library can create.
+
+Which side should change: the code, and it is a feature rather than a fix.
+
+---
+
+### R-DEXPIRY — GAP
+
+Rule: "A contributor's key is valid within the closed window from `pubkey_valid_from`
+through `pubkey_expires_after` (both RFC 3339, both optional) on the contributor
+claim; a contributor carrying neither is valid at any date. A `contribution/expiry`
+edge against that contributor carries an earlier `pubkey_expires_after` and moves the
+end of the window to it. That edge is carried either by a `contribution/expiry` claim
+or by the `contribution/contributor` claim introducing the successor key, and
+`R-C3LIMIT` keeps that claim in every branch reaching the contributor."
+
+Code, first sentence: `verify.go:413` `verifyKeyWindow` reads both bounds off the
+signer and compares the claim's `created_at`. `keyBound` (`verify.go:432`) reports an
+absent field as `nil` — unbounded — and an **unparseable** one as an error, so a
+malformed bound fails rather than silently widening the window. The window is closed
+at both ends: `at.Before(*from)` and `at.After(*until)` both admit equality.
+
+Code, second sentence: **nothing applies it.** `verifyKeyWindow` reads fields off the
+signer claim and never looks for a `contribution/expiry` edge against it.
+`EdgeTypeExpiry` (`edge_taxonomy.go:142`) and `NodeExpiry` (`node.go:257`) exist as
+vocabulary, the generator emits such claims, and `contribution.go:153` reserves the
+type to the Sequencer — but no verification reads one.
+
+Test: `verify_test.go:80` `TestVerifyKeyWindow` covers the first sentence thoroughly
+— a nine-case table including *on the lower bound* and *on the upper bound*, which is
+what pins the closed/inclusive reading, plus both open-ended forms and the
+neither-bound case. `verify_test.go:123`
+`TestVerifyKeyWindowRejectsUnparsableBound` covers the malformed bound explicitly,
+naming the trap: "an unreadable bound is a failure, not a free pass". Both traps the
+task flagged are already closed.
+
+Test for the second sentence: NONE.
+
+Note: the consequence is early revocation having no effect. An expiry edge is the
+mechanism for retiring a key ahead of its declared window — a compromised key, most
+obviously — and a claim signed after that revocation still verifies, because the
+window the verifier reads is the one on the contributor claim alone. This is the
+finding in the family with a security shape rather than a correctness shape, and the
+one I would fix first.
+
+Which side should change: the code. The rule is precise about where the edge may be
+carried, so there is no ambiguity to resolve first.
+
+---
+
+### R-FIELDS — UNTESTED
+
+Rule: "A field name MUST be at most 128 bytes over `[a-z0-9_]` with no leading `_`; a
+value at most 64 KiB; a record at most 256 fields; inline content at most 1 MiB.
+Larger data belongs in external content (`V-CONTENT`)."
+
+Code: all four bounds are present and correct.
+
+- `field_taxonomy.go:17-19` declares 128, `64 * 1024`, 256.
+- `field_taxonomy.go:75` `checkUserFieldName` rejects `len(name) > 128` — `len` on a
+  Go string is **bytes**, which is what the rule says, and `>` makes 128 itself
+  admissible, matching "at most".
+- `field_taxonomy.go:104` `validFieldChars` iterates by byte index, admits `a-z0-9_`
+  only, and refuses `_` at position 0.
+- `field_taxonomy.go:87` `checkFields` enforces the 256-field cap and the 64 KiB
+  value cap, called for nodes at `claim_builder.go:149` and for edges at
+  `edge.go:162`, so both record kinds are covered.
+- `claim_builder.go:219` rejects inline content over `maxInlineContent`,
+  `1 << 20` = 1 MiB exactly (`claim_builder.go:227`).
+
+Every bound is byte-denominated and inclusive as written. I checked both traps the
+task named and neither is present.
+
+Test: PARTIAL. `field_taxonomy_test.go:66` `TestFieldNameNamespace_Rejected` covers
+the *character* half — a leading underscore, uppercase, and a space are each refused.
+Nothing covers any of the four *numeric* bounds: no test in the repository
+constructs an over-long field name, an over-long value, a 257-field record, or
+oversized inline content. `grep` for the four sentinels
+(`errFieldNameTooLong`, `errFieldValueTooLong`, `errTooManyFields`,
+`errInlineContentTooLarge`) returns no test file, and no test anywhere uses
+`strings.Repeat` to build an oversized input.
+
+Note: the verdict is UNTESTED rather than VERIFIED because the bounds are the bulk of
+what the rule states and none of them is exercised — each could be off by one, or
+denominated in runes, and the suite would stay green. The character half being tested
+is why this is not a clean sweep in either direction; I have not split the verdict,
+since the format takes one per rule, but the split is the actionable part.
+
+Cheap to close: four cases, each constructing one input a byte over its bound and
+asserting the matching sentinel, plus one at exactly the bound asserting acceptance.
+The at-the-bound half is what would catch an inclusivity slip, which is the error the
+current code does *not* have and a future edit easily could.
+
+---
+
+## Summary
+
+| Verdict | Count | Rules |
+|---|---|---|
+| VERIFIED | 1 | R-DPLANNED |
+| UNTESTED | 1 | R-FIELDS |
+| GAP | 3 | R-DREQUEST, R-DGAP, R-DEXPIRY |
+| DIVERGENCE | 0 | |
+| OUT OF SCOPE | 0 | |
+
+Ranked by what I would fix first.
+
+1. **R-DEXPIRY's expiry edge.** Early revocation currently has no effect on
+   verification: a claim signed after a key was retired still verifies. The rule is
+   unambiguous about where the edge may be carried, so this is implementable today,
+   and it is the only finding here with a security consequence.
+2. **R-FIELDS' four bound tests.** Cheapest item on the list and the one most likely
+   to decay silently — bounds are exactly the kind of constant an edit moves by one.
+3. **R-DREQUEST's shape check.** A few lines in `verifyRules`, and it is what R-DGAP
+   will need to lean on: an explained gap is only as trustworthy as the mark that
+   explains it.
+4. **R-DGAP, and the missing delete operation behind it.** The largest piece and the
+   one needing a decision before code: the port advertises `Capabilities.Delete` and
+   offers no way to delete, so "lawful deletion" is unimplemented rather than
+   unverified. The verifier exemption should follow the operation, not precede it —
+   otherwise the verifier learns to tolerate a state nothing can produce.
+
+A cross-cutting observation. Three of the five rules describe machinery that exists
+as *vocabulary* — `NodeDelete`, `NodeExpiry`, `EdgeTypeDelete`, `EdgeTypeExpiry`, and
+`Capabilities.Delete` are all declared, and the generator emits well-formed instances
+of each — while the behaviour the rules attach to that vocabulary is absent. The
+fixtures being well formed by construction is precisely what keeps the suite green
+over it. R-DPLANNED is the exception and is also the only one of the five with a test
+that fires, which I do not think is a coincidence: it is the one whose obligation
+falls on ordinary claims rather than on the limiting-claim machinery.
+
+## Not checked, and why
+
+- **R-DSTRUCT** — verified earlier today, skipped as instructed. I did not re-derive
+  its verdict, though I did read `contribution.go:211` in passing while tracing
+  `reservedTypes` and saw nothing inconsistent with the recorded result.
+- **R-C2TYPE and R-C6REQUEST**, which R-DREQUEST cites for who may request a deletion
+  and who carries it out. Both are contribution rules and belong to that family's
+  task; I checked only that `reservedTypes` (`contribution.go:153`) puts `NodeDelete`
+  and `NodeExpiry` behind a lift, which is the part R-DREQUEST depends on.
+- **R-C3LIMIT**, which R-DEXPIRY cites for keeping the expiry claim in every branch
+  reaching the contributor. Same reason — another family's rule, and moot here while
+  nothing reads the edge at all.
+- **Whether any backend can delete out of band.** I established that the Universe
+  port exposes no delete method; I did not audit each adapter for a delete path
+  reachable another way (the fs adapter owns a directory, so its files can plainly be
+  removed by anything with the path). The finding is about the library's own API, not
+  about whether bytes can be made to vanish.
+- **`V-CONTENT`'s "larger data belongs in external content"**, R-FIELDS' closing
+  sentence. It is a pointer to another rule rather than an obligation of this one,
+  and V-CONTENT is not in this task's set.
