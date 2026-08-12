@@ -6,7 +6,6 @@ package tests
 import (
 	"context"
 	"crypto/ed25519"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -108,11 +107,12 @@ func TestConcurrentContributionsLoseNothing(t *testing.T) {
 	for _, be := range rows {
 		for _, sr := range sequencerRows() {
 			t.Run(be.Name+"/"+sr.Name, func(t *testing.T) {
+				// A requested row that cannot open FAILS: ErrUnavailable is an error
+				// like any other, and the row set decides what runs (RANKE_ROWS).
+				// Skipping here would drop whichever row's locking is hardest,
+				// silently, which is the one this suite exists to exercise.
 				u, cleanup, err := be.Open()
-				if errors.Is(err, backends.ErrUnavailable) {
-					t.Skipf("unavailable here: %v", err)
-				}
-				require.NoError(t, err)
+				require.NoErrorf(t, err, "row %q was asked for and could not open", be.Name)
 				defer cleanup()
 
 				rowWriters := n
