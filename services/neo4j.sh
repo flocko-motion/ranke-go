@@ -13,10 +13,11 @@
 # Usage:
 #   services/neo4j.sh pod    up [agent-pod]   # start in a pod; optionally wire an agent pod to the net
 #   services/neo4j.sh pod    {down|status|env}
-#   services/neo4j.sh native {up|down|status|env|purge}
+#   services/neo4j.sh native {up|down|status|env|reap|purge}
 #
 # Shared overrides: RANKE_NEO4J_{PASS,HTTP_PORT,BOLT_PORT,READY_TIMEOUT}.
-# Pod:    RANKE_NEO4J_{NETWORK,NAME,IMAGE}.   Native: RANKE_NEO4J_{DIR,VERSION}.
+# Pod:    RANKE_NEO4J_{NETWORK,NAME,IMAGE}.
+# Native: RANKE_NEO4J_{DIR,VERSION,HEAP,PAGECACHE,IDLE_MINUTES}.
 set -euo pipefail
 
 # ── shared config ──────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ wait_ready() {
   local deadline=$(( SECONDS + READY_TIMEOUT ))
   echo "waiting for Neo4j to serve (up to ${READY_TIMEOUT}s)..."
   while [ "$SECONDS" -lt "$deadline" ]; do
-    if curl -fsS -o /dev/null "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null; then
+    if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null; then
       echo "Neo4j is serving."
       return 0
     fi
@@ -137,9 +138,59 @@ nat_ensure_neo4j() {
   echo "setting initial password..."
   neo neo4j-admin dbms set-initial-password "$PASS" >/dev/null 2>&1 || \
     echo "note: could not set initial password (already initialised?)" >&2
+  nat_cap_memory
 }
 
-nat_is_running() { [ -d "$NEO4J_HOME" ] && neo neo4j status >/dev/null 2>&1; }
+# Neo4j sizes itself for a dedicated host, so its ceiling scales with the box rather
+# than with the kilobyte test graphs. Measured idle RSS: uncapped 567 MB, 256m/128m
+# 508 MB. Raising the cap costs memory — AlwaysPreTouch makes the heap resident at
+# once — so 512m measured worse than uncapped. Idempotent; `up` caps an old install.
+NAT_HEAP="${RANKE_NEO4J_HEAP:-256m}"
+NAT_PAGECACHE="${RANKE_NEO4J_PAGECACHE:-128m}"
+
+nat_cap_memory() {
+  local conf="$NEO4J_HOME/conf/neo4j.conf"
+  [ -w "$conf" ] || return 0
+  grep -q '^# ranke test memory caps' "$conf" && return 0
+  cat >>"$conf" <<EOF
+
+# ranke test memory caps — see services/neo4j.sh nat_cap_memory
+server.memory.heap.initial_size=${NAT_HEAP}
+server.memory.heap.max_size=${NAT_HEAP}
+server.memory.pagecache.size=${NAT_PAGECACHE}
+EOF
+  echo "capped heap at ${NAT_HEAP}, page cache at ${NAT_PAGECACHE}."
+}
+
+# nat_is_serving means Neo4j ANSWERS. `neo4j status` reads a pidfile, so a JVM that
+# failed to bind reads as running and each retry adds another. --max-time is needed
+# because a wedged JVM accepts the connection and never replies.
+nat_is_serving() { curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null; }
+
+# nat_pid echoes THIS install's JVM pid. The cmdline is checked for our own NEO4J_HOME,
+# since a pidfile can name a dead or reused pid — and that check is what keeps the
+# reaper off an instance it did not start.
+nat_pid() {
+  local pidfile="$NEO4J_HOME/run/neo4j.pid" pid
+  [ -r "$pidfile" ] || return 1
+  pid=$(cat "$pidfile" 2>/dev/null) || return 1
+  [ -n "$pid" ] || return 1
+  grep -qF "$NEO4J_HOME" "/proc/$pid/cmdline" 2>/dev/null || return 1
+  echo "$pid"
+}
+
+# nat_clear_stale removes a JVM that is not serving, and the pidfile naming it. Called
+# before a start so two attempts cannot leave two JVMs.
+nat_clear_stale() {
+  local pid
+  if pid=$(nat_pid); then
+    echo "clearing a Neo4j that is not serving (pid ${pid})..."
+    neo neo4j stop >/dev/null 2>&1 || true
+    kill -0 "$pid" 2>/dev/null && { kill "$pid" 2>/dev/null; sleep 2; }
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+  fi
+  rm -f "$NEO4J_HOME/run/neo4j.pid"
+}
 
 nat_print_env() {
   cat <<EOF
@@ -151,16 +202,70 @@ EOF
   test_env_hint "bolt://127.0.0.1:${BOLT_PORT}" "http://127.0.0.1:${HTTP_PORT}"
 }
 
+# The lock internal/exclusive takes around the shared Neo4j. The kernel drops a flock
+# when its holder dies, so this survives a kill and needs nothing from the tests.
+NAT_LOCK="${TMPDIR:-/tmp}/ranke-neo4j.lock"
+NAT_IDLE_MINUTES="${RANKE_NEO4J_IDLE_MINUTES:-5}"
+
+# nat_tests_running reports that some process holds the lock. Non-blocking: the answer
+# is about this instant, which is why it is only half the reaper's test.
+nat_tests_running() {
+  command -v flock >/dev/null 2>&1 || return 0 # no flock: assume busy, never reap
+  [ -e "$NAT_LOCK" ] || return 1
+  ! flock -n "$NAT_LOCK" true 2>/dev/null
+}
+
+# nat_recently_active reports a store write within NAT_IDLE_MINUTES. The data dir is
+# the signal because tests already produce it — each flushes the database at open —
+# where a heartbeat must be remembered. Measured: 19h idle left the mtime unmoved.
+nat_recently_active() {
+  local data="$NEO4J_HOME/data"
+  [ -d "$data" ] || return 1
+  [ -n "$(find "$data" -newermt "-${NAT_IDLE_MINUTES} minutes" -print -quit 2>/dev/null)" ]
+}
+
+# nat_reap_if_idle needs both halves: packages take the lock separately, so it is
+# momentarily free between two of them and the lock alone would reap mid-suite.
+nat_reap_if_idle() {
+  nat_pid >/dev/null || return 0
+  nat_tests_running && return 0
+  nat_recently_active && return 0
+  echo "reaping a Neo4j idle for over ${NAT_IDLE_MINUTES}m with no tests holding the lock..."
+  neo neo4j stop >/dev/null 2>&1 || true
+  nat_clear_stale
+}
+
 nat_up() {
   nat_ensure_java
   nat_ensure_neo4j
-  if nat_is_running; then echo "Neo4j already running; reusing it."; else echo "starting Neo4j..."; neo neo4j start; wait_ready; fi
+  nat_cap_memory   # an install predating the caps gets them here
+  nat_reap_if_idle # a leaked instance is cleared before we decide to reuse one
+  if nat_is_serving; then
+    echo "Neo4j already serving; reusing it."
+    nat_print_env
+    return 0
+  fi
+  nat_clear_stale # a JVM that is not serving is in the way, not a running instance
+  echo "starting Neo4j..."
+  neo neo4j start
+  # The env is a promise that something answers, so it is printed only once one does.
+  if ! wait_ready; then
+    echo "error: Neo4j did not come up; leaving nothing behind." >&2
+    nat_clear_stale
+    return 1
+  fi
   nat_print_env
 }
 
-nat_down()   { nat_is_running && { neo neo4j stop; echo "stopped."; } || echo "not running."; }
-nat_status() { nat_is_running && echo "running — bolt://127.0.0.1:${BOLT_PORT}" || echo "not running"; }
-nat_env()    { nat_is_running && nat_print_env || { echo "not running" >&2; exit 1; }; }
+# down stops whatever this install left behind, serving or not — the leak is the case
+# where a JVM exists and does not answer.
+nat_down()   { nat_pid >/dev/null && { nat_clear_stale; echo "stopped."; } || echo "not running."; }
+nat_status() {
+  if nat_is_serving; then echo "serving — bolt://127.0.0.1:${BOLT_PORT}"
+  elif nat_pid >/dev/null; then echo "a JVM is up but not serving (pid $(nat_pid)) — run 'down' then 'up'"
+  else echo "not running"; fi
+}
+nat_env()    { nat_is_serving && nat_print_env || { echo "not serving" >&2; exit 1; }; }
 nat_purge()  { nat_down || true; rm -rf "$NAT_DIR"; echo "purged ${NAT_DIR}"; }
 
 # ── query ──────────────────────────────────────────────────────────────
@@ -214,7 +319,11 @@ usage: $0 <pod|native> <command> [opts]
   pod     run Neo4j in a podman pod on a shared network (needs podman)
             up [agent-pod] | down | status | env
   native  install + run Neo4j in this container (no podman/root)
-            up | down | status | env | purge
+            up | down | status | env | reap | purge
+            up reaps a leaked instance first, and fails rather than printing
+            the env when nothing comes up; status means SERVING, not "a pid
+            exists"; reap stops an instance no test holds and none has
+            touched for RANKE_NEO4J_IDLE_MINUTES (default 5).
   query   run any Cypher against the running instance (either mode) and
           print one JSON object per row, keyed by return column. Pass '-'
           to read the statement from stdin, and --params a JSON object to
@@ -245,6 +354,7 @@ case "$mode" in
       down) nat_down ;;
       status) nat_status ;;
       env) nat_env ;;
+      reap) nat_reap_if_idle ;;
       purge) nat_purge ;;
       *) usage; exit 2 ;;
     esac ;;
