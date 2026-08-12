@@ -190,6 +190,19 @@ func isPreconditionFailed(err error) bool {
 	return false
 }
 
+// Delete removes the object; S3 reports success for a key that was not there, which
+// is the idempotence the port asks for.
+func (s *store) Delete(ctx context.Context, key string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("%w: delete %s: %w", errIO, key, err)
+	}
+	return nil
+}
+
 func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),

@@ -117,6 +117,16 @@ type Universe interface {
 	// positionally — verification hashes these bytes, replication copies them. A
 	// structure-only cache (RawClaims false) misses, so a stack routes below it.
 	GetClaimsRaw(ctx context.Context, ids []Id) ([][]byte, error)
+	// DeleteClaims removes the stored bytes of each id: a lawful deletion the graph
+	// still explains (`R-DGAP`), or a cache eviction. Idempotent — an id already
+	// absent is no error, so a sweep may run twice. ErrUnsupported where
+	// Capabilities.Delete is false, rather than a silent success.
+	//
+	// Removing bytes rewrites no id: every referencing claim still commits to the
+	// one it named, which is what leaves a gap rather than a hole. Whether a
+	// deletion is LAWFUL is the caller's to establish (-> DeletePlanned); this
+	// removes what it is told to.
+	DeleteClaims(ctx context.Context, ids []Id) error
 
 	// GetContents returns the bytes for each ref, positionally; a missing blob
 	// fails the whole call with ErrNotFound.
@@ -127,6 +137,9 @@ type Universe interface {
 	HasContents(ctx context.Context, hashes []Id) ([]bool, error)
 	// StreamContent returns a reader for one blob — the lazy, singular GetContents.
 	StreamContent(ctx context.Context, hash Id, size uint64) (io.ReadCloser, error)
+	// DeleteContents removes the blobs at hashes, on DeleteClaims' terms: idempotent,
+	// and ErrUnsupported without Capabilities.Delete.
+	DeleteContents(ctx context.Context, hashes []Id) error
 
 	// GetClaimHeights returns the committed heights (§4.1) of the claims at ids,
 	// positionally. Height is fixed at creation and read back cheaply here, since

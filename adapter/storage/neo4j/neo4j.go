@@ -336,6 +336,47 @@ func (u *neo4jUniverse) PutContents(_ context.Context, _ []ranke.ContentBlob) er
 	return nil
 }
 
+// cypherDeleteClaims returns a claim's node to what a reference target looks like
+// before its own claim arrives: id alone, no labels, no outgoing edges. Relationships
+// INTO it are other claims' edges and MUST survive — every citing claim commits to the
+// id it named, so removing those would rewrite what those claims say.
+const cypherDeleteClaims = `
+UNWIND $ids AS id
+MATCH (n {id: id})
+WITH n, labels(n) AS ls
+OPTIONAL MATCH (n)-[r]->()
+DELETE r
+WITH DISTINCT n, ls
+CALL (n, ls) {
+  WITH n, ls
+  WHERE size(ls) > 0
+  REMOVE n:$(ls)
+}
+SET n = {id: n.id}`
+
+// DeleteClaims strips each claim back to a labelless stub, leaving the gap the graph
+// explains. Absent ids match nothing, which is the idempotence the port asks for.
+func (u *neo4jUniverse) DeleteClaims(ctx context.Context, ids []ranke.Id) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	idStrs := make([]string, len(ids))
+	for i, id := range ids {
+		if id == nil {
+			return errNilID
+		}
+		idStrs[i] = id.String()
+	}
+	if _, err := u.query(ctx, cypherDeleteClaims, map[string]any{"ids": idStrs}); err != nil {
+		return fmt.Errorf("%w: delete claims: %w", errQuery, err)
+	}
+	return nil
+}
+
+// DeleteContents is a no-op: this backend holds no external content, so there is none
+// to remove — the mirror of PutContents.
+func (u *neo4jUniverse) DeleteContents(_ context.Context, _ []ranke.Id) error { return nil }
+
 // HasContents reports false for everything: the cache holds no external content.
 func (u *neo4jUniverse) HasContents(_ context.Context, hashes []ranke.Id) ([]bool, error) {
 	return make([]bool, len(hashes)), nil

@@ -40,9 +40,6 @@ R-C4SEAL       citation owed: sealed once verified, adapter/sequencer
 R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequencer
 R-C6SIGN       citation owed: Sequencer claims name its own contributor, adapter/sequencer
 
-# Deletion — the requested form, which the Sequencer carries out.
-R-DREQUEST     citation owed: contribution/delete naming its target, contribution.go
-
 # Field syntax.
 R-FIELDS       citation owed: field-name form and limit, field_taxonomy.go
 

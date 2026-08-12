@@ -122,6 +122,14 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+// Delete removes key's row; DELETE of an absent id affects nothing and is no error.
+func (s *store) Delete(ctx context.Context, key string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM blobs WHERE id = ?`, key); err != nil {
+		return fmt.Errorf("%w: delete %s: %w", errIO, key, err)
+	}
+	return nil
+}
+
 func (s *store) Close() error { return s.db.Close() }
 
 // Capabilities returns what New probed: persistence from the DSN, overwrite and

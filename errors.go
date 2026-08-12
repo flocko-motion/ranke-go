@@ -171,6 +171,10 @@ var (
 	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
 	ErrProvenanceMissing = errors.New("ranke.verify: a derivation/*, entity/* or relation/* node carries at least one derivation/* edge")
 	ErrTimestampForm     = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
+	// ErrUnexplainedGap: a claim's bytes are missing and nothing explains the gap —
+	// no copied delete_by on the edge reaching it, no contribution/delete mark against
+	// it. Indistinguishable from data loss, which is why it fails.
+	errUnexplainedGap = errors.New("ranke.verify: a missing claim with no explained gap (no copied delete_by, no contribution/delete mark)")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

@@ -50,6 +50,10 @@ func (s *store) Has(_ context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
+// Delete is refused: the floor claims no Delete capability, and answering a removal
+// it does not make would let a lawful deletion read as done.
+func (s *store) Delete(_ context.Context, _ string) error { return ranke.ErrUnsupported }
+
 func (s *store) Close() error { return nil }
 
 // Capabilities: the minimal floor exposes only get/put/has over an ephemeral

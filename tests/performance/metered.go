@@ -107,6 +107,20 @@ func (m *metered) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, error)
 	return b, err
 }
 
+func (m *metered) DeleteClaims(ctx context.Context, ids []ranke.Id) error {
+	t := time.Now()
+	err := m.inner.DeleteClaims(ctx, ids)
+	m.rec("DeleteClaims", kindWrite, len(ids), time.Since(t))
+	return err
+}
+
+func (m *metered) DeleteContents(ctx context.Context, hashes []ranke.Id) error {
+	t := time.Now()
+	err := m.inner.DeleteContents(ctx, hashes)
+	m.rec("DeleteContents", kindWrite, len(hashes), time.Since(t))
+	return err
+}
+
 func (m *metered) GetContents(ctx context.Context, refs []ranke.ContentRef) ([][]byte, error) {
 	t := time.Now()
 	c, err := m.inner.GetContents(ctx, refs)
