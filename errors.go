@@ -163,6 +163,13 @@ var (
 	errNilUniverse = errors.New("ranke.NewArchive: nil Universe")
 	errNilHeadID   = errors.New("ranke.NewArchive: nil head id")
 	errNilID       = errors.New("ranke.Archive: nil id")
+
+	// --- ADT shape, checked wherever a claim arrives rather than at the builder
+	// alone: a record decoded or assembled meets these too.
+	ErrContentBothSlots  = errors.New("ranke: a record carries both content and content_hash, which are mutually exclusive")
+	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
+	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
+	ErrProvenanceMissing = errors.New("ranke.verify: a derivation/*, entity/* or relation/* node carries at least one derivation/* edge")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

@@ -416,6 +416,11 @@ func decodeNode(en encNode) (*node, error) {
 		height:        en.Height,
 		fields:        unaliasFieldKeys(en.Fields),
 	}
+	// `V-CONTENT` forbids both slots. Refused rather than resolved: taking one would
+	// hand back a claim whose view denies what the record says.
+	if len(en.Content) > 0 && len(en.ContentHash) > 0 {
+		return nil, ErrContentBothSlots
+	}
 	switch {
 	case len(en.Content) > 0: // inline (§Content)
 		n.content = en.Content
@@ -447,6 +452,9 @@ func decodeEdge(ee encEdge) (*edge, error) {
 		encodingSub:       string(aliasFromWire(ee.EncodingSub, encodingSubFromAlias)),
 		relationDirection: RelationDirection(ee.RelationDirection),
 		fields:            unaliasFieldKeys(ee.Fields),
+	}
+	if len(ee.Content) > 0 && len(ee.ContentHash) > 0 {
+		return nil, ErrContentBothSlots // `V-CONTENT`, as for a node
 	}
 	switch {
 	case len(ee.Content) > 0: // inline (§Content)

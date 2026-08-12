@@ -57,6 +57,11 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if err != nil {
 		return nil, WrapDetail(errAssemble, "type", err)
 	}
+	// `V-CONTENT` forbids both slots. It matters most here: these parts carry no
+	// canonical bytes, so a claim built from both re-encodes to neither record.
+	if len(parts.InlineContent) > 0 && parts.ContentHash != nil {
+		return nil, WrapDetail(errAssemble, "content", ErrContentBothSlots)
+	}
 	n := &node{
 		typeClass:   NodeClass(nClass),
 		typeSub:     nSub,
@@ -84,6 +89,9 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		class, sub, err := splitType(ep.Type)
 		if err != nil {
 			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" type", err)
+		}
+		if len(ep.InlineContent) > 0 && ep.ContentHash != nil {
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" content", ErrContentBothSlots)
 		}
 		e := &edge{
 			reference:         ep.Reference,
