@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -118,6 +118,17 @@ test/integration:
 # Verbose so the per-row, per-query sub-tests are visible.
 test/matrix:
 	$(GOTEST) ./tests/matrix/ -v -count=1
+
+# test/concurrency/N — N writers contributing at once, over every (Sequencer,
+# storage) pair the run asks for. The suite runs this at a modest count already;
+# this target is for the massive one, which is where a race that hides at 64
+# writers shows itself. E.g.
+#   make test/concurrency/1000
+# RANKE_ROWS narrows the storage half, and the services come up as for test/matrix.
+# The serialised Sequencer is capped internally — its count is sequential work.
+test/concurrency/%:
+	@RANKE_CONCURRENCY=$* $(GOTEST) ./tests/ -run TestConcurrentContributionsLoseNothing \
+		-v -count=1 -timeout 30m
 
 # test/performance/N — the backend matrix: generate the same deterministic
 # size-N archive into each storage backend and time build + verify, one row

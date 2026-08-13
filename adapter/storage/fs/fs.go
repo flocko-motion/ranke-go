@@ -88,6 +88,14 @@ func (s *store) Has(_ context.Context, key string) (bool, error) {
 	return false, err
 }
 
+// Delete unlinks key's file, an already-absent one being no error.
+func (s *store) Delete(_ context.Context, key string) error {
+	if err := os.Remove(s.path(key)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // Open implements storage.Streamer: a raw file handle, so content streams
 // off disk instead of being read whole into memory.
 func (s *store) Open(_ context.Context, key string) (io.ReadCloser, error) {

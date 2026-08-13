@@ -9,10 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// V-TYPE, V-REL, V-PROV and V-CONTENT's XOR were enforced at construction alone, so
-// a record that arrived as bytes or through AssembleClaim broke them and verified
-// clean. Every fixture here is built AROUND the builder — NewClaim refuses to make
-// one — either by assembling parts or by marshalling a record literal.
+// V-TYPE, V-REL, V-PROV and V-CONTENT's XOR were enforced at construction alone, so a
+// record that arrived as bytes or through AssembleClaim broke them and verified clean.
+// Those fixtures are built AROUND the builder — NewClaim refuses them — by assembling
+// parts or marshalling a record literal.
+//
+// R-DREQUEST is the exception at the end: nothing enforced it anywhere, construction
+// included, so NewClaim builds its malformed shapes directly.
 
 // fired reports whether want is among the failures, so a fixture that also breaks
 // V-ID (a hand-built id is not a signature over these bytes) still tests its own rule.
@@ -285,4 +288,51 @@ func TestBothSlotsWouldHaveLostItsOwnBytes(t *testing.T) {
 		"the two readings of a both-slots record encode differently, so resolving it silently picks one and loses the other")
 	require.Equal(t, ContentInline, inline.Node().ContentKind())
 	require.Equal(t, ContentExternal, external.Node().ContentKind())
+}
+
+// TestVerifyDeleteMarkWithoutTarget: `R-DREQUEST` — a contribution/delete claim
+// documents a deletion by carrying a contribution/delete edge to its target. Unlike the
+// four rules above, this one had no construction gate either: NewClaim builds both
+// malformed shapes, so the fixtures need no hand assembly.
+func TestVerifyDeleteMarkWithoutTarget(t *testing.T) {
+	ctr := contributor(t)
+
+	t.Run("no delete edge at all", func(t *testing.T) {
+		bad, err := NewClaim(NodeDelete, ctr).WithHeight(HeightOf(ctr)).Sign()
+		require.NoError(t, err, "NewClaim builds it, which is the hole")
+		require.True(t, fired(verifyOne(t, bad, ctr, bad), ErrDeleteMarkNoTarget),
+			"a mark naming no target must fail verification")
+	})
+
+	t.Run("a derivation edge in its place", func(t *testing.T) {
+		e, err := NewEdge(EdgeConfig{Reference: ctr.ID(), Type: TypeDerivation("source")})
+		require.NoError(t, err)
+		bad, err := NewClaim(NodeDelete, ctr).WithEdges(e).WithHeight(HeightOf(ctr)).Sign()
+		require.NoError(t, err)
+		require.True(t, fired(verifyOne(t, bad, ctr, bad), ErrDeleteMarkNoTarget),
+			"an edge of another class does not document a deletion")
+	})
+}
+
+// TestVerifyDeleteMarkWithTargetPasses is the control, in the shape the Sequencer and
+// the generator both build: the mark carries a contribution/delete edge to its target.
+func TestVerifyDeleteMarkWithTargetPasses(t *testing.T) {
+	ctr := contributor(t)
+	target := srcClaim(t, ctr, "the claim being deleted")
+	e, err := NewEdge(EdgeConfig{Reference: target.ID(), Type: EdgeTypeDelete})
+	require.NoError(t, err)
+	good, err := NewClaim(NodeDelete, ctr).
+		WithEdges(e).
+		WithHeight(HeightOf(ctr, target)).
+		Sign()
+	require.NoError(t, err)
+	require.False(t, fired(verifyOne(t, good, ctr, target, good), ErrDeleteMarkNoTarget))
+}
+
+// TestVerifyOrdinaryClaimNeedsNoDeleteEdge: the rule is scoped to the class, so it must
+// not ask a source or a derivation for a delete edge.
+func TestVerifyOrdinaryClaimNeedsNoDeleteEdge(t *testing.T) {
+	ctr := contributor(t)
+	plain := srcClaim(t, ctr, "no mark, no target")
+	require.False(t, fired(verifyOne(t, plain, ctr, plain), ErrDeleteMarkNoTarget))
 }

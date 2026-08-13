@@ -33,6 +33,52 @@ func Run(t *testing.T, newU Factory) {
 	t.Run("copy closure merges provenance", func(t *testing.T) { testCopyClosure(t, newU) })
 	t.Run("capabilities", func(t *testing.T) { testCapabilities(t, newU) })
 	t.Run("sync reports readiness", func(t *testing.T) { testSync(t, newU) })
+	t.Run("delete matches the capability", func(t *testing.T) { testDelete(t, newU) })
+}
+
+// testDelete holds every backend to the Delete capability it declares: one that
+// declares it removes the bytes and is idempotent, one that does not refuses rather
+// than reporting a removal it never made.
+func testDelete(t *testing.T, newU Factory) {
+	u := newU(t)
+	defer u.Close()
+	ctx := context.Background()
+	op, em, _, _, _ := sample(t)
+	if err := u.PutClaims(ctx, []ranke.Claim{op, em}); err != nil {
+		t.Fatalf("PutClaims: %v", err)
+	}
+
+	err := u.DeleteClaims(ctx, []ranke.Id{em.ID()})
+	if !u.Capabilities().Delete {
+		if !errors.Is(err, ranke.ErrUnsupported) {
+			t.Fatalf("DeleteClaims without the capability = %v, want ErrUnsupported", err)
+		}
+		has, herr := u.HasClaims(ctx, []ranke.Id{em.ID()})
+		if herr != nil {
+			t.Fatalf("HasClaims: %v", herr)
+		}
+		if !has[0] {
+			t.Fatal("a backend that cannot delete must still hold the claim")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("DeleteClaims: %v", err)
+	}
+	has, err := u.HasClaims(ctx, []ranke.Id{em.ID()})
+	if err != nil {
+		t.Fatalf("HasClaims: %v", err)
+	}
+	if has[0] {
+		t.Fatal("the deleted claim is still present")
+	}
+	if err := u.DeleteClaims(ctx, []ranke.Id{em.ID()}); err != nil {
+		t.Fatalf("DeleteClaims is idempotent, second call: %v", err)
+	}
+	// The claim it referenced is untouched: a deletion removes bytes, not provenance.
+	if has, err := u.HasClaims(ctx, []ranke.Id{op.ID()}); err != nil || !has[0] {
+		t.Fatalf("the referenced claim must survive (has=%v err=%v)", has, err)
+	}
 }
 
 // testSync checks Sync delivers one result: an in-tree backend holds the whole

@@ -117,6 +117,40 @@ func (s *stack) PutContents(ctx context.Context, blobs []ranke.ContentBlob) erro
 
 // writeSync runs put over the authoritative+eager layers in parallel, returning
 // the authoritative layers' joined error.
+// DeleteClaims removes the bytes from EVERY layer, not by tier. A lawful deletion is
+// only done when no layer still serves the claim, so a cache left holding it would
+// undo the deletion on the next read — which is why a stack reports Delete only when
+// all its layers do, and refuses as a whole when one cannot.
+func (s *stack) DeleteClaims(ctx context.Context, ids []ranke.Id) error {
+	return s.deleteEverywhere(ctx, func(ctx context.Context, l layer) error {
+		return l.u.DeleteClaims(ctx, ids)
+	})
+}
+
+// DeleteContents removes the blobs from every layer, on DeleteClaims' terms.
+func (s *stack) DeleteContents(ctx context.Context, hashes []ranke.Id) error {
+	return s.deleteEverywhere(ctx, func(ctx context.Context, l layer) error {
+		return l.u.DeleteContents(ctx, hashes)
+	})
+}
+
+// deleteEverywhere refuses before removing anything where a layer cannot delete, so a
+// partial removal is not reported as a deletion. Sequential: a half-deleted stack is
+// worse than a slow one, and the first failure names the layer.
+func (s *stack) deleteEverywhere(ctx context.Context, del func(context.Context, layer) error) error {
+	for i := range s.layers {
+		if !s.layers[i].caps.Delete {
+			return fmt.Errorf("%w: layer %d cannot delete, so the stack cannot", ranke.ErrUnsupported, i)
+		}
+	}
+	for i := range s.layers {
+		if err := del(ctx, s.layers[i]); err != nil {
+			return fmt.Errorf("delete in layer %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (s *stack) writeSync(ctx context.Context, put func(context.Context, layer) error) error {
 	var (
 		wg      sync.WaitGroup

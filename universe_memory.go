@@ -111,6 +111,34 @@ func (u *memoryUniverse) GetClaimsRaw(_ context.Context, ids []Id) ([][]byte, er
 	return out, nil
 }
 
+// DeleteClaims drops each id's bytes and its tags, absence being no error. The tags
+// go with the record: they are a side-map keyed by an id whose bytes are gone.
+func (u *memoryUniverse) DeleteClaims(_ context.Context, ids []Id) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, id := range ids {
+		if id == nil {
+			return errNilID
+		}
+		delete(u.claims, id.String())
+		delete(u.tags, id.String())
+	}
+	return nil
+}
+
+// DeleteContents drops each blob, absence being no error.
+func (u *memoryUniverse) DeleteContents(_ context.Context, hashes []Id) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, h := range hashes {
+		if h == nil {
+			return errNilID
+		}
+		delete(u.content, h.String())
+	}
+	return nil
+}
+
 // GetClaimHeights decodes and reads the height (via the closure default) — no
 // cache; correctness over speed.
 func (u *memoryUniverse) GetClaimHeights(ctx context.Context, ids []Id) ([]uint64, error) {

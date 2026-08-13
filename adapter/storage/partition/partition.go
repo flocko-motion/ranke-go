@@ -157,6 +157,33 @@ func (p *partition) GetContents(ctx context.Context, refs []ranke.ContentRef) ([
 	return out, nil
 }
 
+// DeleteClaims routes each id to the shard that owns it, so a removal reaches the one
+// place holding the bytes.
+func (p *partition) DeleteClaims(ctx context.Context, ids []ranke.Id) error {
+	for s, idx := range p.groupIds(ids) {
+		if len(idx) == 0 {
+			continue
+		}
+		if err := p.shards[s].DeleteClaims(ctx, at(ids, idx)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteContents routes each blob the same way.
+func (p *partition) DeleteContents(ctx context.Context, hashes []ranke.Id) error {
+	for s, idx := range p.groupIds(hashes) {
+		if len(idx) == 0 {
+			continue
+		}
+		if err := p.shards[s].DeleteContents(ctx, at(hashes, idx)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *partition) HasClaims(ctx context.Context, ids []ranke.Id) ([]bool, error) {
 	out := make([]bool, len(ids))
 	groups := p.groupIds(ids)

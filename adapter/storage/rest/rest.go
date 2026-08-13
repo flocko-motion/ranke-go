@@ -126,6 +126,30 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	}
 }
 
+// Delete issues DELETE, refused unless the operator declared the capability.
+//
+//deadcode:keep
+func (s *store) Delete(ctx context.Context, key string) error {
+	if !s.caps.Delete {
+		return ranke.ErrUnsupported
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.url(key), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusAccepted, http.StatusNoContent, http.StatusNotFound:
+		return nil // absent is no error
+	default:
+		return fmt.Errorf("%w: DELETE %s: %s", errStatus, key, resp.Status)
+	}
+}
+
 //deadcode:keep
 func (s *store) Close() error { return nil }
 

@@ -10,102 +10,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"sync"
 	"time"
 )
-
-// Failure is one verification failure: the claim that failed, its depth in
-// the walk, and why.
-type Failure struct {
-	ID    Id
-	Depth int
-	Err   error
-}
-
-// VerificationRun is a live handle on a verification, safe to read while the
-// walk runs — poll for progress, or Wait for completion.
-type VerificationRun interface {
-	// Verified is the number of claims that passed so far.
-	Verified() int
-	// Failures is a snapshot of the failures found so far.
-	Failures() []Failure
-	// Done reports whether the walk has finished (completed or stopped).
-	Done() bool
-	// Err is a terminal error that aborted the walk (a load failure,
-	// ctx cancellation) — distinct from per-claim Failures. Nil otherwise.
-	Err() error
-	// Wait blocks until the walk is Done.
-	Wait()
-}
-
-type verificationRun struct {
-	mu       sync.Mutex
-	verified int
-	failures []Failure
-	done     bool
-	err      error
-	doneCh   chan struct{}
-}
-
-func newRun() *verificationRun { return &verificationRun{doneCh: make(chan struct{})} }
-
-func (r *verificationRun) Verified() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.verified
-}
-
-func (r *verificationRun) Failures() []Failure {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]Failure, len(r.failures))
-	copy(out, r.failures)
-	return out
-}
-
-func (r *verificationRun) Done() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.done
-}
-
-func (r *verificationRun) Err() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.err
-}
-
-func (r *verificationRun) Wait() { <-r.doneCh }
-
-func (r *verificationRun) pass() {
-	r.mu.Lock()
-	r.verified++
-	r.mu.Unlock()
-}
-
-func (r *verificationRun) fail(f Failure, onError func(Failure)) int {
-	r.mu.Lock()
-	r.failures = append(r.failures, f)
-	n := len(r.failures)
-	r.mu.Unlock()
-	if onError != nil {
-		onError(f)
-	}
-	return n
-}
-
-func (r *verificationRun) abort(err error) {
-	r.mu.Lock()
-	r.err = err
-	r.mu.Unlock()
-}
-
-func (r *verificationRun) finish() {
-	r.mu.Lock()
-	r.done = true
-	r.mu.Unlock()
-	close(r.doneCh)
-}
 
 // --- configuration ---
 
@@ -118,6 +24,7 @@ type verifyConfig struct {
 	stopAfter       int             // stop after n failures; 0 = verify everything
 	onError         func(Failure)   // fired per failure, from the run goroutine
 	skipRule        map[string]bool // verifyRules[].name to omit (WithSkipRules)
+	expiry          *expiryIndex    // revocations found in this run's closure (`R-DEXPIRY`)
 }
 
 // VerifyOption configures a verification run.
@@ -190,6 +97,9 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 // claim (§5.10) against the one Universe u, and returns a live handle. rootCheck,
 // if set, validates each depth-0 root — an Archive requires a branch-table head.
 func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyConfig, rootCheck func(Claim) error) *verificationRun {
+	// A revocation lies in the closure rather than under the claim it revokes, so the
+	// run's roots are what makes it findable (`R-DEXPIRY`, `R-C3LIMIT`).
+	cfg.expiry = newExpiryIndex(roots)
 	run := newRun()
 	go func() {
 		defer run.finish()
@@ -197,12 +107,18 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 		type item struct {
 			id    Id
 			depth int
+			// dated: the edge reaching it carried a delete_by (`R-DPLANNED`).
+			dated bool
 		}
 		seen := map[string]struct{}{}
 		queue := make([]item, 0, len(roots))
 		for _, id := range roots {
-			queue = append(queue, item{id, 0})
+			queue = append(queue, item{id: id})
 		}
+		// A mark may lie further along the walk than the gap it explains, so gaps are
+		// held and settled once the closure is exhausted (`R-DGAP`).
+		gaps := map[string]Failure{}
+		marked := map[string]bool{}
 
 		stop := func() bool { return cfg.stopAfter > 0 && len(run.failures) >= cfg.stopAfter }
 		processed := 0
@@ -228,6 +144,13 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 			// The raw CBOR is the exact bytes the id was signed over, so
 			// verification works from it: its node preimage and delta edges.
 			raws, err := u.GetClaimsRaw(ctx, []Id{cur.id})
+			if errors.Is(err, ErrNotFound) {
+				// Deleted: explained by the edge that reached it, or held for a mark.
+				if !cur.dated {
+					gaps[k] = Failure{ID: cur.id, Depth: cur.depth, Err: Wrap(errUnexplainedGap, err)}
+				}
+				continue
+			}
 			if err != nil {
 				run.fail(Failure{ID: cur.id, Depth: cur.depth, Err: err}, cfg.onError)
 				if stop() {
@@ -272,12 +195,37 @@ func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyCon
 				return // hit the work cap
 			}
 
-			// Every reference is walked, so one that does not resolve fails the load
-			// above (`V-REF`). Delta edges reach the closure through a diff predecessor.
+			// A contribution/delete claim marks its target, explaining that gap
+			// (`R-DREQUEST`).
+			if c.Node().Type() == NodeDelete {
+				for _, e := range c.Edges() {
+					if e.Type() == EdgeTypeDelete {
+						marked[e.Reference().String()] = true
+					}
+				}
+			}
+
+			// Every reference is walked; one that does not resolve fails above unless a
+			// gap explains it (`V-REF`). Delta edges arrive via a diff predecessor.
 			if cfg.maxDepth == 0 || cur.depth < cfg.maxDepth {
 				for _, e := range c.Edges() {
-					queue = append(queue, item{e.Reference(), cur.depth + 1})
+					queue = append(queue, item{
+						id:    e.Reference(),
+						depth: cur.depth + 1,
+						dated: e.HasField(FieldDeleteBy),
+					})
 				}
+			}
+		}
+
+		// Every mark has now been seen, and an unexplained gap is data loss.
+		for k, f := range gaps {
+			if marked[k] {
+				continue
+			}
+			run.fail(f, cfg.onError)
+			if stop() {
+				return
 			}
 		}
 	}()
@@ -388,11 +336,12 @@ var verifyRules = []verifyRule{
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
 	{name: "relation direction", rule: "a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0 (`V-REL`)", edge: ruleRelationDirection},
 	{name: "provenance", rule: "a derivation/*, entity/* or relation/* node carries at least one derivation/* edge (`V-PROV`)", claim: ruleProvenance},
+	{name: "delete mark target", rule: "a contribution/delete claim carries a contribution/delete edge naming the claim it deletes (`R-DREQUEST`)", claim: ruleDeleteMarkShape},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches) (`V-ARCHIVE`)", archive: ruleArchiveHead},
-	{name: "key validity", rule: "a claim is dated within its contributor key's validity window (`R-DEXPIRY`)", claim: ruleKeyWindow},
+	{name: "key validity", rule: "a claim is dated within its contributor key's validity window, as an expiry edge against that contributor shortens it (`R-DEXPIRY`)", claim: ruleKeyWindow},
 	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
 	{name: "structure not deletable", rule: "a contribution/{contributor,branches,delete,expiry} claim takes no delete_by (`R-DSTRUCT`)", claim: ruleStructureNotDeletable},
 }
@@ -403,8 +352,8 @@ func ruleSignature(_ context.Context, t *claimUnderVerification) error {
 }
 
 // ruleKeyWindow: a signature proves who signed, the window that they still could (`R-DEXPIRY`).
-func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
-	return verifyKeyWindow(t.claim, t.signer)
+func ruleKeyWindow(ctx context.Context, t *claimUnderVerification) error {
+	return verifyKeyWindow(ctx, t.claim, t.signer, t.u, t.cfg.expiry)
 }
 
 // verifyKeyWindow checks c's created_at against the closed window its signer declares.
@@ -413,7 +362,9 @@ func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
 // A contributor claim declares the window rather than sitting in it: a key valid from
 // next year is introduced by a claim written today, and one already rotated out
 // declares an expiry behind its own date.
-func verifyKeyWindow(c, signer Claim) error {
+// A revocation shortens the end: an expiry edge naming the signer carries an earlier
+// pubkey_expires_after, and the window ends at whichever comes first (`R-DEXPIRY`).
+func verifyKeyWindow(ctx context.Context, c, signer Claim, u Universe, x *expiryIndex) error {
 	if signer == nil || signer.ID().Equal(c.ID()) {
 		return nil
 	}
@@ -423,9 +374,18 @@ func verifyKeyWindow(c, signer Claim) error {
 	} else if from != nil && at.Before(*from) {
 		return WithDetail(ErrKeyNotYetValid, c.ID().String()+" dated "+at.Format(iso8601Nano))
 	}
-	if until, err := keyBound(signer, FieldPubkeyExpiresAfter); err != nil {
+	until, err := keyBound(signer, FieldPubkeyExpiresAfter)
+	if err != nil {
 		return err
-	} else if until != nil && at.After(*until) {
+	}
+	revoked, err := x.endFor(ctx, u, signer.ID())
+	if err != nil {
+		return err
+	}
+	if revoked != nil && (until == nil || revoked.Before(*until)) {
+		until = revoked
+	}
+	if until != nil && at.After(*until) {
 		return WithDetail(ErrKeyExpired, c.ID().String()+" dated "+at.Format(iso8601Nano))
 	}
 	return nil

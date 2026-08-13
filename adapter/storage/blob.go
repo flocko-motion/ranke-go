@@ -33,6 +33,9 @@ type BlobStore interface {
 	Put(ctx context.Context, key string, data []byte) error
 	// Has reports whether key is present.
 	Has(ctx context.Context, key string) (bool, error)
+	// Delete removes the bytes at key, absence being no error. A store whose
+	// Capabilities report Delete false returns ranke.ErrUnsupported.
+	Delete(ctx context.Context, key string) error
 	// Capabilities reports the backend's nature — durable medium, delete,
 	// enumerate (see ranke.Capabilities) — which becomes the Universe's.
 	Capabilities() ranke.Capabilities
@@ -265,6 +268,31 @@ func (u *blobUniverse) HasContents(ctx context.Context, hashes []ranke.Id) ([]bo
 }
 
 // hasAll asks the flat key namespace for each id, tolerating nil entries.
+// DeleteClaims removes each id's bytes through the store, refusing outright where the
+// medium cannot delete — a WORM bucket must not report a deletion it did not make.
+func (u *blobUniverse) DeleteClaims(ctx context.Context, ids []ranke.Id) error {
+	return u.deleteAll(ctx, ids)
+}
+
+// DeleteContents removes each blob, on DeleteClaims' terms. Claims and content share
+// one key space here, so one helper serves both.
+func (u *blobUniverse) DeleteContents(ctx context.Context, hashes []ranke.Id) error {
+	return u.deleteAll(ctx, hashes)
+}
+
+// deleteAll removes every key, gated once on the capability rather than per key.
+func (u *blobUniverse) deleteAll(ctx context.Context, ids []ranke.Id) error {
+	if !u.store.Capabilities().Delete {
+		return ranke.ErrUnsupported
+	}
+	return u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {
+		if ids[i] == nil {
+			return errNilHash
+		}
+		return u.store.Delete(ctx, ids[i].String())
+	})
+}
+
 func (u *blobUniverse) hasAll(ctx context.Context, ids []ranke.Id) ([]bool, error) {
 	out := make([]bool, len(ids))
 	err := u.forEach(ctx, len(ids), func(ctx context.Context, i int) error {

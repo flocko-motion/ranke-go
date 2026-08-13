@@ -112,6 +112,11 @@ func (s *store) Has(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
+// Delete removes key (DEL), which reports 0 for an absent key rather than failing.
+func (s *store) Delete(ctx context.Context, key string) error {
+	return s.client.Del(ctx, s.key(key)).Err()
+}
+
 // Capabilities: redis overwrites (SET), deletes (DEL), and enumerates (SCAN),
 // and serves as a cache tier whatever AOF/RDB the server runs.
 func (s *store) Capabilities() ranke.Capabilities {

@@ -12,6 +12,9 @@ import "context"
 // §Sequencer): it hands out immutable read snapshots and advances the
 // head, k → k', by merging contributions. The concrete implementation
 // (naive here, concurrent in a server) lives in an adapter.
+//
+// An implementation is safe to drive from several goroutines. Which one a caller
+// holds decides how fast that goes, never whether it is allowed.
 type Sequencer interface {
 	// GetArchive returns the current immutable snapshot RA_k.
 	GetArchive(ctx context.Context) (Archive, error)

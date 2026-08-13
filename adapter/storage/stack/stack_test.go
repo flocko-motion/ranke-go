@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
 	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
+	"github.com/flocko-motion/ranke-go/adapter/storage/minimal"
 	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
 )
 
@@ -37,6 +39,52 @@ func TestConformance(t *testing.T) {
 		}
 		return u
 	})
+}
+
+// TestDeleteNeedsEveryLayer: a lawful deletion is done only when no layer still serves
+// the claim, so a cache that cannot delete would undo it on the next read. The stack
+// reports Delete only when all its layers do, and refuses as a whole rather than
+// removing from some — a partial removal reported as a deletion is the worst answer.
+func TestDeleteNeedsEveryLayer(t *testing.T) {
+	ctx := context.Background()
+	keeper := minimal.New() // the floor: Overwrite only, no Delete
+	st, err := stack.NewStack(mem.New(), keeper)
+	if err != nil {
+		t.Fatalf("NewStack: %v", err)
+	}
+	if st.Capabilities().Delete {
+		t.Fatal("a stack holding a layer that cannot delete must not claim Delete")
+	}
+	c := signedClaim(t)
+	if err := ranke.PutClaim(ctx, st, c); err != nil {
+		t.Fatalf("PutClaim: %v", err)
+	}
+	if err := st.DeleteClaims(ctx, []ranke.Id{c.ID()}); !errors.Is(err, ranke.ErrUnsupported) {
+		t.Fatalf("DeleteClaims = %v, want ErrUnsupported", err)
+	}
+	// Nothing was removed anywhere: the refusal came before the first deletion.
+	has, err := st.HasClaims(ctx, []ranke.Id{c.ID()})
+	if err != nil || !has[0] {
+		t.Fatalf("the claim must survive a refused deletion (has=%v err=%v)", has, err)
+	}
+
+	// The control: every layer able to delete, and the deletion goes through.
+	ok, err := stack.NewStack(mem.New(), mem.New())
+	if err != nil {
+		t.Fatalf("NewStack: %v", err)
+	}
+	if !ok.Capabilities().Delete {
+		t.Fatal("a stack of deleting layers reports Delete")
+	}
+	if err := ranke.PutClaim(ctx, ok, c); err != nil {
+		t.Fatalf("PutClaim: %v", err)
+	}
+	if err := ok.DeleteClaims(ctx, []ranke.Id{c.ID()}); err != nil {
+		t.Fatalf("DeleteClaims: %v", err)
+	}
+	if has, err := ok.HasClaims(ctx, []ranke.Id{c.ID()}); err != nil || has[0] {
+		t.Fatalf("the claim is gone from every layer (has=%v err=%v)", has, err)
+	}
 }
 
 func TestNewStackValidation(t *testing.T) {
