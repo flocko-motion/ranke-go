@@ -24,6 +24,7 @@ type verifyConfig struct {
 	stopAfter       int             // stop after n failures; 0 = verify everything
 	onError         func(Failure)   // fired per failure, from the run goroutine
 	skipRule        map[string]bool // verifyRules[].name to omit (WithSkipRules)
+	expiry          *expiryIndex    // revocations found in this run's closure (`R-DEXPIRY`)
 }
 
 // VerifyOption configures a verification run.
@@ -96,6 +97,9 @@ func newVerifyConfig(opts ...VerifyOption) *verifyConfig {
 // claim (§5.10) against the one Universe u, and returns a live handle. rootCheck,
 // if set, validates each depth-0 root — an Archive requires a branch-table head.
 func runVerification(ctx context.Context, roots []Id, u Universe, cfg *verifyConfig, rootCheck func(Claim) error) *verificationRun {
+	// A revocation lies in the closure rather than under the claim it revokes, so the
+	// run's roots are what makes it findable (`R-DEXPIRY`, `R-C3LIMIT`).
+	cfg.expiry = newExpiryIndex(roots)
 	run := newRun()
 	go func() {
 		defer run.finish()
@@ -337,7 +341,7 @@ var verifyRules = []verifyRule{
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches) (`V-ARCHIVE`)", archive: ruleArchiveHead},
-	{name: "key validity", rule: "a claim is dated within its contributor key's validity window (`R-DEXPIRY`)", claim: ruleKeyWindow},
+	{name: "key validity", rule: "a claim is dated within its contributor key's validity window, as an expiry edge against that contributor shortens it (`R-DEXPIRY`)", claim: ruleKeyWindow},
 	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
 	{name: "structure not deletable", rule: "a contribution/{contributor,branches,delete,expiry} claim takes no delete_by (`R-DSTRUCT`)", claim: ruleStructureNotDeletable},
 }
@@ -348,8 +352,8 @@ func ruleSignature(_ context.Context, t *claimUnderVerification) error {
 }
 
 // ruleKeyWindow: a signature proves who signed, the window that they still could (`R-DEXPIRY`).
-func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
-	return verifyKeyWindow(t.claim, t.signer)
+func ruleKeyWindow(ctx context.Context, t *claimUnderVerification) error {
+	return verifyKeyWindow(ctx, t.claim, t.signer, t.u, t.cfg.expiry)
 }
 
 // verifyKeyWindow checks c's created_at against the closed window its signer declares.
@@ -358,7 +362,9 @@ func ruleKeyWindow(_ context.Context, t *claimUnderVerification) error {
 // A contributor claim declares the window rather than sitting in it: a key valid from
 // next year is introduced by a claim written today, and one already rotated out
 // declares an expiry behind its own date.
-func verifyKeyWindow(c, signer Claim) error {
+// A revocation shortens the end: an expiry edge naming the signer carries an earlier
+// pubkey_expires_after, and the window ends at whichever comes first (`R-DEXPIRY`).
+func verifyKeyWindow(ctx context.Context, c, signer Claim, u Universe, x *expiryIndex) error {
 	if signer == nil || signer.ID().Equal(c.ID()) {
 		return nil
 	}
@@ -368,9 +374,18 @@ func verifyKeyWindow(c, signer Claim) error {
 	} else if from != nil && at.Before(*from) {
 		return WithDetail(ErrKeyNotYetValid, c.ID().String()+" dated "+at.Format(iso8601Nano))
 	}
-	if until, err := keyBound(signer, FieldPubkeyExpiresAfter); err != nil {
+	until, err := keyBound(signer, FieldPubkeyExpiresAfter)
+	if err != nil {
 		return err
-	} else if until != nil && at.After(*until) {
+	}
+	revoked, err := x.endFor(ctx, u, signer.ID())
+	if err != nil {
+		return err
+	}
+	if revoked != nil && (until == nil || revoked.Before(*until)) {
+		until = revoked
+	}
+	if until != nil && at.After(*until) {
 		return WithDetail(ErrKeyExpired, c.ID().String()+" dated "+at.Format(iso8601Nano))
 	}
 	return nil

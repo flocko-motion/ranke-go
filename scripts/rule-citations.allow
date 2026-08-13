@@ -34,7 +34,6 @@ R-C1BASE       citation owed: base (k, t) at open, adapter/sequencer
 R-C2DATE       citation owed: no claim dated after the base time, adapter/sequencer
 R-C2TYPE       citation owed: reserved types, contribution.go reservedTypes
 R-C3CLOSE      citation owed: closing over references, contribution.go
-R-C3LIMIT      citation owed: a branch holds every limiting claim against what it holds
 R-C4KEY        citation owed: claim dated inside its key's window, verify.go ruleKeyWindow
 R-C4SEAL       citation owed: sealed once verified, adapter/sequencer
 R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequencer
