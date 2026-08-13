@@ -403,9 +403,12 @@ func nodePreimage(raw []byte) ([]byte, error) {
 }
 
 func decodeNode(en encNode) (*node, error) {
+	// `V-TIME` governs created_at as it does the optional fields below, so the same
+	// sentinel names it — a bare parse error is unmatchable by a caller telling a
+	// timestamp violation from any other malformed record.
 	createdAt, err := parseRFC3339Nano(en.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, WrapDetail(ErrTimestampForm, "created_at="+en.CreatedAt, err)
 	}
 	n := &node{
 		typeClass:     aliasFromWire(en.TypeClass, nodeClassFromAlias),

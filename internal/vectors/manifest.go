@@ -25,7 +25,18 @@ const (
 	ReasonNoContributor   = "unresolvable_contributor"
 	ReasonHeightWrong     = "height_wrong"
 	ReasonContentMismatch = "content_hash_mismatch"
+	ReasonTimestampForm   = "timestamp_form"
+	ReasonBothContent     = "content_both_slots"
 )
+
+// AllReasons is every code above. The list lives beside the declarations so a new
+// reason demands a case by existing — the hand-kept copy in a test was what let
+// `V-TIME` arrive with no case at all.
+var AllReasons = []string{
+	ReasonOK, ReasonIDMismatch, ReasonWrongMessage, ReasonMalformedID,
+	ReasonIdentitySign, ReasonNoContributor, ReasonHeightWrong,
+	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent,
+}
 
 // Manifest names every artifact and the outcome an implementation must reach for it.
 type Manifest struct {
@@ -51,15 +62,19 @@ type ClaimCase struct {
 	Verify bool   `json:"verify"`
 	Reason string `json:"reason"`
 	Why    string `json:"why"`
+	// Violates names the rules this record breaks, and is what the coverage gate
+	// counts (-> scripts/rule-vectors.sh). Empty for a case that must verify.
+	Violates []string `json:"violates,omitempty"`
 }
 
 // ContentCase is one content blob under the hash it is offered as.
 type ContentCase struct {
-	File   string `json:"file"`
-	Hash   string `json:"hash"`
-	Verify bool   `json:"verify"`
-	Reason string `json:"reason"`
-	Why    string `json:"why"`
+	File     string   `json:"file"`
+	Hash     string   `json:"hash"`
+	Verify   bool     `json:"verify"`
+	Reason   string   `json:"reason"`
+	Why      string   `json:"why"`
+	Violates []string `json:"violates,omitempty"`
 }
 
 // Load reads the manifest in dir.

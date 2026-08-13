@@ -16,10 +16,13 @@ import (
 // externalBlob is the content the external-content claim addresses.
 var externalBlob = []byte("externalized content, addressed by hash")
 
+// rootSeed derives the identity that signs most of the set, patched records included.
+const rootSeed = "ranke-vectors/root"
+
 // toyGraph builds the claims that must verify: a contributor, a source note, a
 // derived claim citing it, external content, node fields, and a second contributor.
 func (g *gen) toyGraph(ctx context.Context) error {
-	root, who, err := contributorClaim(ctx, signer("ranke-vectors/root"), epoch)
+	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
 		return err
 	}

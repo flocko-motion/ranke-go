@@ -370,6 +370,16 @@ lint:
 rule-citations:
 	@./scripts/rule-citations.sh
 
+# Rule-coverage gate for the published reference vectors: every ADT (V-*) rule the
+# spec declares either has a case that BREAKS it, or is listed in
+# scripts/rule-vectors.allow with a reason. It generates the set and reads the
+# manifest, so what is gated is the artifact downstream receives.
+#
+# Coverage is per RULE, not per clause — see the script's header for what that misses.
+# Needs the spec, like rule-citations; RANKE_SPEC points it at a copy.
+rule-vectors:
+	@./scripts/rule-vectors.sh
+
 # rql-schema: the machine-readable projection of the query language against the Go
 # constants that implement it. Every constraint the schema states is probed against
 # DecodeQuery, and a keyword the gate cannot check FAILS rather than passing silently.
@@ -396,7 +406,7 @@ rql-schema:
 # the desk, and that is how the 0.18.0 signature framing landed against a bundle
 # it had invalidated. `release` depends on this target, so an id-moving release
 # now stops here rather than shipping a reference that reproduces nothing.
-verify: build fmt-check lint rule-citations rql-schema verify-scenarios
+verify: build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios
 
 # One-shot "is everything green", and the name people reach for, so it costs what
 # that name promises: the static gates, vet, and the fast suite. Seconds. The full

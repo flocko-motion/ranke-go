@@ -131,7 +131,9 @@ func TestManifestRecordsItsProvenance(t *testing.T) {
 }
 
 // TestEveryReasonIsExercised keeps the set honest as it grows: a reason code that
-// no case carries is a failure mode nobody is testing.
+// no case carries is a failure mode nobody is testing. It reads vectors.AllReasons
+// rather than a list of its own — the hand-kept copy that used to live here could
+// only grow when someone remembered, which is how `V-TIME` arrived with no case.
 func TestEveryReasonIsExercised(t *testing.T) {
 	_, m := generate(t)
 
@@ -142,11 +144,38 @@ func TestEveryReasonIsExercised(t *testing.T) {
 	for _, c := range m.Content {
 		seen[c.Reason] = true
 	}
-	for _, want := range []string{
-		vectors.ReasonOK, vectors.ReasonIDMismatch, vectors.ReasonWrongMessage,
-		vectors.ReasonMalformedID, vectors.ReasonIdentitySign, vectors.ReasonNoContributor,
-		vectors.ReasonHeightWrong, vectors.ReasonContentMismatch,
-	} {
+	for _, want := range vectors.AllReasons {
 		require.Truef(t, seen[want], "no case carries reason %q", want)
 	}
+}
+
+// decodeSentinel is the error a reason must produce, for the reasons a record is
+// refused at DECODE. The rest are refused by the closure verifier, where the failure
+// is a set rather than one error, so they are not in reach of this assertion.
+var decodeSentinel = map[string]error{
+	vectors.ReasonTimestampForm: ranke.ErrTimestampForm,
+	vectors.ReasonBothContent:   ranke.ErrContentBothSlots,
+}
+
+// TestRejectedCasesFailForTheirStatedReason: rejection alone is cheap — a case with
+// two defects, or one refused by an unrelated check, still reads as passing. Where a
+// reason names a decode-time error, the case must produce THAT error.
+func TestRejectedCasesFailForTheirStatedReason(t *testing.T) {
+	dir, m := generate(t)
+
+	var checked int
+	for _, c := range m.Claims {
+		want, ok := decodeSentinel[c.Reason]
+		if !ok {
+			continue
+		}
+		t.Run(filepath.Base(c.File), func(t *testing.T) {
+			require.False(t, c.Verify, "a case naming a refusal must expect one")
+			_, err := vectors.Decode(dir, c)
+			require.ErrorIs(t, err, want)
+		})
+		checked++
+	}
+	require.Equal(t, len(decodeSentinel)+2, checked,
+		"every V-TIME and V-CONTENT case is covered here: three timestamps and both slots")
 }
