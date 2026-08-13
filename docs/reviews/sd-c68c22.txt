@@ -1,0 +1,107 @@
+# rql.schema.json against the Go query constants — the gate, and what its first run found
+
+Task sd-c68c22. The gate is scripts/rqlgate (a Go program), wired into `make verify` as
+`make rql-schema`, beside scripts/rule-citations.sh.
+
+## What the first run found: TWO divergences, one of them new
+
+Both are the same shape — a string constraint the schema states and the decoder did not
+enforce — and both are now fixed in this branch, so the gate is green.
+
+1. execution.layer minLength (rql.schema.json:276) — the third instance the task named,
+   confirmed. `{"execution":{"layer":""}}` decoded clean.
+
+2. order[].field minLength — NOT previously known. `{"order":[{"field":""}]}` decoded
+   clean: a sort key that names no field. Same class as (1), found by the same probe,
+   which is the argument for deriving probes from the schema rather than from a list of
+   suspicions.
+
+Everything else the schema states was already enforced: 9 enums (each schema value
+accepted, each Go-only value refused on the wire), 18 refusals, 2 admissions.
+
+The fix for (1) needed a wire-type change. A Go caller's `Layer: ""` means ABSENT — the
+backend chooses — so refusing empty in ValidateQuery would refuse every query that omits
+a layer. The schema distinguishes absent from present-and-empty, so the wire must too:
+wireExecution.Layer became *string. ValidateQuery still refuses a whitespace-only layer,
+which states a name and gives none at either door.
+
+## Why a Go program rather than jq plus a shell script
+
+The thing under comparison is the Go implementation. Only Go can enumerate what the
+decoder actually accepts; a shell script would have to grep Go source for constant
+blocks, which is a SECOND, weaker definition of the truth — exactly the failure
+rule-citations.sh warns about in its own header ("two gates for one job with two
+definitions of a citation is worse than either alone"). It would also have gone stale the
+first time a constant moved file.
+
+More decisive: the gate does not mirror the schema, it PROBES. For each constraint it
+builds a query the schema refuses and requires DecodeQuery to refuse it, and for
+optionality it builds one the schema admits and requires DecodeQuery to accept it. A
+mirror asserts that two tables match; a probe asserts that the behaviour matches, which
+is what a divergence actually is. All three defects of this class are probe-shaped:
+`detail: graph` (Go accepted an absent enum value), required `overflow` (Go refused what
+the schema admits), `layer: ""` (Go accepted what the schema refuses).
+
+## The unknown-keyword rule
+
+The task's third instance says the gate must not be built from a list of constraint
+KINDS, since minLength was not on that list. So the gate walks the schema and collects
+every keyword it meets. A keyword that is neither structural (composition and annotation:
+$ref, allOf, oneOf, if/then, title, description, type, properties, items) nor in
+knownKeywords FAILS the run, naming the keyword and where it was met.
+
+knownKeywords is the ten the schema uses today: enum, const, required,
+additionalProperties, minimum, minLength, minItems, minProperties, maxProperties,
+pattern. Adding an eleventh to the schema fails the gate until it is taught, which is the
+intended behaviour — an unchecked constraint is a gap in the GATE, and the gate says so
+rather than passing over it.
+
+Two traps found while building this:
+
+- `properties` and `$defs` map NAMES to schemas. Reading their keys as keywords reports
+  every field of the query type ("select", "branch", "shape", …) as an unknown keyword.
+  The walker tracks whether it is in a schema-object position.
+- `examples` and `default` hold VALUES of the type, not schema. Descending into them
+  reports the fields of the example query. The walker stops at both.
+
+Either mistake makes the gate cry wolf on its first run, and a gate that cries wolf gets
+switched off — which is the failure mode the task names.
+
+## The Go-only superset
+
+Three entries, each a literal with its reason, in `goOnly`:
+
+  Output.encoding "native"  — in-process only: Go objects in ClaimNative, which no wire
+                              form carries
+  Execution.report "error"  — in-process only: a verbosity threshold below info
+  Execution.report "warn"   — in-process only: a verbosity threshold below info
+
+The gate does not take the exemption on trust. For each entry it checks BOTH that the
+schema really omits the value (a listed value the schema states is reported, so the list
+shrinks when the schema catches up) and that the WIRE refuses it — which is what makes an
+in-process superset legitimate rather than a divergence. wireOnlyEnums does the refusing;
+the gate proves it still does.
+
+## Coverage, and what a green run does not mean
+
+The gate checks every enum the schema states — a new enum without a probe is reported, so
+the schema cannot grow one silently — and 18 stated constraints across minLength,
+minimum, required, additionalProperties, minItems, minProperties, maxProperties, pattern
+and const.
+
+It does NOT check that a constraint means the same thing on both sides beyond the probe:
+a probe offers one violating value, so a bound off by one would pass. It says the
+constraint is enforced, never that it is enforced exactly. Read a green run as "every
+constraint the schema states is refused by the decoder, and every value it admits is
+accepted", which is the property the three defects broke.
+
+It also says nothing about the executor: whether a query that decodes returns the right
+claims is the conformance matrix's job.
+
+## Files
+
+  scripts/rqlgate/main.go      the gate
+  Makefile                     `make rql-schema`, and verify depends on it
+  query_codec.go               the two fixes, and wireExecution.Layer as *string
+  errors.go                    ErrQueryOrderField, ErrQueryLayerName
+  scripts/rule-citations.allow R-QLAYER removed: the gate cites it
