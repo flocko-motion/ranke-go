@@ -1,8 +1,8 @@
 // package: ranke / verify
 // type:    logic
 // job:     the per-claim rules read off a claim's own shape — `V-TYPE` type classes, `V-REL`
-// relation_direction, `V-PROV` provenance — enforced at construction and, from here, on
-// anything the verifier walks
+// relation_direction, `V-PROV` provenance, `R-DREQUEST` a delete mark's target — the
+// first three enforced at construction too, the fourth only from here
 // limits:  needs no Universe read and no reference resolution, so it judges a record that
 // arrived as bytes or through AssembleClaim as readily as one this library built
 package ranke
@@ -52,4 +52,22 @@ func ruleProvenance(_ context.Context, t *claimUnderVerification) error {
 		}
 	}
 	return WithDetail(ErrProvenanceMissing, n.Type())
+}
+
+// ruleDeleteMarkShape: `R-DREQUEST` — a contribution/delete claim documents a deletion
+// by carrying a contribution/delete edge to its target. One without that edge marks
+// nothing, while reading to a person as though it did.
+//
+// `R-DGAP` leans on this shape: a malformed mark leaves the gap it was meant to explain
+// unexplained, and nothing else would say so.
+func ruleDeleteMarkShape(_ context.Context, t *claimUnderVerification) error {
+	if t.claim.Node().Type() != NodeDelete {
+		return nil
+	}
+	for _, e := range t.claim.Edges() {
+		if e.Type() == EdgeTypeDelete {
+			return nil
+		}
+	}
+	return WithDetail(ErrDeleteMarkNoTarget, t.claim.ID().String())
 }

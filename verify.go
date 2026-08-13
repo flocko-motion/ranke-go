@@ -332,6 +332,7 @@ var verifyRules = []verifyRule{
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
 	{name: "relation direction", rule: "a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0 (`V-REL`)", edge: ruleRelationDirection},
 	{name: "provenance", rule: "a derivation/*, entity/* or relation/* node carries at least one derivation/* edge (`V-PROV`)", claim: ruleProvenance},
+	{name: "delete mark target", rule: "a contribution/delete claim carries a contribution/delete edge naming the claim it deletes (`R-DREQUEST`)", claim: ruleDeleteMarkShape},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
