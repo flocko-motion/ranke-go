@@ -52,6 +52,67 @@ func TestDeniesDeltaForm(t *testing.T) {
 		"a materialised-only layer must reject a delta read, not answer it")
 }
 
+// TestDeniesSerialisedForm is the read-path twin of TestDeniesDeltaForm: a
+// serialised result is the stored record, and this cache keeps none. Answering with
+// ids instead was answering with something else — the one thing a layer that cannot
+// serve a request must not do.
+func TestDeniesSerialisedForm(t *testing.T) {
+	u, head := openTestNeo4j(t)
+	ctx := context.Background()
+	scope := ranke.Scope{Branch: ranke.BranchUniverse}
+	sel := ranke.Select{Branch: ranke.BranchUniverse, Head: head}
+
+	for _, enc := range []ranke.ResultEncoding{ranke.ResultCBOR, ranke.ResultJSON} {
+		t.Run(string(enc), func(t *testing.T) {
+			_, err := u.Query(ctx, ranke.Query{Select: sel,
+				Output: ranke.Output{Detail: ranke.DetailClaims, Encoding: enc}}, scope)
+			require.ErrorIs(t, err, ranke.ErrUnsupported,
+				"a layer holding no canonical bytes must refuse a serialised read")
+		})
+	}
+}
+
+// TestServesNativeForm bounds the refusal: native is what every stack asks its
+// layers for, so a guard that caught it would take the cache out of every stack.
+func TestServesNativeForm(t *testing.T) {
+	u, head := openTestNeo4j(t)
+	ctx := context.Background()
+	scope := ranke.Scope{Branch: ranke.BranchUniverse}
+	sel := ranke.Select{Branch: ranke.BranchUniverse, Head: head}
+
+	for name, out := range map[string]ranke.Output{
+		"unset":  {Detail: ranke.DetailClaims},
+		"native": {Detail: ranke.DetailClaims, Encoding: ranke.ResultNative},
+		"ids":    {Detail: ranke.DetailID},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rs, err := u.Query(ctx, ranke.Query{Select: sel, Output: out}, scope)
+			require.NoError(t, err)
+			require.NoError(t, rs.Close())
+		})
+	}
+}
+
+// TestRawClaimsLayerStillSerialises: the refusal keys on the LAYER's capability, so
+// a layer that does hold the bytes keeps answering the same read.
+func TestRawClaimsLayerStillSerialises(t *testing.T) {
+	ctx := context.Background()
+	byteLayer := mem.New()
+	require.True(t, byteLayer.Capabilities().RawClaims)
+	m, err := generator.Generate(ctx, byteLayer, generator.ToyDiff(1))
+	require.NoError(t, err)
+
+	rs, err := byteLayer.Query(ctx, ranke.Query{
+		Select: ranke.Select{Branch: ranke.BranchUniverse, Head: m.Head},
+		Output: ranke.Output{Detail: ranke.DetailClaims, Encoding: ranke.ResultCBOR},
+	}, ranke.Scope{Branch: ranke.BranchUniverse})
+	require.NoError(t, err)
+	defer func() { _ = rs.Close() }()
+	require.True(t, rs.Next(), "a RawClaims layer must still serve a cbor read")
+	require.Equal(t, ranke.KindClaimEncoded, rs.Result().Kind)
+	require.NotEmpty(t, rs.Result().ClaimEncoded, "and serve it as bytes")
+}
+
 // servedBy reads one claim through the stack and returns the index of the layer
 // that answered, read off the stack's own routing events.
 func servedBy(t *testing.T, u ranke.Universe, id ranke.Id, opts ...ranke.GetOption) int {

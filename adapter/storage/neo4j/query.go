@@ -4,7 +4,7 @@
 // reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
 // limits:  every read starts from Select.Claim, or from anywhere in the closure when it names
 // none — a scan without a path, a walk with one; branch confinement is the
-// _b_<branch> tag (<= Height, point-in-time), not a walk; a cbor read yields ids only
+// _b_<branch> tag (<= Height, point-in-time), not a walk; a serialised read is refused
 package neo4j
 
 import (
@@ -22,6 +22,12 @@ import (
 // Query lowers the whole RQL read to one Cypher statement, runs it, then
 // reconstructs and streams the matched claims (routes too, for the path shape).
 func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
+	// A serialised result is the stored record, which this layer keeps none of. The
+	// capability is what decides, not the request: a stack asks its layers natively
+	// and encodes above them, so an ask that reaches here is a caller's bug.
+	if enc := q.Output.Encoding; enc != "" && enc != ranke.ResultNative && !u.Capabilities().RawClaims {
+		return nil, errByteForm
+	}
 	start := time.Now()
 	needPaths := q.Output.Shape == ranke.ShapePath
 	rep := newReport(q.Execution.Report, start)
@@ -127,11 +133,11 @@ func (u *neo4jUniverse) reachedPaths(records []*neo4jdriver.Record) ([]ranke.Que
 	return out, nil
 }
 
-// idsOnly reports whether a read returns identities alone: DetailID asks for
-// them, and a cbor read gets them because the canonical bytes live in a
-// RawClaims layer — neo4j does the selection, that layer serialises.
+// idsOnly reports whether a read returns identities alone, which only DetailID
+// asks for. A serialised read is refused at the door (-> Query), not answered
+// with ids.
 func idsOnly(out ranke.Output) bool {
-	return out.Detail == ranke.DetailID || out.Encoding == ranke.ResultCBOR
+	return out.Detail == ranke.DetailID
 }
 
 // nodeData is the Cypher map projection of a node's full data (props, labels, out-edges).
