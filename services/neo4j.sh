@@ -138,13 +138,14 @@ nat_ensure_neo4j() {
   echo "setting initial password..."
   neo neo4j-admin dbms set-initial-password "$PASS" >/dev/null 2>&1 || \
     echo "note: could not set initial password (already initialised?)" >&2
-  nat_cap_memory
 }
 
-# Neo4j sizes itself for a dedicated host, so its ceiling scales with the box rather
-# than with the kilobyte test graphs. Measured idle RSS: uncapped 567 MB, 256m/128m
-# 508 MB. Raising the cap costs memory — AlwaysPreTouch makes the heap resident at
-# once — so 512m measured worse than uncapped. Idempotent; `up` caps an old install.
+# Neo4j sizes itself for a dedicated host: no heap ceiling, and a page cache
+# heuristic reading half of RAM. initial_size stays UNSET on purpose — pinned equal
+# to max_size, AlwaysPreTouch makes the whole heap resident at startup, which costs
+# more than no ceiling at all. Idle RSS over 6 runs on a 42 GB box: uncapped
+# 414-686 MB, pinned 513-530, max_size alone 411-438. The cap buys a bounded worst
+# case, not a fixed saving. Idempotent; `up` caps an install that predates it.
 NAT_HEAP="${RANKE_NEO4J_HEAP:-256m}"
 NAT_PAGECACHE="${RANKE_NEO4J_PAGECACHE:-128m}"
 
@@ -155,7 +156,6 @@ nat_cap_memory() {
   cat >>"$conf" <<EOF
 
 # ranke test memory caps — see services/neo4j.sh nat_cap_memory
-server.memory.heap.initial_size=${NAT_HEAP}
 server.memory.heap.max_size=${NAT_HEAP}
 server.memory.pagecache.size=${NAT_PAGECACHE}
 EOF
@@ -179,12 +179,12 @@ nat_pid() {
   echo "$pid"
 }
 
-# nat_clear_stale removes a JVM that is not serving, and the pidfile naming it. Called
-# before a start so two attempts cannot leave two JVMs.
+# nat_clear_stale removes this install's JVM, serving or not, and the pidfile naming
+# it. Called before a start so two attempts cannot leave two JVMs.
 nat_clear_stale() {
   local pid
   if pid=$(nat_pid); then
-    echo "clearing a Neo4j that is not serving (pid ${pid})..."
+    echo "stopping Neo4j (pid ${pid})..."
     neo neo4j stop >/dev/null 2>&1 || true
     kill -0 "$pid" 2>/dev/null && { kill "$pid" 2>/dev/null; sleep 2; }
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
@@ -231,21 +231,21 @@ nat_reap_if_idle() {
   nat_tests_running && return 0
   nat_recently_active && return 0
   echo "reaping a Neo4j idle for over ${NAT_IDLE_MINUTES}m with no tests holding the lock..."
-  neo neo4j stop >/dev/null 2>&1 || true
   nat_clear_stale
 }
 
 nat_up() {
   nat_ensure_java
   nat_ensure_neo4j
-  nat_cap_memory   # an install predating the caps gets them here
-  nat_reap_if_idle # a leaked instance is cleared before we decide to reuse one
+  nat_cap_memory # a fresh install and one predating the caps both get them here
   if nat_is_serving; then
     echo "Neo4j already serving; reusing it."
     nat_print_env
     return 0
   fi
-  nat_clear_stale # a JVM that is not serving is in the way, not a running instance
+  # Nothing answers, so any JVM left is in the way whether or not it is idle — which
+  # is why the reaper is the `reap` verb and not a step here: at `up` you want one.
+  nat_clear_stale
   echo "starting Neo4j..."
   neo neo4j start
   # The env is a promise that something answers, so it is printed only once one does.
@@ -320,10 +320,10 @@ usage: $0 <pod|native> <command> [opts]
             up [agent-pod] | down | status | env
   native  install + run Neo4j in this container (no podman/root)
             up | down | status | env | reap | purge
-            up reaps a leaked instance first, and fails rather than printing
-            the env when nothing comes up; status means SERVING, not "a pid
-            exists"; reap stops an instance no test holds and none has
-            touched for RANKE_NEO4J_IDLE_MINUTES (default 5).
+            up reuses a serving instance, clears a leaked one, and fails
+            rather than printing the env when nothing comes up; status means
+            SERVING, not "a pid exists"; reap stops an instance no test holds
+            and none has touched for RANKE_NEO4J_IDLE_MINUTES (default 5).
   query   run any Cypher against the running instance (either mode) and
           print one JSON object per row, keyed by return column. Pass '-'
           to read the statement from stdin, and --params a JSON object to
