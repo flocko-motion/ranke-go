@@ -32,10 +32,10 @@ const writersEnv = "RANKE_CONCURRENCY"
 // backend still finishes in seconds.
 const defaultWriters = 64
 
-// serialWriters bounds a Sequencer that takes one contribution at a time. Its count
-// is sequential work — each writer waits, then mints its own branch table — so what
-// it proves is that nothing is lost across repeated contributions, which a handful
-// shows as well as a crowd and far quicker on a durable backend.
+// serialWriters bounds a Sequencer that merges one contribution at a time. Its writers
+// still race — they queue inside the adapter, not in this test — but past a handful
+// the count buys sequential merges rather than contention, and each mints its own
+// branch table. Runtime, not coverage, is what the cap is about.
 const serialWriters = 16
 
 // writers reads the writer count for this run.
@@ -66,28 +66,26 @@ func (c *tickClock) Tick() time.Time {
 	return out
 }
 
-// sequencerRow is one Sequencer under test, paired with the concurrency contract its
-// adapter documents. Serialised marks a writer that admits one contribution at a
-// time: the caller holds the lock, which is the only correct way to drive it, and the
-// completeness property is asserted identically either way. Cap bounds the writer
-// count for a row that gains nothing from more (0 = take the run's full count).
+// sequencerRow is one Sequencer under test. Every row is driven the same way — all
+// writers at once, no lock in the caller — because ranke.Sequencer is safe from
+// several goroutines whichever implementation answers it. Cap bounds the writer count
+// for a row that gains nothing from more (0 = take the run's full count).
 type sequencerRow struct {
-	Name       string
-	Serialised bool
-	Cap        int
-	New        func(ctx context.Context, u ranke.Universe, hist ranke.History,
+	Name string
+	Cap  int
+	New  func(ctx context.Context, u ranke.Universe, hist ranke.History,
 		op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error)
 }
 
 // sequencerRows is the Sequencer half of the matrix. Raising the writer count is for
-// the row that races; the serialised one is capped (see serialWriters).
+// the row that runs them in parallel; dev queues them, so it is capped (serialWriters).
 func sequencerRows() []sequencerRow {
 	return []sequencerRow{
 		{Name: "concurrent", New: func(ctx context.Context, u ranke.Universe, hist ranke.History,
 			op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
 			return concseq.NewSequencer(ctx, u, hist, op, clk)
 		}},
-		{Name: "dev", Serialised: true, Cap: serialWriters,
+		{Name: "dev", Cap: serialWriters,
 			New: func(ctx context.Context, u ranke.Universe, hist ranke.History,
 				op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
 				return devseq.NewSequencer(ctx, u, hist, op, clk)
@@ -118,7 +116,7 @@ func TestConcurrentContributionsLoseNothing(t *testing.T) {
 				rowWriters := n
 				if sr.Cap > 0 && sr.Cap < rowWriters {
 					rowWriters = sr.Cap
-					t.Logf("%d writers (capped from %d: this Sequencer takes one contribution at a time)", rowWriters, n)
+					t.Logf("%d writers (capped from %d: this Sequencer merges one at a time)", rowWriters, n)
 				}
 				runConcurrentWriters(t, u, sr, rowWriters)
 			})
@@ -136,10 +134,6 @@ func runConcurrentWriters(t *testing.T, u ranke.Universe, sr sequencerRow, n int
 	seq, err := sr.New(ctx, u, historymem.New(), op, clk)
 	require.NoError(t, err)
 
-	// One lock for a Sequencer documented as single-threaded; unheld for one that
-	// admits parallel writers, so that row races for real.
-	var write sync.Mutex
-
 	ids := make([]ranke.Id, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
@@ -153,10 +147,6 @@ func runConcurrentWriters(t *testing.T, u ranke.Universe, sr sequencerRow, n int
 				return
 			}
 			ids[i] = c.ID()
-			if sr.Serialised {
-				write.Lock()
-				defer write.Unlock()
-			}
 			_, errs[i] = helpers.Contribute(ctx, seq, "main", []ranke.Claim{c})
 		}()
 	}

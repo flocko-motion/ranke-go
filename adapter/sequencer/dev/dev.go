@@ -1,18 +1,17 @@
 // package: adapter/sequencer/dev / testkit
 // type:    adapter
-// job:     a blocking, single-threaded reference Sequencer for tests and development — the sole
-// writer that advances a Ranke-Archive by driving the paper's six steps one contribution
-// at a time
-// limits:  blocking and single-threaded — every step runs inline, one contribution at a time;
-// manages named branches without propagating between them (paper 2's cross-branch merge);
-// mints from the injected Clock, so heads are deterministic. NOT for production
-// (-> adapter/sequencer/concurrent).
+// job:     a blocking reference Sequencer for tests and development — the sole writer that
+// advances a Ranke-Archive by driving the paper's six steps one contribution at a time
+// limits:  a merge holds the lock end to end, so callers queue; manages named branches
+// without propagating between them (paper 2's cross-branch merge); mints from the
+// injected Clock. NOT for production (-> adapter/sequencer/concurrent).
 package dev
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/flocko-motion/ranke-go"
@@ -41,15 +40,31 @@ type Clock interface {
 
 // Sequencer is the reference Ranke-Archive write path (RankeDB §Sequencer): the
 // single writer advancing the head k → k′ by merging a contribution, running the
-// six steps serially in one blocking AddClaims call.
+// six steps serially in one blocking AddClaims call. Safe for concurrent use, bought
+// by queueing — a merge runs alone (-> adapter/sequencer/concurrent for parallel).
 type Sequencer struct {
 	u     ranke.Universe
 	hist  ranke.History
 	self  ranke.Contributor
 	clock Clock
 
+	// mu guards head and heads, and holds across a whole Merge: two merges sharing a
+	// read of one branch head would both fold from it, and one would be lost.
+	mu    sync.Mutex
 	head  ranke.Id            // current archive head k (a contribution/branches claim)
 	heads map[string]ranke.Id // current consolidated head per branch name (empty until first add)
+
+	// cmu serialises clock.Tick on its own, so an injected Clock needs no locking of
+	// its own and a Tick outside mu (step 3's consolidation) is still safe.
+	cmu sync.Mutex
+}
+
+// tick reads the next timestamp. Every mint goes through here, so one unsynchronised
+// Clock serves however many goroutines the caller drives this Sequencer from.
+func (s *Sequencer) tick() time.Time {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	return s.clock.Tick()
 }
 
 // NewSequencer bootstraps a fresh archive over u, storing the key-carrying self
@@ -88,30 +103,41 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 // GetContributor returns the contributor the Sequencer signs branch advances with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
 
-// GetArchive returns the immutable snapshot RA_k at the current head.
+// GetArchive returns the immutable snapshot RA_k at the current head, read under the
+// lock and built outside it, so a reader neither tears nor waits on a merge's I/O.
 func (s *Sequencer) GetArchive(ctx context.Context) (ranke.Archive, error) {
-	return ranke.NewArchive(ctx, s.u, s.head)
+	s.mu.Lock()
+	head := s.head
+	s.mu.Unlock()
+	return ranke.NewArchive(ctx, s.u, head)
 }
 
 // NewContribution is step 1: it captures the base (k, t) and returns a
-// contribution to fill, whose claims name the branches they join.
+// contribution to fill, whose claims name the branches they join. Head and time come
+// together, so the base is a pair that held at one instant.
 func (s *Sequencer) NewContribution(_ context.Context, opts ...ranke.ContributionOption) (ranke.Contribution, error) {
+	s.mu.Lock()
+	base, at := s.head, s.tick()
+	s.mu.Unlock()
 	return &contribution{
 		s:           s,
-		baseHead:    s.head,
-		baseTime:    s.clock.Tick(),
+		baseHead:    base,
+		baseTime:    at,
 		constraints: ranke.NewConstraints(opts...),
 		staged:      map[string][]ranke.Claim{},
 	}, nil
 }
 
 // Merge is step 6: it folds each named branch's head in, mints one branch table
-// restating them all, records the revision, and publishes the new archive head.
+// restating them all, records the revision, and publishes the new archive head. The
+// lock covers the whole step, since it derives the next head from the one it read.
 func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (ranke.Receipt, error) {
 	m, ok := mc.(*mergable)
 	if !ok || m.s != s {
 		return nil, errForeign
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	advanced := make([]string, 0, len(m.branches))
 	newHeads := make(map[string]ranke.Id, len(m.branches))
@@ -189,7 +215,7 @@ func (s *Sequencer) consolidateGraph(ctx context.Context, g ranke.Graph) (ranke.
 	if g.IsConsolidated() {
 		return g.Heads()[0], nil
 	}
-	head, err := g.Consolidate(ctx, s.self, s.clock.Tick())
+	head, err := g.Consolidate(ctx, s.self, s.tick())
 	if err != nil {
 		return nil, fmt.Errorf("%w: consolidate: %w", errSequencer, err)
 	}
@@ -211,7 +237,7 @@ func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ra
 	// new head's height (§4.1) from their committed heights.
 	return ranke.NewClaim(ranke.NodeHead, s.self).
 		WithEdges(edges...).
-		WithCreatedAt(s.clock.Tick()).
+		WithCreatedAt(s.tick()).
 		WithAutoHeight(ctx, s.u).
 		Sign()
 }
@@ -221,7 +247,7 @@ func (s *Sequencer) consolidateHeads(ctx context.Context, heads ...ranke.Id) (ra
 // changed branches, so the others are inherited by overlaying the chain (§Branches)
 // and the prior tables stay in the head's provenance — the spine (§Archive).
 func (s *Sequencer) mintBranchTable(ctx context.Context, changed []string) (ranke.Claim, error) {
-	b := ranke.NewClaim(ranke.NodeBranches, s.self).WithCreatedAt(s.clock.Tick())
+	b := ranke.NewClaim(ranke.NodeBranches, s.self).WithCreatedAt(s.tick())
 	if s.head != nil {
 		b = b.WithDiff(s.head) // diff over the previous table — build the spine
 	}
