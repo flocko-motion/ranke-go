@@ -145,11 +145,11 @@ func TestNodeNoContent(t *testing.T) {
 
 // --- height (§4.1) ------------------------------------------------------
 
-// TestNodeHeightInitialIsZero: an initial node (a root contributor, no edges)
+// TestNodeHeightInitialIsZero: an initial claim (a root contributor, no edges)
 // is height 0 automatically.
 func TestNodeHeightInitialIsZero(t *testing.T) {
 	root := contributor(t)
-	require.Equal(t, uint64(0), root.Node().Height(), "an initial node is height 0")
+	require.Equal(t, uint64(0), root.Node().Height(), "an initial claim is height 0")
 }
 
 // TestNodeHeightIncrementsDownChain: height is 1 + max(reference heights), so

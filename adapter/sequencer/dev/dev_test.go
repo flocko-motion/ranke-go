@@ -24,7 +24,7 @@ func (c *clock) Tick() time.Time {
 }
 
 // operator builds a signed root contributor carrying its own signing key, so
-// the Sequencer can attribute and sign with it. It is an initial node (height 0).
+// the Sequencer can attribute and sign with it. It is an initial claim (height 0).
 func operator(t *testing.T, ctx context.Context, at time.Time) ranke.Contributor {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(nil)

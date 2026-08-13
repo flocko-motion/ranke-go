@@ -72,8 +72,8 @@ func performanceCmd() *cobra.Command {
 			"Backends — durable byte-stores standalone; neo4j is a graph cache, only\n" +
 			"stacked over a durable tier:\n" +
 			"  mem, fs, sqlite, s3(MinIO), redis, neo4j/mem, neo4j/redis/s3\n\n" +
-			"A backend that can't run here (no podman, no RANKE_NEO4J_*/RANKE_REDIS_*)\n" +
-			"is skipped, not failed.",
+			"A backend that can't run here (no podman, no RANKE_NEO4J_*/RANKE_REDIS_*/\n" +
+			"RANKE_S3_ENDPOINT) is skipped, not failed.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			size, err := parseCount(sizeStr)
 			if err != nil {
@@ -97,7 +97,7 @@ func performanceCmd() *cobra.Command {
 	f.Int64Var(&seed, "seed", 1, "generator seed (fixes every id)")
 	f.IntVar(&access, "access", 50, "chapter-3 random accesses")
 	f.StringSliceVar(&backends, "backends", nil, "backends to run, comma-separated (mem,fs,sqlite,s3,redis,neo4j/mem,neo4j/redis/s3); default all")
-	f.BoolVar(&native, "native", false, "use the host-native neo4j/redis on localhost (flushed at start, left in place after) instead of spawning podman pods")
+	f.BoolVar(&native, "native", false, "use the host-native neo4j/redis/s3 on localhost (flushed at start, left in place after) instead of spawning podman pods")
 	f.StringVar(&step, "step", "", "run only this step (e.g. 2-verify, 3.1, 4.5; 4 = all queries); setup and tag always run")
 	f.BoolVar(&report, "report", false, "print each query's full execution report in the queries section")
 	return cmd

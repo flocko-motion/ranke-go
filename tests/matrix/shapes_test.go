@@ -8,6 +8,7 @@ import (
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/flocko-motion/ranke-go/tests/matrix"
 	"github.com/flocko-motion/ranke-go/tests/rql"
 )
 
@@ -15,7 +16,7 @@ import (
 
 // TestShapeScan: a filter over a branch returns the claims matching it.
 func TestShapeScan(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch},
 			Where:  &ranke.Where{Field: "type", Test: &ranke.Comparison{Glob: "source/*"}},
@@ -28,7 +29,7 @@ func TestShapeScan(t *testing.T) {
 // TestShapeScanRejectsPathOutput: a read without Path steps rejects Shape: path.
 // A route only exists where steps state one, so backends would each invent their own.
 func TestShapeScanRejectsPathOutput(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		arc, err := ranke.NewArchive(context.Background(), u, m.Head)
 		require.NoError(t, err)
 		_, err = arc.Query(context.Background(), ranke.Query{
@@ -43,7 +44,7 @@ func TestShapeScanRejectsPathOutput(t *testing.T) {
 // TestShapeAnchoredTraversal: from one claim, derivation edges reach the sources
 // it cites.
 func TestShapeAnchoredTraversal(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		base := diffPredecessor(t, u, m.DiffChainHead)
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch, Claim: base,
@@ -57,7 +58,7 @@ func TestShapeAnchoredTraversal(t *testing.T) {
 // TestShapeUnanchoredTraversal: a pattern without a starting point matches wherever
 // it occurs in the scope — here the relation reaches both entities it wires.
 func TestShapeUnanchoredTraversal(t *testing.T) {
-	eachToyBackend(t, generator.ToyRelation(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyRelation(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		got := reached(t, u, m.Head, ranke.Query{
 			Select: ranke.Select{Branch: rql.Branch,
 				Path: []ranke.PathStep{{Edges: []string{"relation/*"}, Nodes: []string{"entity/person"}}}},
@@ -71,7 +72,7 @@ func TestShapeUnanchoredTraversal(t *testing.T) {
 // (`R-QFRONTIER`). Two steps in opposing directions is the smallest case, and a lowering
 // that spans one pattern over the whole route drops it — only under Shape: path.
 func TestShapePathRecrossesAnEdge(t *testing.T) {
-	eachToyBackend(t, generator.ToyDiff(1), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyDiff(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
 		delta := m.DiffChainHead
 		base := diffPredecessor(t, u, delta)
 

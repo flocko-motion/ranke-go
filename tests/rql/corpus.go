@@ -107,6 +107,14 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"select/root-mid-archive", ranke.Query{
 			Select: ranke.Select{Branch: ranke.BranchArchive, Head: m.DiffChainHead},
 		}},
+		// A path-less anchor reads the anchor's closure (`R-QANCHOR`, `R-QSTEPS`). The
+		// twin spells the same read with its zero step, holding both shapes to one answer.
+		{"select/anchored-scan", ranke.Query{
+			Select: ranke.Select{Branch: Branch, Claim: m.DiffChainHead},
+		}},
+		{"select/anchored-scan-path", ranke.Query{
+			Select: pathFrom(m.DiffChainHead, ranke.PathStep{Min: ranke.Hops(0)}),
+		}},
 
 		// ── traversal: unanchored, matched wherever it occurs in the closure ──
 		{"unanchored/relation-to-entity", ranke.Query{Select: unanchored(
@@ -253,5 +261,13 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 				{Field: "height", Compare: ranke.CompareNumeric, Dir: ranke.SortDesc},
 			}}},
 		{"limit/results-5", ranke.Query{Select: sel(), Limit: ranke.Limit{Results: 5}}},
+
+		// ── the report, in band ─────────────────────────────────────────────
+		// A reported run ends with the report as a tagged element (`R-QSTREAM`), so
+		// every backend must end this sequence the same way. The fingerprint reads the
+		// tag, never the timings, so the comparison is the shape and not the clock.
+		{"execution/report-ends-the-stream", ranke.Query{Select: sel(),
+			Limit:     ranke.Limit{Results: 5},
+			Execution: ranke.Execution{Report: ranke.ReportInfo}}},
 	}
 }

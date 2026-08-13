@@ -185,7 +185,7 @@ func (b *builder) add(c ranke.Claim, err error) ranke.Claim {
 	return c
 }
 
-// contributors builds the operator plus spec.Contributors-1 more initial nodes
+// contributors builds the operator plus spec.Contributors-1 more initial claims
 // carrying keys. The Sequencer stores the operator, so only the others batch.
 func (b *builder) contributors(op ranke.Contributor) {
 	b.contribs = []ranke.Contributor{op}
@@ -418,8 +418,9 @@ func (b *builder) expiries() {
 	if len(b.contribs) < 2 {
 		return // no non-operator contributor to expire
 	}
-	// A fixed future instant, deterministic like everything else.
-	expiresAt := b.spec.Base.Add(365 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	// A fixed future instant, deterministic like everything else. RFC3339 alone drops
+	// the fraction, which `V-TIME` requires at nanosecond precision.
+	expiresAt := b.spec.Base.Add(365 * 24 * time.Hour).UTC().Format("2006-01-02T15:04:05.000000000Z")
 	for i := 0; i < b.spec.KeyExpiries && b.err == nil; i++ {
 		// Never expire the operator's key — it signs the branch tables.
 		target := b.contribs[1+(i%(len(b.contribs)-1))]

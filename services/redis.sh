@@ -104,7 +104,12 @@ nat_ensure_redis() {
   curl -fSL "$NAT_URL" -o "$NAT_DIR/redis.tar.gz"
   tar -xzf "$NAT_DIR/redis.tar.gz" -C "$SRC_DIR" --strip-components=1
   rm -f "$NAT_DIR/redis.tar.gz"
-  ( cd "$SRC_DIR" && make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1 )
+  # Redis 8 bundles optional modules (search, json, bloom, timeseries) whose builds
+  # want cmake and openssl headers and fail without them, taking the whole make
+  # target down with them. redis-server and redis-cli — all the tests use — build
+  # anyway, so the binaries are the gate, not make's exit status.
+  ( cd "$SRC_DIR" && make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1 ) || true
+  [ -x "$SRC_DIR/src/redis-server" ] || { echo "error: redis-server did not build; build by hand in ${SRC_DIR} to see why" >&2; exit 1; }
   cp "$SRC_DIR/src/redis-server" "$SERVER"
   cp "$SRC_DIR/src/redis-cli" "$CLI"
   echo "built redis-server + redis-cli into ${NAT_DIR}"

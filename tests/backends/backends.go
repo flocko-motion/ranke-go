@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -32,10 +34,14 @@ import (
 // with no podman); a caller reports the row as skipped.
 var ErrUnavailable = errors.New("backend unavailable")
 
-// forceNativeServices routes the pod-based services (neo4j, redis) to localhost.
+// forceNativeServices routes the pod-based services (neo4j, redis, s3) to localhost.
 var forceNativeServices bool
 
-// UseNativeServices routes neo4j and redis to host-native instances on localhost
+// redisSeq numbers the key prefixes one process hands out, so two live universes over
+// one redis never share a keyspace.
+var redisSeq atomic.Int64
+
+// UseNativeServices routes neo4j, redis and s3 to host-native instances on localhost
 // rather than podman pods — the harness's --native mode. Call before opening a backend.
 func UseNativeServices(on bool) { forceNativeServices = on }
 
@@ -44,6 +50,12 @@ func UseNativeServices(on bool) { forceNativeServices = on }
 type Backend struct {
 	Name string
 	Open func() (ranke.Universe, func(), error)
+	// Exclusive names a live service only ONE universe may hold at a time, so a
+	// caller keeping instances alive knows which rows it may not overlap. Both neo4j
+	// rows sit on the one database and flush it at open, and openNeo4j holds a
+	// cross-process lock meanwhile: a second live universe over it would block, then
+	// wipe the first's graph. Empty where a row can hold instances side by side.
+	Exclusive string
 }
 
 // Reference is the row every other backend is compared against: the in-memory store,
@@ -54,14 +66,32 @@ func Reference() Backend { return Backend{Name: "mem", Open: openMem} }
 // neo4j holds no CBOR and caps content, so it appears only stacked over one.
 func All() []Backend {
 	return []Backend{
-		{"mem", openMem},
-		{"fs", openFS},
-		{"sqlite", openSqlite},
-		{"s3", openS3},
-		{"redis", openRedis},
-		{"neo4j/mem", Stacked(openNeo4j, openMem)},
-		{"neo4j/redis/s3", Stacked(openNeo4j, openRedis, openS3)},
+		{Name: "mem", Open: openMem},
+		{Name: "fs", Open: openFS},
+		{Name: "sqlite", Open: openSqlite},
+		{Name: "s3", Open: openS3},
+		{Name: "redis", Open: openRedis},
+		{Name: "neo4j/mem", Open: Stacked(openNeo4j, openMem), Exclusive: exclusive.Neo4j},
+		{Name: "neo4j/redis/s3", Open: Stacked(openNeo4j, openRedis, openS3), Exclusive: exclusive.Neo4j},
 	}
+}
+
+// RowsEnv names the row set a run asks for: comma-separated row names, in any order.
+// It is how the Make layer reaches a Go-level knob — the fast gate asks for the rows
+// needing no service, the full run asks for all of them.
+const RowsEnv = "RANKE_ROWS"
+
+// Requested is the row set this run asks for, per RowsEnv; unset or empty means All.
+// Naming a row is a demand for it, never a hint: an unknown name errors here, and a
+// named row that cannot open is the caller's failure to report, not to skip.
+func Requested() ([]Backend, error) {
+	var names []string
+	for _, n := range strings.Split(os.Getenv(RowsEnv), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	return Select(names)
 }
 
 // Select filters All by name (empty = all) in matrix order; unknown names error.
@@ -127,7 +157,7 @@ func openSqlite() (ranke.Universe, func(), error) {
 }
 
 func openS3() (ranke.Universe, func(), error) {
-	client, bucket, cleanup, err := minioPod()
+	client, bucket, cleanup, err := s3Conn()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -145,9 +175,11 @@ func openRedis() (ranke.Universe, func(), error) {
 		return nil, nil, err
 	}
 	client := goredis.NewClient(&goredis.Options{Addr: addr, Password: pass})
-	// The key prefix isolates a run from other tenants of the same redis; the TTL expires its keys.
+	// A prefix per open isolates this universe from every other tenant of the same
+	// redis — including a second one of ours, live at the same time; the TTL expires
+	// its keys either way.
 	u, err := redisstore.New(client,
-		redisstore.WithKeyPrefix("rankeperf"),
+		redisstore.WithKeyPrefix(fmt.Sprintf("rankeperf-%d-%d", os.Getpid(), redisSeq.Add(1))),
 		redisstore.WithTTL(time.Hour),
 		redisstore.WithConcurrency(8))
 	if err != nil {

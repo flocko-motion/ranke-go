@@ -74,7 +74,7 @@ func TestDefaultMaterializeNonDiffNoOp(t *testing.T) {
 // --- GetClaimHeights (§4.1) --------------------------------------------
 
 // TestGetClaimHeights: GetClaimHeights returns committed heights positionally —
-// 0 for an initial node, 1 + max(refs) for a referencing one — and the
+// 0 for an initial claim, 1 + max(refs) for a referencing one — and the
 // single-item GetClaimHeight wrapper agrees.
 func TestGetClaimHeights(t *testing.T) {
 	ctx := context.Background()
@@ -86,7 +86,7 @@ func TestGetClaimHeights(t *testing.T) {
 
 	hs, err := u.GetClaimHeights(ctx, []Id{root.ID(), a.ID()})
 	require.NoError(t, err)
-	require.Equal(t, []uint64{0, 1}, hs, "initial node 0, source 1 — positionally")
+	require.Equal(t, []uint64{0, 1}, hs, "initial claim 0, source 1 — positionally")
 
 	h, err := GetClaimHeight(ctx, u, a.ID())
 	require.NoError(t, err)

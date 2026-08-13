@@ -62,7 +62,7 @@ var (
 	errTwoContributors          = errors.New("ranke.NewClaim: a claim may carry only one contribution/contributor edge")
 	errTwoDiffEdges             = errors.New("ranke.NewClaim: a claim may carry only one contribution/diff edge")
 	errHeightRequired           = errors.New("ranke.NewClaim: a claim with references must declare its height (use WithHeight or WithAutoHeight)")
-	errHeightOnInitial          = errors.New("ranke.NewClaim: an initial node (no references) must have height 0")
+	errHeightOnInitial          = errors.New("ranke.NewClaim: an initial claim (no references) must have height 0")
 	errHeightWithAuto           = errors.New("ranke.NewClaim: WithHeight and WithAutoHeight are mutually exclusive")
 
 	// --- Graph ---
@@ -107,7 +107,6 @@ var (
 	ErrQueryNoHead           = errors.New("ranke.Query: Select.Head is required under $universe (it has no natural head to scope by)")
 	ErrQueryNoScope          = errors.New("ranke.Query: Select.Branch is required (scope is mandatory — use BranchUniverse for an unconfined read)")
 	ErrQueryScanShape        = errors.New("ranke.Query: a scan (no Select.Path) reaches claims by no stated route, so Output.Shape must be single")
-	ErrQueryScanClaim        = errors.New("ranke.Query: a scan (no Select.Path) has no traversal to start, so Select.Claim is meaningless")
 	ErrQueryEncoding         = errors.New("ranke.Query: unknown Output.Encoding (native | json | cbor)")
 	errDecodeQuery           = errors.New("ranke.DecodeQuery")
 	errEncodeQuery           = errors.New("ranke.EncodeQuery")
@@ -136,6 +135,7 @@ var (
 	ErrDeleteByNotCopied     = errors.New("ranke.verify: an edge must carry exactly the delete_by its referenced claim declares")
 	ErrStructureNotDeletable = errors.New("ranke: a contribution/* claim carries the graph's structure and its own identity, so it takes no delete_by")
 	errHeightMismatch        = errors.New("ranke.verify: claim height ≠ 1 + max(reference heights)")
+	ErrCreatedAtNotMonotone  = errors.New("ranke.verify: claim is dated before a claim it references")
 	errNotBranchTable        = errors.New("ranke.Archive.Verify: head is not a contribution/branches claim")
 	errRefsBranchTable       = errors.New("ranke.verify: claim references a branch table")
 	errEncodeClaim           = errors.New("ranke: encode claim")
@@ -163,6 +163,14 @@ var (
 	errNilUniverse = errors.New("ranke.NewArchive: nil Universe")
 	errNilHeadID   = errors.New("ranke.NewArchive: nil head id")
 	errNilID       = errors.New("ranke.Archive: nil id")
+
+	// --- ADT shape, checked wherever a claim arrives rather than at the builder
+	// alone: a record decoded or assembled meets these too.
+	ErrContentBothSlots  = errors.New("ranke: a record carries both content and content_hash, which are mutually exclusive")
+	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
+	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
+	ErrProvenanceMissing = errors.New("ranke.verify: a derivation/*, entity/* or relation/* node carries at least one derivation/* edge")
+	ErrTimestampForm     = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
 )
 
 // wrapErr attaches an optional detail string and/or an optional cause to a

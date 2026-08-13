@@ -2,13 +2,14 @@
 // type:    adapter
 // job:     native RQL execution — lower the whole query to one Cypher statement, run it,
 // reconstruct + stream (neo4j has an engine, never uses DefaultQuery)
-// limits:  field read → scan; path read → walk from Select.Claim, or from anywhere in the closure
-// when it names none; branch confinement is the _b_<branch> tag (<= Height,
-// point-in-time), not a walk; a cbor read yields ids only
+// limits:  every read starts from Select.Claim, or from anywhere in the closure when it names
+// none — a scan without a path, a walk with one; branch confinement is the
+// _b_<branch> tag (<= Height, point-in-time), not a walk; a cbor read yields ids only
 package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,8 +30,16 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 	rep.log("cypher", "lower", ranke.ReportDebug, 0, cypher)
 
 	execStart := time.Now()
-	res, err := u.query(ctx, cypher, params)
+	res, err := u.query(ctx, cypher, params, txTimeout(q.Limit.Time)...)
 	if err != nil {
+		// The server terminating the transaction is limit.time being spent, which
+		// bounds the answer rather than failing it (`R-QLIMIT`). It leaves no partial
+		// rows, so the bounded answer here is the empty one, reported as cut short.
+		if boundedByTime(err, q.Limit.Time, ctx.Err()) {
+			rep.log("cypher", "limit", ranke.ReportInfo, time.Since(execStart), q.Limit.Time.String())
+			// No rows: the report is the whole sequence, or none of it (`R-QREPORT`).
+			return &cypherStream{results: ranke.AppendReport(nil, rep.finalize(0, true))}, nil
+		}
 		return nil, fmt.Errorf("%w: execute: %w", errQuery, err)
 	}
 	rep.log("cypher", "execute", ranke.ReportInfo, time.Since(execStart), "")
@@ -74,8 +83,17 @@ func (u *neo4jUniverse) Query(ctx context.Context, q ranke.Query, scope ranke.Sc
 			})
 		}
 	}
+	// The statement asked for one row past the cap, so an extra row here is the
+	// evidence that more existed — the same thing the reference learns by holding
+	// the whole set and cutting it (`R-QLIMIT`).
+	truncated := false
+	if n := q.Limit.Results; n > 0 && len(results) > n {
+		results, truncated = results[:n], true
+		rep.log("neo4j", "limit", ranke.ReportInfo, 0, strconv.Itoa(n)+" results, truncated")
+	}
 	rep.log("neo4j", "reconstruct", ranke.ReportInfo, time.Since(recStart), strconv.Itoa(len(results))+" results")
-	return &cypherStream{results: results, report: rep.finalize(len(results))}, nil
+	// The report ends the sequence (`R-QSTREAM`), finalised over what it counts.
+	return &cypherStream{results: ranke.AppendReport(results, rep.finalize(len(results), truncated))}, nil
 }
 
 // reachedPaths assembles one result per record: a claim per route element, last is
@@ -156,38 +174,49 @@ func closureAnchor(q ranke.Query, scope ranke.Scope) ranke.Id {
 	return nil
 }
 
-// startClause binds n0, where a traversal's first segment starts: the claim
-// Select.Claim names, else any claim the closure holds.
-func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string {
+// frontierRoot binds the claim a read starts from — the anchor `R-QANCHOR` names, else
+// the closure anchor — returning its parameter name, "" when neither bounds the read.
+func frontierRoot(q ranke.Query, scope ranke.Scope, params map[string]any) string {
 	if q.Select.Claim != nil {
 		params["root"] = q.Select.Claim.String()
-		return "MATCH (n0 {id: $root})"
+		return "$root"
 	}
 	if anchor := closureAnchor(q, scope); anchor != nil {
 		params["head"] = anchor.String()
-		return "MATCH (h {id: $head})-[*0..]->(n0)"
+		return "$head"
 	}
-	return "MATCH (n0)"
+	return ""
 }
 
-// lowerCypher routes a query to its Cypher: a Path-less read is the scope's claim
-// set (a scan), anything else follows the Path's steps.
+// startClause binds n0, where a traversal's first segment starts: the claim
+// Select.Claim names, else any claim the closure holds.
+func startClause(q ranke.Query, scope ranke.Scope, params map[string]any) string {
+	root := frontierRoot(q, scope, params)
+	switch {
+	case root == "":
+		return "MATCH (n0)"
+	case q.Select.Claim != nil:
+		return "MATCH (n0 {id: " + root + "})" // the anchor itself is the frontier
+	}
+	return "MATCH (h {id: " + root + "})-[*0..]->(n0)"
+}
+
+// lowerCypher routes a query to its Cypher: a Path-less read is the frontier's
+// closure (a scan), anything else follows the Path's steps.
 func lowerCypher(q ranke.Query, scope ranke.Scope, needPaths bool) (string, map[string]any) {
 	if len(q.Select.Path) == 0 {
-		return scanCypher(q, scope) // no traversal: the scope's claim set
+		return scanCypher(q, scope) // no traversal: the frontier's outward closure
 	}
 	return traversalCypher(q, scope, needPaths)
 }
 
-// scanCypher lowers a Path-less read: the scope's claim set. Branch membership is
-// the _b_<branch> tag (<= Height gives point-in-time); Head narrows to its reach.
+// scanCypher lowers a Path-less read: the frontier's outward closure (`R-QSTEPS`),
+// frontierRoot fixing the start so a scan and a walk begin alike (ranke.frontier).
 func scanCypher(q ranke.Query, scope ranke.Scope) (string, map[string]any) {
-	anchor := closureAnchor(q, scope)
 	params := map[string]any{}
 	match := "MATCH (n)"
-	if anchor != nil {
-		params["head"] = anchor.String()
-		match = "MATCH (h {id: $head})-[*0..]->(n)\nWITH DISTINCT n"
+	if root := frontierRoot(q, scope, params); root != "" {
+		match = "MATCH (h {id: " + root + "})-[*0..]->(n)\nWITH DISTINCT n"
 	}
 	var conds []string
 	if tagBounded(scope) {
@@ -545,7 +574,9 @@ func orderLimitClause(keys []ranke.OrderKey, limit int, node string) string {
 	// Natural order (created_at, id) — the tiebreak, always last.
 	b.WriteString(node + ".created_at, " + node + ".id")
 	if limit > 0 {
-		b.WriteString("\nLIMIT " + strconv.Itoa(limit))
+		// One past the cap: the extra row is how the caller learns more existed, and
+		// it is trimmed before the results are returned.
+		b.WriteString("\nLIMIT " + strconv.Itoa(limit+1))
 	}
 	return b.String()
 }
@@ -601,10 +632,9 @@ func toFloatVal(v any) float64 {
 // --- result stream, report, content shaping (neo4j-native, no reference reuse) ---
 
 // cypherStream is neo4j's ResultStream over an already-resolved slice: Cypher ran
-// the filter/order/limit, so this hands rows out in order.
+// the filter/order/limit, so this hands rows out in order, the report last.
 type cypherStream struct {
 	results []ranke.QueryResult
-	report  *ranke.QueryReport
 	i       int
 }
 
@@ -616,53 +646,24 @@ func (s *cypherStream) Next() bool {
 	return false
 }
 func (s *cypherStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
-func (s *cypherStream) Report() *ranke.QueryReport { return s.report }
+func (s *cypherStream) Report() *ranke.QueryReport { return ranke.ReportOf(s.results) }
 func (s *cypherStream) Err() error                 { return nil }
 func (s *cypherStream) Close() error               { return nil }
 
-// reportBuilder collects execution events above the requested level; a zero level
-// makes log/finalize no-ops.
-type reportBuilder struct {
-	level   ranke.ReportLevel
-	started time.Time
-	events  []ranke.QueryEvent
+// boundedByTime reports whether err is limit.time being spent rather than the read
+// failing: a budget was set, the caller's context is still live, and the server ended
+// the transaction on the budget the statement carried.
+func boundedByTime(err error, budget time.Duration, ctxErr error) bool {
+	return budget > 0 && ctxErr == nil && isTxTimeout(err)
 }
 
-func newReport(level ranke.ReportLevel, started time.Time) *reportBuilder {
-	return &reportBuilder{level: level, started: started}
-}
-
-func (r *reportBuilder) on() bool { return reportRank(r.level) > 0 }
-
-func (r *reportBuilder) log(engine, op string, level ranke.ReportLevel, dur time.Duration, detail string) {
-	if !r.on() || reportRank(level) > reportRank(r.level) {
-		return
-	}
-	r.events = append(r.events, ranke.QueryEvent{
-		At: time.Since(r.started), Engine: engine, Op: op, Level: level, Duration: dur, Detail: detail,
-	})
-}
-
-func (r *reportBuilder) finalize(results int) *ranke.QueryReport {
-	if !r.on() {
-		return nil
-	}
-	return &ranke.QueryReport{StartedAt: r.started, Elapsed: time.Since(r.started), Results: results, Events: r.events}
-}
-
-func reportRank(l ranke.ReportLevel) int {
-	switch l {
-	case ranke.ReportError:
-		return 1
-	case ranke.ReportWarn:
-		return 2
-	case ranke.ReportInfo:
-		return 3
-	case ranke.ReportDebug:
-		return 4
-	case ranke.ReportTrace:
-		return 5
-	default:
-		return 0
-	}
+// isTxTimeout reports whether err is the server ending the transaction on its
+// timeout, which is how limit.time arrives back here. Only the TransactionTimedOut
+// codes count: the driver normalises every transient termination — an operator's
+// killTransaction, a leader switch, a lock manager stopping — into a bare
+// Transaction.Terminated, and reading those as a bounded answer would turn each of
+// them into a silent empty success.
+func isTxTimeout(err error) bool {
+	var nerr *neo4jdriver.Neo4jError
+	return errors.As(err, &nerr) && strings.Contains(nerr.Code, "TransactionTimedOut")
 }

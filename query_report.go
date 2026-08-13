@@ -43,9 +43,10 @@ func reportRank(l ReportLevel) int {
 	}
 }
 
-// QueryReport is a query's execution log (Execution.Report set), returned via
-// ResultStream.Report. Engine/layer identity is per-event, since one query can
-// span several engines.
+// QueryReport is a query's execution log (Execution.Report set). It travels as the
+// stream's final element under KindReport (`R-QSTREAM`), which ResultStream.Report
+// reads back. Engine/layer identity is per-event, since one query can span several
+// engines.
 // A report travels a result sequence as its last record, so its field names are wire
 // names: lower-case like every other, and a duration says its unit, since one
 // serialises as a bare integer of nanoseconds.
@@ -55,6 +56,26 @@ type QueryReport struct {
 	Results   int           `json:"results"`    // items emitted
 	Truncated bool          `json:"truncated"`  // whether Limit cut the read short
 	Events    []QueryEvent  `json:"events,omitempty"`
+}
+
+// AppendReport ends results with rep as a tagged element, when there is a report to
+// end with: `R-QREPORT` puts one in the stream when, and only when, the query asked
+// for it, so a nil report leaves the sequence as it was.
+func AppendReport(results []QueryResult, rep *QueryReport) []QueryResult {
+	if rep == nil {
+		return results
+	}
+	return append(results, QueryResult{Kind: KindReport, Report: rep})
+}
+
+// ReportOf returns the report the sequence's final element carries, nil when that
+// element is a result. It is the one place a stream's Report reads from, so the
+// element and the accessor cannot disagree.
+func ReportOf(results []QueryResult) *QueryReport {
+	if n := len(results); n > 0 && results[n-1].Kind == KindReport {
+		return results[n-1].Report
+	}
+	return nil
 }
 
 // QueryEvent is one logged step or point during execution.

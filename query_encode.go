@@ -19,7 +19,7 @@ func routeIds(route []Claim) []Id {
 }
 
 // EncodeResults fills each result's ClaimEncoded/PathEncoded per out.Encoding, in
-// out.Form, inlining the content out.Content allows (R-QCONTENT). Native asks for the
+// out.Form, inlining the content out.Content allows (`R-QCONTENT`). Native asks for the
 // Go objects, which the executor already set and which keep their content whole — an
 // in-process caller holds the claim itself, so a cap would only cost it the bytes.
 func EncodeResults(results []QueryResult, out Output) error {
@@ -52,6 +52,9 @@ func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error)) error {
 		return enc(c)
 	}
 	for i := range results {
+		if results[i].Kind == KindReport {
+			continue // a report is not a claim, and keeps the tag it travels under
+		}
 		b, err := one(results[i].ClaimNative)
 		if err != nil {
 			return Wrap(errQuery, err)

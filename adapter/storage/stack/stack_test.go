@@ -465,7 +465,7 @@ func (s *sliceStream) Next() bool {
 	return s.i <= len(s.results)
 }
 func (s *sliceStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
-func (s *sliceStream) Report() *ranke.QueryReport { return nil }
+func (s *sliceStream) Report() *ranke.QueryReport { return ranke.ReportOf(s.results) }
 func (s *sliceStream) Err() error                 { return nil }
 func (s *sliceStream) Close() error               { return nil }
 

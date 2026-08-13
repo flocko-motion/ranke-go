@@ -1,0 +1,58 @@
+# Rules the spec declares that no Go comment cites — the ratchet half of
+# scripts/rule-citations.sh. One rule per line: the id, then a reason.
+#
+# THE LIST MAY ONLY SHRINK. Cite a rule and its line goes; the script fails on a
+# listed rule that has since been cited, so the list cannot rot into a permanent
+# exemption that silences the "uncited and unlisted" failure. It started at 48
+# entries; sd-924c13's sweep bound the verification family to code and took 16
+# of them, which is the mechanism working.
+#
+# What a reason says, and it says one of these three:
+#
+#   another layer's  — the rule governs something this library never does. It
+#                      stands as long as that holds.
+#   citation owed    — this library enforces the rule and no comment says so. The
+#                      line names the site, so the citation lands where the rule
+#                      is enforced rather than anywhere convenient.
+#   nothing to cite  — the rule is unimplemented here, so there is no site. The
+#                      line goes when the check does, not before.
+#
+# A reason that says only "not yet" says none of that: it neither justifies the
+# exemption nor names what removes it.
+
+# Access — accounts, targets, and the letters they hold. Grants are server
+# configuration resolved before a call reaches the library, which sees only the
+# constraints it is handed (Constraints, contribution.go).
+R-AGRANT       another layer's: grants and accounts are the server's configuration
+R-ABRANCH      another layer's: per-branch rights are checked before the library is called
+R-ATABLE       another layer's: rights over $branches are the server's to check
+R-AUNIVERSE    another layer's: the privileged $universe read is the server's to grant
+
+# Contribution rules — the six-step procedure, whose write path is the Sequencer
+# in adapter/sequencer.
+R-C1BASE       citation owed: base (k, t) at open, adapter/sequencer
+R-C2DATE       citation owed: no claim dated after the base time, adapter/sequencer
+R-C2TYPE       citation owed: reserved types, contribution.go reservedTypes
+R-C3CLOSE      citation owed: closing over references, contribution.go
+R-C3LIMIT      citation owed: a branch holds every limiting claim against what it holds
+R-C4KEY        citation owed: claim dated inside its key's window, verify.go ruleKeyWindow
+R-C4SEAL       citation owed: sealed once verified, adapter/sequencer
+R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequencer
+R-C6SIGN       citation owed: Sequencer claims name its own contributor, adapter/sequencer
+
+# Deletion — the requested form, which the Sequencer carries out.
+R-DREQUEST     citation owed: contribution/delete naming its target, contribution.go
+
+# Field syntax.
+R-FIELDS       citation owed: field-name form and limit, field_taxonomy.go
+
+# RQL — the query type and the native engine that is the conformance oracle.
+R-QEVAL        citation owed: fixed evaluation order, query.go
+R-QFORM        citation owed: original or materialized field values, query.go
+R-QLAYER       citation owed: layer pinning leaves the result set alone, query.go
+
+# Translation to Cypher — the neo4j backend's own chapter.
+R-QCYPHER      citation owed: the translation answers what the native engine does
+R-QCCLAUSE     citation owed: block-by-block clause mapping, adapter/storage/neo4j
+R-QCSTEP       citation owed: a step as a variable-length segment, adapter/storage/neo4j
+R-QCSCOPE      citation owed: the confined set equals the scope, adapter/storage/neo4j

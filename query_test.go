@@ -25,6 +25,8 @@ func queryFixture(t *testing.T) (Universe, Contributor, Claim, Claim) {
 	return u, root, a, b
 }
 
+// drain reads every element the stream emits — the report among them, since that is
+// what a generic reader sees (`R-QSTREAM`).
 func drain(t *testing.T, rs ResultStream) []QueryResult {
 	t.Helper()
 	var out []QueryResult
@@ -33,6 +35,21 @@ func drain(t *testing.T, rs ResultStream) []QueryResult {
 	}
 	require.NoError(t, rs.Err())
 	require.NoError(t, rs.Close())
+	return out
+}
+
+// drainResults is the results alone, for a test whose subject is the answer rather
+// than the shape of the sequence carrying it. That shape is asserted where it is the
+// subject — TestQueryReport and TestReportOffEmitsNoReportElement — so dropping the
+// element here hides nothing.
+func drainResults(t *testing.T, rs ResultStream) []QueryResult {
+	t.Helper()
+	var out []QueryResult
+	for _, r := range drain(t, rs) {
+		if r.Kind != KindReport {
+			out = append(out, r)
+		}
+	}
 	return out
 }
 
@@ -153,7 +170,9 @@ func TestQueryNoScopeAnchor(t *testing.T) {
 	require.ErrorIs(t, err, ErrQueryNoHead)
 }
 
-// TestQueryReport: Execution.Report appends a report after the stream drains.
+// TestQueryReport: the report is the stream's final element, tagged as one
+// (`R-QSTREAM`), so a reader iterating generically meets it like any other element
+// and Report() is a convenience over it rather than a channel beside it.
 func TestQueryReport(t *testing.T) {
 	u, _, _, b := queryFixture(t)
 	rs, err := u.Query(context.Background(), Query{
@@ -162,9 +181,22 @@ func TestQueryReport(t *testing.T) {
 	}, Scope{Branch: BranchUniverse})
 	require.NoError(t, err)
 	got := drain(t, rs)
+	require.NotEmpty(t, got)
+
+	last := got[len(got)-1]
+	require.Equal(t, KindReport, last.Kind, "the run asked for a report, so it ends with one")
+	require.NotNil(t, last.Report)
+	// The tag is enough to know what the element holds: no other field is set on it.
+	require.Nil(t, last.ClaimId)
+	require.Nil(t, last.ClaimNative)
+	require.Nil(t, last.ClaimEncoded)
+	for _, r := range got[:len(got)-1] {
+		require.NotEqual(t, KindReport, r.Kind, "one report, and it is last")
+	}
+
 	rep := rs.Report()
-	require.NotNil(t, rep)
-	require.Equal(t, len(got), rep.Results)
+	require.Same(t, last.Report, rep, "one report, read two ways")
+	require.Equal(t, len(got)-1, rep.Results, "Results counts the results, not itself")
 	require.NotEmpty(t, rep.Events, "the report carries an execution log")
 	// The native engine logged at least one event, and the log ends with results.
 	var sawNative bool

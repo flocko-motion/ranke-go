@@ -2,6 +2,7 @@ package generator
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/flocko-motion/ranke-go"
@@ -157,11 +158,16 @@ func TestGenerateDiffChainMaterialises(t *testing.T) {
 	require.NoError(t, err, "the chain head carries a revision field")
 }
 
+// scaleEnv gates the scale set. Signing and verifying 10k claims is a fixture
+// question, not a correctness one, so the fast gate does not pay for it; the full run
+// (`make test/full`) sets this.
+const scaleEnv = "RANKE_SCALE"
+
 // TestGenerateScales: a large size produces a 10k+-claim archive that still
 // verifies — the scale target for integration/conformance fixtures.
 func TestGenerateScales(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 10k-claim generation in -short")
+	if os.Getenv(scaleEnv) == "" {
+		t.Skipf("%s unset: the 10k-claim archive is built under `make test/full`", scaleEnv)
 	}
 	ctx := context.Background()
 	u, m := generateInto(t, SpecForSize(1, 2000))

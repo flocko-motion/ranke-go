@@ -12,7 +12,7 @@ The Ed25519 keypairs in this directory exist solely as **test fixtures** for the
 
 | Private key   | Public key        | Persona                             | Used in scenarios |
 |---------------|-------------------|-------------------------------------|-------------------|
-| `alice.pem`   | `alice.pub.pem`   | Alice (initial node, original key)  | 01, 02, 03 |
+| `alice.pem`   | `alice.pub.pem`   | Alice (initial claim, original key) | 01, 02, 03 |
 | `bob.pem`     | `bob.pub.pem`     | Bob (second contributor)            | _reserved for future scenario_ |
 | `alice2.pem`  | `alice2.pub.pem`  | Alice (post-rotation key)           | _reserved for future scenario_ |
 

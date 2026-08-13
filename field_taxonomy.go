@@ -158,7 +158,8 @@ func validEncodingSubtypeChars(sub string) bool {
 	return true
 }
 
-// fieldNameToAlias maps a well-known field name to its bare alias; user names pass through.
+// fieldNameToAlias maps a well-known field name to its bare alias (`V-ALIAS`); user
+// names pass through.
 func fieldNameToAlias(n Field) Field {
 	switch n {
 	case FieldName:

@@ -43,7 +43,7 @@ type Node interface {
 	EncodingClass() EncodingClass
 	EncodingSub() string
 	CreatedAt() time.Time
-	// Height is the claim's generation number: 0 for an initial node, else 1 + max
+	// Height is the claim's generation number: 0 for an initial claim, else 1 + max
 	// over referenced heights (§4.1). In the node hash, so the id commits to it.
 	Height() uint64
 	// Edges returns the ids of edges created with this claim, in canonical order.
@@ -64,7 +64,7 @@ type node struct {
 	content       []byte // inline content bytes, kept with the node; nil when external or none
 	contentSize   uint64 // paired with content/contentHash to defend against truncation/extension
 	createdAt     time.Time
-	height        uint64 // generation number: 0 for an initial node, else 1 + max(reference heights)
+	height        uint64 // generation number: 0 for an initial claim, else 1 + max(reference heights)
 	edges         []Id   // edge ids, sorted canonically
 	fields        map[string]string
 	id            Id // = Sign(H(S(node))); also the claim id
@@ -98,7 +98,8 @@ func (n *node) flattened() *node {
 	return &out
 }
 
-// computeDiffFields builds diffFields: inherit diffNode → drop fields_diff_omit → overlay self.
+// computeDiffFields builds diffFields (`V-DIFF`): inherit diffNode → drop
+// fields_diff_omit → overlay self.
 func (n *node) computeDiffFields() {
 	m := make(map[string]string, len(n.diffNode.fieldMap())+len(n.fields))
 	for k, v := range n.diffNode.fieldMap() {
@@ -114,7 +115,7 @@ func (n *node) computeDiffFields() {
 }
 
 // contentSource is the node supplying this node's content: self when it sets its own
-// (inline or content_hash), else the diff predecessor's source — content is inherited.
+// (inline or content_hash), else the predecessor's — content inherits whole (`V-DIFF`).
 func (n *node) contentSource() *node {
 	if n.content != nil || n.contentHash != nil || n.diffNode == nil {
 		return n

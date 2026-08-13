@@ -63,7 +63,7 @@ type Edge interface {
 type EdgeConfig struct {
 	Reference Id
 	// Referenced is the claim Reference names, for the fields an edge derives from its
-	// target: today the delete_by every edge must carry (`R-DELBY`). Supply it wherever
+	// target: today the delete_by every edge must carry (`R-DPLANNED`). Supply it wherever
 	// the target is in hand, since an edge cannot learn this after it is built.
 	Referenced        Claim
 	Type              string
@@ -134,7 +134,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		return nil, err
 	}
 
-	// Relation direction (§4.7): RelationFrom or RelationTo on relation/*, zero elsewhere.
+	// Relation direction (§4.7, `V-REL`): RelationFrom or RelationTo on relation/*, zero elsewhere.
 	if cfg.TypeClass == EdgeClassRelation {
 		if cfg.RelationDirection != RelationFrom && cfg.RelationDirection != RelationTo {
 			return nil, errEdgeRelationDir
@@ -145,7 +145,7 @@ func newEdge(cfg EdgeConfig) (*edge, error) {
 		}
 	}
 
-	// The target's schedule travels with the reference (`R-DELBY`), so it is part of
+	// The target's schedule travels with the reference (`R-DPLANNED`), so it is part of
 	// the edge from the start; an edge stating one keeps what it states.
 	if cfg.Referenced != nil {
 		if due, err := cfg.Referenced.Node().GetField(FieldDeleteBy); err == nil {
@@ -290,6 +290,7 @@ func validEdgeClass(c EdgeClass) bool {
 	return false
 }
 
+// validNodeClass reports whether c is one of the fixed node classes (`V-TYPE`).
 func validNodeClass(c NodeClass) bool {
 	switch c {
 	case NodeClassSource, NodeClassDerivation, NodeClassEntity, NodeClassRelation, NodeClassContribution:

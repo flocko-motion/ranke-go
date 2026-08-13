@@ -36,16 +36,18 @@ func corruptNode(t *testing.T, g Graph, c Claim) {
 	mu.mu.Unlock()
 }
 
-// windowedContributor builds a signed contributor whose key is valid over the closed
-// window the fields describe, an empty bound being left unset.
-func windowedContributor(t *testing.T, from, until string) (Contributor, ed25519.PrivateKey) {
+// windowedContributor builds a signed contributor dated at, whose key is valid over the
+// closed window the fields describe — an empty bound being left unset. It is dated with
+// the claims it signs rather than now, since `V-MONO` dates a claim no earlier than the
+// contributor it references, and a window is declared rather than sat in.
+func windowedContributor(t *testing.T, from, until string, at time.Time) (Contributor, ed25519.PrivateKey) {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	pubkey, err := EncodePublicKey(priv.Public())
 	require.NoError(t, err)
 
-	b := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream)
+	b := NewClaim(NodeContributor, nil).WithInlineContent(pubkey).WithEncoding(EncodingOctetStream).WithCreatedAt(at)
 	if from != "" {
 		b = b.WithField(FieldPubkeyValidFrom, from)
 	}
@@ -99,7 +101,7 @@ func TestVerifyKeyWindow(t *testing.T) {
 		"no window ever fails": {"", "", stamp("2099-01-01T00:00:00.000000000Z"), nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			who, _ := windowedContributor(t, tc.from, tc.until)
+			who, _ := windowedContributor(t, tc.from, tc.until, tc.at)
 			g := newGraph(t, who)
 			require.NoError(t, g.AddClaims(context.Background(), signedAt(t, who, tc.at)))
 
@@ -116,18 +118,8 @@ func TestVerifyKeyWindow(t *testing.T) {
 	}
 }
 
-// TestVerifyKeyWindowRejectsUnparsableBound: a bound that is not RFC 3339 states no
-// window, so it fails rather than being read as absent.
-func TestVerifyKeyWindowRejectsUnparsableBound(t *testing.T) {
-	who, _ := windowedContributor(t, "", "whenever")
-	g := newGraph(t, who)
-	require.NoError(t, g.AddClaims(context.Background(), signedAt(t, who, time.Now().UTC())))
-
-	run := g.Verify()
-	run.Wait()
-	require.NoError(t, run.Err())
-	require.Len(t, run.Failures(), 1, "an unreadable bound is a failure, not a free pass")
-}
+// An unparsable bound is `V-TIME`'s subject rather than the window's, so
+// TestVerifyKeyWindowRejectsUnparsableBound lives in verify_time_test.go.
 
 // deletableSource stages a source claim scheduled for deletion, so a later claim has
 // something whose schedule it must carry.
@@ -532,6 +524,83 @@ func TestVerifyRejectsWrongHeight(t *testing.T) {
 	require.True(t, found, "the wrong-height claim is reported")
 }
 
+// --- created_at monotonicity (`V-MONO`) --------------------------------
+
+// TestVerifyCreatedAtMonotone: a claim dated before the contributor it references
+// fails, one dated after it passes, and one dated at the same instant passes too —
+// the rule is ≥, and a contribution commits its claims at a single instant.
+func TestVerifyCreatedAtMonotone(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		at      time.Time
+		wantErr error
+	}{
+		"after its reference":  {base.Add(24 * time.Hour), nil},
+		"at the same instant":  {base, nil},
+		"before its reference": {base.Add(-24 * time.Hour), ErrCreatedAtNotMonotone},
+	} {
+		t.Run(name, func(t *testing.T) {
+			who, _ := windowedContributor(t, "", "", base)
+			g := newGraph(t, who)
+			c := signedAt(t, who, tc.at)
+			require.NoError(t, g.AddClaims(context.Background(), c), "the builder dates a claim as told")
+
+			run := g.Verify()
+			run.Wait()
+			require.NoError(t, run.Err())
+			if tc.wantErr == nil {
+				require.Empty(t, run.Failures())
+				return
+			}
+			require.Len(t, run.Failures(), 1)
+			require.True(t, run.Failures()[0].ID.Equal(c.ID()), "the failure names the back-dated claim")
+			require.ErrorIs(t, run.Failures()[0].Err, tc.wantErr)
+		})
+	}
+}
+
+// TestVerifyCreatedAtMonotoneAcrossDerivation: every reference is compared, so a
+// derivation dated after its contributor and before the source it cites still fails.
+func TestVerifyCreatedAtMonotoneAcrossDerivation(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	who, _ := windowedContributor(t, "", "", base)
+	g := newGraph(t, who)
+
+	src := signedAt(t, who, base.Add(2*time.Hour))
+	require.NoError(t, g.AddClaims(ctx, src))
+
+	bad, err := NewClaim(TypeEntity("person"), who).
+		WithInlineContent([]byte("dated between its two references")).
+		WithEncoding(EncodingPlain).
+		WithEdges(mustDerivEdge(t, src)).
+		WithHeight(HeightOf(who, src)).
+		WithCreatedAt(base.Add(time.Hour)).
+		Sign()
+	require.NoError(t, err)
+	require.NoError(t, g.AddClaims(ctx, bad))
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Len(t, run.Failures(), 1)
+	require.True(t, run.Failures()[0].ID.Equal(bad.ID()))
+	require.ErrorIs(t, run.Failures()[0].Err, ErrCreatedAtNotMonotone)
+}
+
+// TestVerifyCreatedAtMonotoneInitialClaim: an initial claim references nothing, so the
+// rule has nothing to compare it against and it verifies alone.
+func TestVerifyCreatedAtMonotoneInitialClaim(t *testing.T) {
+	who, _ := windowedContributor(t, "", "", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	g := newGraph(t, who)
+
+	run := g.Verify()
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Empty(t, run.Failures())
+	require.Equal(t, 1, run.Verified(), "the initial claim is the whole closure")
+}
+
 // TestVerifyRejectsBranchTableReference: a contribution/branches (branch-table)
 // claim may be referenced only by another branch table. An ordinary claim that
 // references one fails verification — the branch-table-reference rule keeps the
@@ -612,4 +681,6 @@ func TestVerifyRuleSet(t *testing.T) {
 	}
 	require.Contains(t, names, "branch-table reference")
 	require.Contains(t, names, "§5.7 signature")
+	require.Contains(t, names, "created_at monotonicity", "a FORCED rule is skippable like the rest")
+	require.Contains(t, names["created_at monotonicity"], "`V-MONO`", "and states the rule it enforces")
 }

@@ -31,7 +31,7 @@ type ClaimBuilder struct {
 	DiffOf Id
 	Edges  []Edge
 	Fields map[string]string
-	// Height is the claim's generation number (§4.1): 0 on an initial node, else
+	// Height is the claim's generation number (§4.1): 0 on an initial claim, else
 	// 1 + max(reference heights), which a referencing claim must declare.
 	Height uint64
 	// autoHeight* back WithAutoHeight — a Universe plus context, so the mode is
@@ -88,7 +88,7 @@ func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
 
 // WithHeight sets the generation number (§4.1) — 1 + max over the referenced
-// heights, or 0 for an initial node. The verifier re-derives and enforces it.
+// heights, or 0 for an initial claim. The verifier re-derives and enforces it.
 func (b ClaimBuilder) WithHeight(h uint64) ClaimBuilder { b.Height = h; return b }
 
 // WithAutoHeight makes Sign read each referenced claim's committed height from
@@ -149,7 +149,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err := checkFields(cfg.Fields); err != nil {
 		return nil, err
 	}
-	if err := CheckDeletable(cfg.TypeClass, cfg.Fields); err != nil {
+	if err := CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields); err != nil {
 		return nil, err
 	}
 
@@ -317,7 +317,7 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 }
 
 // checkDiffEdgeNames requires a unique, non-empty name on every edge of a diff
-// claim beyond the singletons (contributor, diff) — overlay is name-keyed.
+// claim beyond the singletons (contributor, diff) — overlay is name-keyed (`V-DIFFEDGE`).
 func checkDiffEdgeNames(edges []*edge) error {
 	seen := make(map[string]struct{}, len(edges))
 	for _, e := range edges {
@@ -376,7 +376,7 @@ func applyContent(n *node, cfg ClaimBuilder, hasInline, hasExternal bool) error 
 }
 
 // resolveHeight derives the generation number (§4.1) from the assembled edges:
-// 0 on an initial node, a declared non-zero Height on a referencing claim, or
+// 0 on an initial claim, a declared non-zero Height on a referencing claim, or
 // the WithAutoHeight lookup, which rejects a conflicting explicit Height.
 func resolveHeight(cfg ClaimBuilder, edges []*edge) (uint64, error) {
 	if cfg.autoHeightU != nil {

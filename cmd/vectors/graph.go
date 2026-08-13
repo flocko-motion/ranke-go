@@ -25,7 +25,7 @@ func (g *gen) toyGraph(ctx context.Context) error {
 	}
 	g.who = who
 	if err := g.addClaim("root-contributor", root,
-		"initial node (height 0), content is its own multikey pubkey, signed by that key (§5.7)"); err != nil {
+		"initial claim (height 0), content is its own multikey pubkey, signed by that key (§5.7)"); err != nil {
 		return err
 	}
 

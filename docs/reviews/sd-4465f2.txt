@@ -1,0 +1,427 @@
+# V-* ADT rules — verification report
+
+Task sd-4465f2. Nineteen FORCED ADT rules, checked against `docs/papers/spec/ranke-spec.typ`
+(fetched by `make docs` at the start of this task) and against the code as it stands on the
+branch. Report only; no code changed.
+
+Seven were verified earlier today and the task said to say so rather than redo them: V-SER,
+V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF, V-ARCHIVE, V-MONO. They are marked SKIPPED, which is
+not one of the task's five verdicts, because none of the five fits a rule deliberately not
+examined. OUT OF SCOPE means another layer's rule, and these are FORCED ADT rules — portable
+to every implementation, the opposite of another layer's concern — so labelling them that way
+would tell a reader skimming the counts exactly the wrong thing about the most important
+family in the spec. Each SKIPPED entry names the site that covers it and the rule text I
+re-read, so it can be checked without being re-verified here.
+
+One structural observation governs several verdicts and is stated once here. The library has
+three doors a claim can come in by:
+
+- `NewClaim` / `NewEdge` — construction, which validates heavily (`claim_builder.go`, `edge.go`)
+- `DecodeClaim` — CBOR from a store or a peer (`codec.go:405` `decodeNode`, `codec.go:437` `decodeEdge`)
+- `AssembleClaim` — reconstruction from a backend's own representation (`claim_assemble.go:52`),
+  which is how the neo4j adapter rebuilds a claim from graph nodes
+
+Only the first validates the ADT's shape rules. Neither of the other two checks type class,
+relation direction, provenance, or the content XOR, and the closure verifier
+(`verifyRules`, `verify.go:384`) has no rule for any of them. So a record that violates
+V-TYPE, V-REL, V-PROV, or V-CONTENT's XOR arriving as bytes from another implementation, or
+rebuilt out of neo4j, verifies clean. Each such rule is marked UNTESTED below with the
+door it is missing from, and the summary ranks the whole shape as the first thing to fix.
+
+---
+
+### V-TYPE — UNTESTED
+
+Rule: "Every node and every edge MUST carry a `type` whose `class` is one of the fixed set:
+`source`, `derivation`, `entity`, `relation`, or `contribution` for a node; `derivation`,
+`relation`, or `contribution` for an edge. The subtype is open vocabulary."
+
+Code: `edge.go:294` `validNodeClass` lists exactly the five node classes; `edge.go:285`
+`validEdgeClass` exactly the three edge classes. Called from `claim_builder.go:205` and
+`edge.go:119`. The subtype is checked only for character set (`field_taxonomy.go:125`
+`checkSubtype`), never against a list, so the vocabulary is open — the code agrees with the
+rule as it now reads, not with the old "closed" comment the task warns about.
+`node_taxonomy.go:64` and `edge_taxonomy.go:30` both describe the subtype vocabulary as open.
+
+Test: NONE for the class restriction. `errUnknownNodeClass` and `errUnknownEdgeClass` occur
+only at their raise sites — neither appears anywhere under `*_test.go`, and no test builds a
+claim or edge with a class outside the set. I cannot name a test that would go red if both
+validator calls were deleted.
+
+Note: `decodeNode` (`codec.go:411`) assigns the class straight through `aliasFromWire` with no
+check, `AssembleClaim` (`claim_assemble.go:61`) takes it from `splitType` alone, and no
+`verifyRules` entry examines it. Reading those three sites, a stored record typed
+`nonsense/thing` decodes and passes verification; I did not execute that case.
+
+### V-REF — VERIFIED
+
+Rule: "Every edge's `reference` MUST resolve to a claim present in the closure, and MUST
+reference a *claim* — never an edge."
+
+Code: `verify.go:277-281` queues every edge's reference as the walk proceeds, and
+`verify.go:230` loads each queued id with `GetClaimsRaw`; a reference that resolves to
+nothing fails that load and is recorded as a `Failure`. The second half is structural rather
+than checked: an edge is serialized inline in its node's record (`V-SER`) and is never stored
+under its own key, so a reference naming an edge id resolves to nothing and fails as the
+first half.
+
+Test: `tests/vectors_test.go:51` `TestPublishedClaimVectors`, over the published case
+`rejected-absent-contributor` — a claim whose edge names a claim the set omits. The harness
+runs a full closure `Verify()` (`internal/vectors/check.go:65` `Accepts`) and the manifest
+demands rejection, so removing the walk's load failure turns that case green and the test red.
+
+Note: `graph_test.go:94` points a reader at `universe_closure_test.go` for the dangling-
+reference case; that file does not exist. The coverage is real but the signpost is stale.
+
+### V-ROOT — VERIFIED
+
+Rule: "Every claim MUST either be an *initial claim* — one with no references — or carry
+exactly one `contribution/contributor` edge. Several initial claims are admitted."
+
+Code: two halves in two places. At most one: `claim_builder.go:355` counts
+`contribution/contributor` edges and returns `errTwoContributors` above one. At least one:
+`verify.go:564` `resolveSigner` returns `c` itself when the claim has no edges, else looks for
+the contributor edge and returns `errNoContributorEdge` when there is none — and every claim
+in a walk goes through it, since `verifyClaim` resolves the signer before any rule runs. Several
+initial claims are admitted: `graph_test.go:110` `TestAddClaimAllowsMultipleInitialClaims`.
+
+Test: `claim_builder_test.go:304` `TestClaimRejectsTwoContributors` for the upper bound;
+`TestPublishedClaimVectors` for the lower, via the same `rejected-absent-contributor` case.
+
+Note: the lower bound is enforced as a side effect of needing a pubkey, not as a rule of its
+own. A claim carrying references and no contributor edge fails with "contributor claim
+unresolved" rather than naming V-ROOT, which is the right outcome reached by an accident of
+ordering.
+
+### V-CONTENT — UNTESTED
+
+Rule: "If a claim declares content, it MUST carry both `content_size` (its exact byte length)
+and `encoding` (its media type). Inline content lives in `content`; external content is
+referenced by `content_hash`, and the referenced bytes in U MUST hash to it: H(c) =
+`content_hash`. A claim MUST NOT carry both `content` and `content_hash`."
+
+Code, clause by clause:
+
+- `content_size`: set from `len` for inline (`claim_builder.go:370`); taken from the caller for
+  external (`claim_builder.go:372`). Verified for external content only under
+  `WithExternalContent`, where `NewVerifyingReader` (`verify_content.go:44`) rejects both a
+  short and a long stream.
+- `encoding`: required with content and forbidden without, at construction
+  (`resolveContentEncoding`, via `claim_builder.go:235` and `edge.go:132`), and re-checked per
+  content carrier by `ruleContentEncoding` (`verify.go:389`) — a verifier rule, so it survives
+  the decode door.
+- `H(c) = content_hash`: `ruleContent` (`verify.go:388`) → `verifyContentRef`
+  (`verify.go:610`), which streams through a verifying reader. Skipped unless the run passes
+  `WithExternalContent` (`verify.go:617`), by design, since blobs can be gigabytes.
+- XOR: `claim_builder.go:216` `errClaimContentXOR` for a node, `edge.go:125`
+  `errEdgeContentXOR` for an edge.
+
+Test: `node_test.go:121` `TestNodeContentXOR` and `edge_test.go:40` `TestNewEdgeContentXOR`
+for the XOR at construction; `verify_test.go:446` `TestVerifyExternalContentToggle` for the
+hash clause, asserting a corrupt blob passes the default walk and fails under
+`WithExternalContent`; `TestPublishedClaimVectors` carries `content_hash_mismatch`.
+
+Note: the XOR is UNTESTED at the door that matters. `decodeNode` (`codec.go:419-432`) is a
+`switch` whose first arm takes `content` — so on the face of it a stored record carrying BOTH
+slots decodes with the hash silently dropped rather than being refused, and nothing downstream
+compares the two, since the id commits to the bytes as they were encoded. `AssembleClaim`
+(`claim_assemble.go:60-70`) sets both fields from its parts with no check at all. This one is
+a reading of the switch; I did not execute a both-slots record, and confirming it is the first
+thing the fix task should do.
+
+### V-ID — VERIFIED
+
+Rule: "Every claim's stored id MUST verify against the claim's stored bytes: the id is the
+signature over their hash, checked with the key `V-SIG` names."
+
+Code: `verify.go:549` `(*claim).verifyID` calls `nodePreimage(raw)` (`codec.go:392`), which
+pulls record field 1 out of the STORED CBOR as `cbor.RawMessage` and hashes those exact bytes
+— no re-encode, which is the property the task flags. Wired as `ruleSignature`
+(`verify.go:398`), the first entry in `verifyRules`.
+
+Test: `verify_test.go:398` `TestVerifyWithOnError` via `corruptNode` (`verify_test.go:25`),
+which rewrites a claim's stored bytes under its original id so the preimage no longer hashes
+to it. Also `TestPublishedClaimVectors` with `id_mismatch`, `wrong_message` and `malformed_id`.
+Re-encoding instead of reading stored bytes turns all four red.
+
+### V-SIG — VERIFIED
+
+Rule: "The signature in id(v) MUST verify against the contributor's `pubkey` — reached through
+v's `contribution/contributor` edge, or, when v is an initial claim, in v's own content. Where
+no `pubkey` is set, the signature scheme is *identity*, Sign(h) = h."
+
+Code: `verify.go:564` `resolveSigner` implements the two reaching paths (own claim when it has
+no edges, else the `contribution/contributor` target); `resolveClaimPubkey` (`verify.go:586`)
+reads the key off the signer's content; `sign.go:83` `verifySignature` takes the identity
+branch on an empty pubkey and compares `idPayload` to `hash` directly, else decodes the
+multikey, requires the signature code paired with the key code, and checks Ed25519.
+
+Test: `verify_test.go:260` `TestVerifySignedGraph` for the positive path;
+`TestPublishedClaimVectors` for `identity_sign_mismatch` and `unresolvable_contributor`, plus
+the published `rejected-wrong-signer` case.
+
+Note: distinct from V-SIGN, as the task warns. V-SIGN (the Ed25519 choice and the multikey
+framing) is `sign_test.go`, verified earlier today; what is checked here is only that the
+signature answers to the contributor's key.
+
+### V-MONO — SKIPPED (verified earlier today)
+
+Rule: "Every claim MUST carry `created_at`, the UTC time it was added, and MUST NOT predate
+what it references: created_at(v) >= max created_at(u) over every reference u of v."
+
+Code: `verify_reference.go:54` `verifyCreatedAtMonotone`, registered at `verify.go:387`.
+Test: `verify_test.go` `TestVerifyCreatedAtMonotone` and its two siblings. Added under
+sd-334cf7 and merged today; not re-checked here.
+
+### V-TIME — GAP
+
+Rule: "Every timestamp — `created_at`, `delete_by`, `pubkey_valid_from`,
+`pubkey_expires_after`, and every timestamp a read returns — MUST be text in RFC 3339 form,
+UTC, with nanosecond precision: `2026-01-05T12:00:00.000000000Z`."
+
+Code: the layout is `codec.go:215` `iso8601Nano = "2006-01-02T15:04:05.000000000Z"`. Because
+the layout ends in a literal `Z` rather than `Z07:00`, `time.Parse` rejects an offset form, so
+UTC is enforced rather than assumed; the fixed-width `.000000000` likewise rejects a
+timestamp with fewer digits. Per field:
+
+- `created_at` — encoded at `codec.go:159`, parsed at `codec.go:406` on every decode. Held: a
+  timestamp that will not parse fails the decode, so no such claim reaches a verifier at all.
+- `pubkey_valid_from` / `pubkey_expires_after` — parsed by `keyBound` (`verify.go:431`), which
+  answers `errKeyWindowField` on anything unparsable. Held only along one path; see below.
+- `delete_by` — never parsed anywhere. It is read as an opaque string at `verify.go:506-507`
+  (compared for equality between claim and edge), copied as a string at `edge.go:151-157`, and
+  tested only for presence at `contribution.go:202,215`. `delete_by: "whenever"` is accepted by
+  construction, by decode, and by every verifier rule.
+
+Test: `verify_test.go:123` `TestVerifyKeyWindowRejectsUnparsableBound` covers the pubkey
+bounds along the path that is checked. NONE for `delete_by`.
+
+Note: the gap has two paths, and they are one finding rather than a finding and an aside —
+whoever fixes the first should fix the second in the same pass, since both are a declared
+timestamp that no code ever reads as a time.
+
+The first is `delete_by`, and it is the substantive one: a scheduled deletion whose date no
+reader can parse is a deletion nobody can carry out, and `R-DPLANNED` leans on that date.
+
+The second is the pubkey window. `keyBound` runs only inside `ruleKeyWindow`, and
+`ruleKeyWindow` judges a claim against its SIGNER — so a contributor claim's own bounds are
+parsed when it signs something inside the closure, and never otherwise. A contributor claim
+carrying `pubkey_expires_after: "soon"` that signs nothing in the walk is verified without
+its bounds being looked at, and the same claim becomes a hard failure later, the moment it
+signs. The rule says the timestamp MUST be RFC 3339 wherever it appears, not merely wherever
+it is currently consulted; both fields want validating where they are written or decoded,
+rather than where they happen to be read.
+
+Separately and cosmetically, `codec.go:159` repeats the layout as a literal instead of
+using `iso8601Nano` three lines up, and `adapter/storage/neo4j/convert.go:206` declares its
+own copy of the same constant — three definitions of one contractual format.
+
+### V-HEIGHT — VERIFIED
+
+Rule: "Every node MUST carry `height`, the longest path from its claim following references:
+height(v) = max({height(u) + 1 : u in refs(v)} union {0}). An initial claim references nothing
+and so carries 0."
+
+Code: `verify_reference.go:27` `verifyHeight` resolves the direct references' committed heights
+through `u.GetClaimHeights` and requires `height == 1 + max`, or 0 with no references. Wired as
+`ruleHeight` (`verify.go:445`). Single-level, made transitive by the closure walk.
+
+Test: `verify_test.go:514` `TestVerifyRejectsWrongHeight` builds a claim with height 99 whose
+only reference is the height-0 contributor and asserts `errHeightMismatch`;
+`TestPublishedClaimVectors` carries `height_wrong`.
+
+### V-SER — SKIPPED (verified earlier today)
+
+Rule: "S MUST be CBOR Deterministic Encoding (RFC 8949 §4.2) … A key MUST only be added, never
+reassigned."
+
+Covered by `codec_keys_test.go` `TestRecordKeysMatchTheTable`, which pins every numeric key
+against @tbl:keys. Not re-checked.
+
+### V-HASH — VERIFIED
+
+Rule: "H MUST be a multihash: the multicodec varint `0x12` (`sha2-256`), the digest length,
+then the digest."
+
+Code: `id.go:55` `hashContent` calls `multihash.Sum(content, multihash.SHA2_256, -1)`, which
+emits exactly that framing, then passes through `id.go:47` `hashFromMultihashBytes`, which
+re-decodes as a validation. Every inbound `content_hash` goes through the same validator
+(`codec.go:424`), so a malformed multihash fails at decode.
+
+Test: `id_test.go:57` `TestHashContentAlgorithm` asserts the id names `sha2-256`, so the
+algorithm is pinned rather than assumed; `verify_content.go:29` additionally refuses any
+multihash whose code is not SHA2-256 at verification time, exercised by
+`verify_content_test.go`. `TestPublishedClaimVectors` carries `content_hash_mismatch`.
+
+### V-SIGN — SKIPPED (verified earlier today)
+
+Rule: "Sign MUST be Ed25519 (RFC 8032). A `pubkey` is framed as the multicodec varint `0xed`
+… a signature as `0xd0ed` …"
+
+Covered by `sign_test.go`. Not re-checked. Distinct from V-SIG above.
+
+### V-ALIAS — VERIFIED
+
+Rule: "A well-known field name, a type class, a type subtype, and an encoding class or subtype
+MAY appear in its alias form: the reserved `.` followed by the letter @tbl:aliases and
+@tbl:encsub give it. … Each half of a type aliases on its own and occupies its own record key
+(`V-SER`) … A mapping MUST only be added, never changed."
+
+Code: the reserved `.` is applied at the wire boundary, not in the tables —
+`codec.go:111` `aliasToWire` returns `"." + alias` only where the table changes the value, and
+`codec.go:119` `aliasFromWire` de-aliases only a `.`-prefixed value. So a literal never
+collides with an alias, which is what the rule buys. The tables themselves hold bare letters
+(`node_taxonomy.go`, `edge_taxonomy.go`, `field_taxonomy.go:163`, `encoding_taxonomy.go`).
+
+I compared every letter against @tbl:aliases by hand:
+
+- type class: contribution `c`, source `s`, derivation `d`, entity `e`, relation `r` — all match.
+- type subtype: branch `b`, branches `B`, contributor `c`, diff `d`, head `h`, delete `x`,
+  expiry `e` — all match. `branch` and `diff` are edge-only in this repo, which the spec's own
+  caption allows, and `prune` is an edge subtype the spec lists.
+- field: name `n`, edges `e`, content `c`, content_size `s`, content_hash `h`, height `H`,
+  edges_diff_omit `E`, fields_diff_omit `F`, pubkey_valid_from `v`, pubkey_expires_after `x`,
+  delete_by `d` — all eleven match.
+- encoding class: application `a`, audio `A`, example `e`, font `f`, image `i`, message `m`,
+  model `l`, multipart `M`, text `t`, video `V` — all match.
+
+Test: `node_taxonomy_test.go:44,54` and `edge_taxonomy_test.go:14,22` round-trip every mapping
+and assert an open value passes through untouched; `node_taxonomy_test.go:73`
+`TestSubtypeAliasTablesAgree` sweeps A-z and fails if one letter decodes to two meanings
+across the node and edge halves — the check that matters, since one spec table is split
+across two Go files here; `node_taxonomy_test.go:100` `TestEdgeOnlySubtypesKeepTheirLetters`
+pins `b` and `d` where the node side dropped them.
+
+Note: append-only is asserted for the encoding subtype table by the spec's own prose ("56 of
+the 62 single-character slots are taken") but by nothing in this repo — no test pins a letter
+to a name for @tbl:encsub the way `TestRecordKeysMatchTheTable` pins the record keys. I did
+not audit all 56 encoding subtype letters; see "What I did not check".
+
+### V-DIFF — SKIPPED (verified earlier today)
+
+Covered by `claim_diff_rules_test.go` — four properties, each with a test that fires.
+Re-reading the rule text confirmed the wording the earlier round settled on. Not re-checked.
+
+### V-DIFFEDGE — SKIPPED (verified earlier today)
+
+Covered by `claim_diff_rules_test.go:194,215`. Not re-checked. Note that `SPEC-REPORT.md` at
+the repo root still carries an open recommendation to narrow V-DIFFEDGE's wording; the spec
+text I read today is unchanged, so that courier document is still awaiting the spec team.
+
+### V-ARCHIVE — SKIPPED (verified earlier today)
+
+Rule: "An archive's head MUST be a `contribution/branches` claim."
+Covered by `ruleArchiveHead` (`verify.go`) and `verify_spec_rules_test.go`. Not re-checked.
+
+### V-TABLEREF — SKIPPED (verified earlier today)
+
+Rule: "Only a `contribution/branches` claim may reference a `contribution/branches` claim, and
+only through its `contribution/diff` or `contribution/branches` edge."
+Covered by `ruleBranchTableReference` and `verify_spec_rules_test.go:59`
+`TestTableRefThroughOtherEdgeFails`. Not re-checked.
+
+### V-REL — UNTESTED
+
+Rule: "A `relation/*` edge MUST carry `relation_direction` of `1` (from) or `-1` (to); an edge
+of any other class MUST carry `0`."
+
+Code: `edge.go:138-146` — exactly the rule, both directions of it, at construction.
+
+Test: `edge_test.go:54` `TestNewEdgeRelationDirectionRequired`, `edge_test.go:62`
+`TestNewEdgeRelationDirectionOnNonRelation`, and `TestNewEdgeRelationValid` as the positive
+control. Those three make the verdict for the construction door.
+
+Note: UNTESTED rather than VERIFIED because of the other two doors. `decodeEdge`
+(`codec.go:448`) assigns `RelationDirection(ee.RelationDirection)` with no check, and
+`AssembleClaim` (`claim_assemble.go:95`) copies it through; no `verifyRules` entry examines it.
+A stored `derivation/*` edge carrying direction `1`, or a `relation/*` edge carrying `0`,
+verifies clean. The rule is one of the cheapest possible verifier checks — it needs no
+lookup at all.
+
+### V-PROV — UNTESTED
+
+Rule: "A `derivation/*`, `entity/*`, or `relation/*` node MUST carry at least one
+`derivation/*` edge."
+
+Code: `claim_helpers.go:136` `requiresProvenance` names exactly those three classes;
+`claim_builder.go:310` refuses such a claim without a `derivation/*` edge, and the
+auto-built `contribution/contributor` edge does not satisfy it.
+
+Test: `claim_builder_test.go:230` `TestProvenanceRequired` across all three classes, with
+`TestProvenanceSatisfied` and `TestSourceCarriesProvenance` as controls. Construction door only.
+
+Note: same shape as V-REL — no decode check, no assemble check, no verifier rule. This one
+needs only the claim's own edges, so it is as cheap as V-REL to add.
+
+---
+
+## Summary
+
+Counts over the twelve rules examined (the seven verified earlier today are SKIPPED, not
+given a verdict here):
+
+| verdict | count | rules |
+| --- | --- | --- |
+| VERIFIED | 7 | V-REF, V-ROOT, V-ID, V-SIG, V-HEIGHT, V-HASH, V-ALIAS |
+| UNTESTED | 4 | V-TYPE, V-CONTENT, V-REL, V-PROV |
+| GAP | 1 | V-TIME |
+| DIVERGENCE | 0 | — |
+| OUT OF SCOPE | 0 | — (no ADT rule belongs to another layer; every one of the nineteen is this library's) |
+| SKIPPED (not a task verdict) | 7 | V-SER, V-SIGN, V-DIFF, V-DIFFEDGE, V-TABLEREF, V-ARCHIVE, V-MONO |
+
+### Findings, in the order I would fix them
+
+1. **Four ADT rules are enforced at construction only** (V-TYPE, V-REL, V-PROV, and
+   V-CONTENT's XOR). Neither `DecodeClaim` nor `AssembleClaim` checks them and no
+   `verifyRules` entry does, so a record from another implementation or rebuilt out of neo4j
+   violates them and verifies clean. This is the same shape as the V-MONO gap closed today,
+   and it is four rules wide. V-REL and V-PROV need nothing but the claim's own edges, so both
+   are single-function verifier rules of the `ruleContentEncoding` kind. V-TYPE is as cheap.
+   Each needs a deliberately-violating fixture, since nothing the generator emits breaks them.
+
+2. **Two declared timestamps are never read as times** (V-TIME), and they are one fix.
+   `delete_by` is compared, copied and presence-checked as an opaque string, so a claim
+   scheduling its own deletion for `"whenever"` is accepted everywhere — and `R-DPLANNED`
+   depends on that date being readable. `pubkey_valid_from` / `pubkey_expires_after` are
+   parsed only inside `ruleKeyWindow`, which judges a claim against its signer, so a
+   contributor claim that signs nothing in the closure never has its own bounds parsed and
+   turns into a hard failure the moment it signs. Both want validating where the field is
+   written or decoded rather than where it happens to be consulted, plus a fixture carrying
+   an unparsable date for each.
+
+3. **`decodeNode` silently drops `content_hash` when a record carries both slots** (V-CONTENT).
+   The rule says MUST NOT carry both; the decoder resolves the ambiguity instead of refusing
+   it. Worth deciding deliberately: refuse at decode, or add a verifier rule, but not silence.
+
+4. **The encoding subtype alias table has no test pinning its letters** (V-ALIAS). @tbl:encsub
+   is append-only and 56 entries wide; `TestRecordKeysMatchTheTable` does exactly this job for
+   the record keys and has no counterpart here. A remapped letter changes what a stored claim
+   says, and nothing would catch it.
+
+5. **Stale signpost**: `graph_test.go:94` directs a reader to `universe_closure_test.go` for
+   the dangling-reference case; the file does not exist. The coverage lives in the published
+   vector set instead.
+
+6. **Three copies of the `V-TIME` layout string**: `codec.go:215` (the constant),
+   `codec.go:159` (a literal, three lines from the constant), and
+   `adapter/storage/neo4j/convert.go:206` (a second constant). One contractual format, three
+   places to change it.
+
+### What I did not check, and why
+
+- **The seven rules verified earlier today.** The task said to say I skipped them rather than
+  redo them, and I have, with the covering site named in each entry. I did re-read each rule's
+  text in the spec, which is how I can state above that V-DIFFEDGE's wording is unchanged.
+- **All 56 encoding subtype aliases in @tbl:encsub.** I checked the ten encoding CLASS letters
+  exhaustively and spot-read the subtype table; auditing every subtype letter against
+  `encoding_taxonomy.go` is a mechanical job better done as the test finding 4 asks for than by
+  eye in a report. Finding 4 stands whether or not the current letters are right.
+- **Whether any alias letter or record key was ever REMAPPED** rather than added. That is a
+  git-history question and I have no `git` in this workspace — only the hub's `sindri git`,
+  which shows this branch's changes rather than a file's history. What I can state is that the
+  current tables agree with the current spec tables where I compared them.
+- **`R-FIELDS`** (name/value/record size limits), which sits in the same spec section and is
+  visibly enforced at `claim_builder.go:219` and `field_taxonomy.go`, but is FREE rather than
+  FORCED and outside this task's list.
+- **Runtime behaviour.** This is a reading of the code against the rules; I ran no tests, since
+  the task is a report and the verdicts turn on what exists rather than on what passes today.

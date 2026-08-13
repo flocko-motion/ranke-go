@@ -149,7 +149,7 @@ func signer(seed string) ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(h[:])
 }
 
-// contributorClaim builds a root contributor: an initial node whose content is its
+// contributorClaim builds a root contributor: an initial claim whose content is its
 // own multikey pubkey (§5.7), signed by the key it publishes.
 func contributorClaim(ctx context.Context, priv ed25519.PrivateKey, at time.Time) (ranke.Claim, ranke.Contributor, error) {
 	pub, err := ranke.EncodePublicKey(priv.Public())

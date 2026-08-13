@@ -14,10 +14,10 @@ import (
 	"strings"
 )
 
-// queryTraverse walks the Select's Path one step at a time within closure(origin),
-// returning the claims reached that conf admits and, when needPaths is set, each
-// claim's route. Only the first step can pass through claims outside the scope,
-// since every later step expands from what the previous one collected.
+// queryTraverse walks the Select's Path a step at a time within closure(origin),
+// returning the claims reached that conf admits and each route when needPaths is set.
+// Only the first step passes through claims outside the scope, since every later one
+// expands from what the previous collected.
 func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, conf *confinement, needPaths bool, rc *reportCollector) ([]Claim, map[string][]Claim, error) {
 	steps := sel.Path
 	if len(steps) == 0 {
@@ -27,6 +27,7 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, conf 
 	startAt := reportStart(rc)
 	frontier, err := walkStart(ctx, u, sel.Claim, origin, conf, rc)
 	if err != nil {
+		// A step always follows, so walkStart's output is a frontier, never an answer.
 		return nil, nil, err
 	}
 	rc.timed("native", "load-start", ReportInfo, startAt, "", map[string]any{"claims": len(frontier)})
@@ -61,7 +62,12 @@ func queryTraverse(ctx context.Context, u Universe, sel Select, origin Id, conf 
 		stepStart := reportStart(rc)
 		reached, err = queryWalkStep(ctx, u, frontier, step, incoming, routes, conf, needPaths, rc)
 		if err != nil {
-			return nil, nil, err
+			// Only the last step's output answers the query, so a partial one is the
+			// bounded answer (`R-QLIMIT`); an earlier step's frontier is not one.
+			if i < len(steps)-1 {
+				return nil, routes, err
+			}
+			return reached, routes, err
 		}
 		rc.timed("native", "step", ReportInfo, stepStart, "", map[string]any{"index": i, "edges": step.Edges, "dir": string(step.Dir), "depth": step.Max, "reached": len(reached)})
 		frontier = reached
@@ -177,7 +183,7 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 
 	for hop := 0; len(level) > 0; hop++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return out, err // partial, so a bounded read keeps what it reached
 		}
 		if step.Max > 0 && hop >= step.Max {
 			break
@@ -221,7 +227,9 @@ func queryWalkStep(ctx context.Context, u Universe, frontier []Claim, step PathS
 					ref := e.Reference()
 					child, err := GetClaim(ctx, u, ref)
 					if err != nil {
-						return nil, WrapDetail(errQuery, "traverse "+ref.String(), err)
+						// A ctx-respecting backend surfaces the deadline here rather than at
+						// the hop-loop head, so this path carries the partial set too.
+						return out, WrapDetail(errQuery, "traverse "+ref.String(), err)
 					}
 					rc.log("native", "fetch", ReportTrace, ref.String(), nil)
 					consider(cur, child)

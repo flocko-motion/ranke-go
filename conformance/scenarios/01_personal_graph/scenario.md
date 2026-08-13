@@ -20,7 +20,7 @@ Run from anywhere:
 
 ## Steps
 
-### 1. Alice as initial node, signed by her Ed25519 key. Her content is her multikey-encoded public key (§5.7). She is the Sequencer's self, stored at bootstrap, so she does not join the contribution batch.
+### 1. Alice as initial claim, signed by her Ed25519 key. Her content is her multikey-encoded public key (§5.7). She is the Sequencer's self, stored at bootstrap, so she does not join the contribution batch.
 
 ### 2. Ingest the two source emails.
 

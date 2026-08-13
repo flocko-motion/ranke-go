@@ -22,7 +22,7 @@ type ClaimParts struct {
 	Type          string            // "class/sub"
 	Encoding      string            // "class/sub", or "" when there is no content
 	CreatedAt     time.Time         // must retain nanosecond precision to re-encode identically
-	Height        uint64            // §4.1 generation number (0 for an initial node); part of the id-preimage
+	Height        uint64            // §4.1 generation number (0 for an initial claim); part of the id-preimage
 	ContentHash   Id                // nil when the claim carries no content
 	ContentSize   uint64            //
 	InlineContent []byte            // present for inline content; omitted for external
@@ -57,6 +57,16 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if err != nil {
 		return nil, WrapDetail(errAssemble, "type", err)
 	}
+	// `V-CONTENT` forbids both slots. It matters most here: these parts carry no
+	// canonical bytes, so a claim built from both re-encodes to neither record.
+	if len(parts.InlineContent) > 0 && parts.ContentHash != nil {
+		return nil, WrapDetail(errAssemble, "content", ErrContentBothSlots)
+	}
+	// `V-TIME`: these fields arrive as an unparsed string map, and this door is the
+	// only one a graph-native rebuild passes through.
+	if err := checkTimestampFields(parts.Fields); err != nil {
+		return nil, WrapDetail(errAssemble, "fields", err)
+	}
 	n := &node{
 		typeClass:   NodeClass(nClass),
 		typeSub:     nSub,
@@ -84,6 +94,12 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		class, sub, err := splitType(ep.Type)
 		if err != nil {
 			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" type", err)
+		}
+		if len(ep.InlineContent) > 0 && ep.ContentHash != nil {
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" content", ErrContentBothSlots)
+		}
+		if err := checkTimestampFields(ep.Fields); err != nil {
+			return nil, WrapDetail(errAssemble, "edge "+strconv.Itoa(i)+" fields", err)
 		}
 		e := &edge{
 			reference:         ep.Reference,

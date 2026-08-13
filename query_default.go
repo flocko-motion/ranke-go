@@ -112,12 +112,25 @@ func tagConfinement(ctx context.Context, u Universe, scope Scope) (*confinement,
 	return &confinement{root: scope.Head, tagKey: key, height: scope.Height}, nil
 }
 
+// frontier is the claim a read starts from: the anchor `R-QANCHOR` names, else the
+// origin. An anchor supersedes the Head, which matches `R-QHEAD`'s intersection while
+// `R-QANCHOR`'s MUST holds — that the anchor lies inside the closure, unchecked here.
+func frontier(sel Select, origin Id) Id {
+	if sel.Claim != nil {
+		return sel.Claim
+	}
+	return origin
+}
+
 // DefaultQuery is the reference implementation of Universe.Query, reading only through
 // the public Universe API: walk the closure, materialise, filter, order, limit, shape.
 func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (ResultStream, error) {
 	start := time.Now()
 	ctx, rc, createdReport := beginReport(ctx, q.Execution.Report, start)
 	rc.log("native", "select", ReportInfo, "", map[string]any{"branch": q.Select.Branch})
+	// outer outlives the budget, so a deadline reached under it is the caller's
+	// cancellation and a deadline reached only under ctx is limit.time running out.
+	outer := ctx
 	if q.Limit.Time > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, q.Limit.Time)
@@ -135,22 +148,32 @@ func DefaultQuery(ctx context.Context, u Universe, q Query, scope Scope) (Result
 	needPaths := q.Output.Shape == ShapePath
 	sel := q.Select
 	if len(sel.Path) == 0 {
-		// A scan: the scope's claim set, one unbounded step from the origin inward,
-		// the origin itself included.
-		sel.Claim = origin
-		sel.Path = []PathStep{{Min: Hops(0)}}
+		sel.Claim = frontier(sel, origin)
+		sel.Path = []PathStep{{Min: Hops(0)}} // the frontier's outward closure (`R-QSTEPS`)
 		needPaths = false
 	}
 	reached, routes, err := queryTraverse(ctx, u, sel, origin, conf, needPaths, rc)
-	if err != nil {
+	// limit.time running out bounds the answer rather than failing it (`R-QLIMIT`),
+	// so the read keeps what it reached and says it was cut short. The caller's own
+	// cancellation is still an error, which is what outer distinguishes.
+	bounded := err != nil && q.Limit.Time > 0 && outer.Err() == nil &&
+		errors.Is(err, context.DeadlineExceeded)
+	if err != nil && !bounded {
 		return nil, err
 	}
-	return finishReached(ctx, u, q, reached, routes, rc, createdReport)
+	if bounded {
+		rc.log("native", "limit", ReportInfo, "",
+			map[string]any{"time": q.Limit.Time.String(), "truncated": true})
+	}
+	// Shaping what the traversal reached runs under outer: the budget bounds the
+	// read, and the answer it produced still has to be returned.
+	return finishReached(outer, u, q, reached, routes, bounded, rc, createdReport)
 }
 
 // finishReached is the reference post-traversal pipeline (Where, sort, limit, shape)
-// over an already-generated set; it finalises the report this call created.
-func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, routes map[string][]Claim, rc *reportCollector, createdReport bool) (ResultStream, error) {
+// over an already-generated set; it finalises the report this call created. bounded
+// carries a truncation the traversal already suffered, which limit.results then joins.
+func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, routes map[string][]Claim, bounded bool, rc *reportCollector, createdReport bool) (ResultStream, error) {
 	filterStart := reportStart(rc)
 	var filtered []Claim
 	for _, c := range reached {
@@ -165,7 +188,7 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	sortResults(filtered, q.Order)
 	rc.timed("native", "sort", ReportInfo, sortStart, "", map[string]any{"ordered": len(q.Order) > 0})
 
-	truncated := false
+	truncated := bounded
 	if q.Limit.Results > 0 && len(filtered) > q.Limit.Results {
 		filtered = filtered[:q.Limit.Results]
 		truncated = true
@@ -201,9 +224,11 @@ func finishReached(ctx context.Context, u Universe, q Query, reached []Claim, ro
 	rc.log("native", "results", ReportInfo, "", map[string]any{"results": len(results)})
 	var report *QueryReport
 	if createdReport {
+		// Finalised before the report joins the sequence, so Results counts the results
+		// it reports on and not itself.
 		report = rc.finalize(len(results), truncated)
 	}
-	return &sliceStream{results: results, report: report}, nil
+	return &sliceStream{results: AppendReport(results, report)}, nil
 }
 
 // --- Where evaluation ------------------------------------------------------
@@ -466,11 +491,11 @@ func compareValues(a, b any, col Collation) int {
 	}
 }
 
-// sliceStream is the reference ResultStream: a materialised slice, one item at a time.
+// sliceStream is the reference ResultStream: a materialised slice, one element at a
+// time, the report among them where one was asked for.
 type sliceStream struct {
 	results []QueryResult
 	i       int
-	report  *QueryReport
 }
 
 func (s *sliceStream) Next() bool {
@@ -481,7 +506,7 @@ func (s *sliceStream) Next() bool {
 	return false
 }
 func (s *sliceStream) Result() QueryResult  { return s.results[s.i-1] }
-func (s *sliceStream) Report() *QueryReport { return s.report }
+func (s *sliceStream) Report() *QueryReport { return ReportOf(s.results) }
 func (s *sliceStream) Err() error           { return nil }
 func (s *sliceStream) Close() error         { return nil }
 

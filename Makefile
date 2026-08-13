@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall test test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -36,6 +36,15 @@ BINDIR ?= $(HOME)/.local/bin
 # Packages run in parallel — internal/exclusive locks the shared services.
 GOTEST ?= go test
 
+# The rows the fast gate asks for: the backends that need no service, so it has
+# nothing to skip. RANKE_ROWS carries the set to the Go layer
+# (-> tests/backends.Requested); test/full leaves it unset, which means all of them.
+FAST_ROWS ?= mem,fs,sqlite
+
+# The benchmark's size under test/full — the claim count per backend. Bigger is a
+# deliberate run: `make test/performance/2000`.
+FULL_PERF_SIZE ?= 800
+
 # Foundational papers live in the ranke-graph repo. `make docs` pulls a
 # fresh copy into docs/papers/ for local reference; the directory is
 # gitignored and never committed — always fetched, never vendored.
@@ -45,9 +54,10 @@ PAPERS_DIR       := docs/papers
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
-# Default target: build, run unit tests, run every scenario, and
-# assert the scenarios are byte-deterministic + docs are in sync.
-all: build test verify-scenarios verify-docs
+# Default target: the static gates (build, gofmt, lint, rule citations, scenario
+# bundles) plus the fast test gate. The full suite is a deliberate ask —
+# `make test/full` — since it needs every service up.
+all: verify test
 
 # Build all binaries into bin/: the ranke CLI, the ranke-test harness,
 # and the scenariodoc generator.
@@ -99,12 +109,12 @@ test/integration:
 	echo "  $(RANKE_FS_DIR)"
 
 # test/matrix — the cross-backend conformance matrix: build the same
-# deterministic archive into every backend that can run here and assert each
-# one answers the whole RQL corpus exactly as the mem reference does. Rows
-# needing a service that is not up skip themselves, so this is green on a bare
-# checkout and grows teeth as services come up:
-#   services/neo4j.sh native up    # adds the neo4j/mem row
-#   services/redis.sh native up    # adds the redis row
+# deterministic archive into every backend the run asks for and assert each one
+# answers the whole RQL corpus exactly as the mem reference does. RANKE_ROWS names
+# the set (default: all of them), and the services they need come up with:
+#   services/neo4j.sh native up    # the neo4j/mem row
+#   services/redis.sh native up    # the redis row
+#   services/s3.sh native up       # the s3 row, and the neo4j/redis/s3 stack
 # Verbose so the per-row, per-query sub-tests are visible.
 test/matrix:
 	$(GOTEST) ./tests/matrix/ -v -count=1
@@ -127,10 +137,56 @@ test/performance/%:
 test/vectors:
 	go test ./tests/ -run TestPublished -v -count=1
 
-# test — the layers in order of foundation: the datatype, then the spec's artifacts,
-# then the feature suite, then cross-backend agreement (which skips the rows whose
-# services aren't up).
-test: test/core test/vectors test/integration test/matrix
+# test — the fast gate, and one pass over every package: the datatype, the feature
+# suite, every adapter, and cross-backend agreement over the rows that need no
+# service. Each package runs once, so the cache works and an untouched tree re-runs
+# in seconds. It asks for nothing it cannot have — no service rows, so there is
+# nothing to skip and no green covering a backend that never ran.
+#
+# What it deliberately does not do: the performance benchmark, the 10k-claim scale
+# set, and the service rows. `make test/full` is where those live.
+test:
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_ROWS=$(FAST_ROWS) $(GOTEST) ./...
+
+# test/full — everything, and the target CI runs, so the gate and the local run are
+# the same thing. Every backend row is REQUIRED: RANKE_ROWS is unset, so the matrix
+# and the benchmark ask for all of them, and a row that cannot open fails the run
+# rather than skipping. Also the benchmark, the scale set, and the scenario bundles
+# with their docs.
+#
+# Needs the services up (services/{neo4j,redis,s3}.sh native up) and the spec
+# fetched (make docs). The 30m timeout is per package: the matrix and the benchmark
+# are minutes each against live services, well past go test's 10m default.
+#
+# WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
+# which `make clean` owns and .gitignore covers.
+# Guarded because it is minutes, CI runs it on every push, and it was being reached
+# for during ordinary work where `make test` was the answer. CI passes the guard by
+# being CI; a person passes it by saying so.
+test/full: full-intended
+	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_PERF_SIZE=$(FULL_PERF_SIZE) RANKE_SCALE=1 \
+		$(GOTEST) -timeout 30m ./...
+	@$(MAKE) verify-scenarios verify-docs
+
+# full-intended stops a slow run nobody meant to start. GITHUB_ACTIONS and CI are
+# set by a runner; RANKE_FULL is a person saying they mean it.
+full-intended:
+	@if [ -z "$$GITHUB_ACTIONS$$CI$$RANKE_FULL" ]; then \
+		echo ""; \
+		echo "  make test/full takes MINUTES: every backend row, the benchmark, the"; \
+		echo "  10k-claim scale set, the scenario bundles and their docs."; \
+		echo ""; \
+		echo "  During regular work you want:   make test      (seconds)"; \
+		echo "  CI runs test/full on every push, so the slow run happens anyway."; \
+		echo ""; \
+		echo "  Run it yourself ONLY when you touched what the fast gate leaves out —"; \
+		echo "  a service-backed row, the benchmark, the scale set, a scenario bundle."; \
+		echo "  Then say so, on whichever target you meant:"; \
+		echo ""; \
+		echo "      RANKE_FULL=1 make $(firstword $(MAKECMDGOALS))"; \
+		echo ""; \
+		exit 1; \
+	fi
 
 test-verbose:
 	$(GOTEST) -v ./tests/...
@@ -193,12 +249,16 @@ scenarios:
 
 # Run each scenario fresh and diff the produced bundle against the committed
 # reference: same claims under the same ids, same branch heads at the same heights.
+# Wired into `verify`, so anything that moves an id fails here first — the ids are
+# signatures, and the reference bundle is the only thing holding them to a value.
 #
 # B_h is compared on its id and height columns only. Its third column is the wall
 # clock at which a head was committed, so a byte diff of it can never pass — the
 # timeline records when, which is exactly the part that does not reproduce.
 #
-# Update after an intentional change: `make update-references`.
+# Update after an intentional change: `make update-references`. Regenerating is
+# not the same as checking: the bundle is self-generated, so promote it only
+# after reading what changed and confirming each scenario still verifies clean.
 verify-scenarios:
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
@@ -289,16 +349,43 @@ docs-clean:
 lint:
 	brokkr lint
 
-# Quick quality gate: build the binaries, check formatting, and run the lint
-# gate — the fast "does it compile, is it gofmt-clean, does it pass lint"
-# without vet or the full test suite (-> check).
-verify: build fmt-check lint
+# Rule-citation gate: every backticked `V-…`/`R-…` id a comment cites is one the
+# spec declares, and every declared rule is either cited or listed in
+# scripts/rule-citations.allow with a reason. It says nothing about whether a
+# citation is TRUE — only that the ids exist and are accounted for.
+#
+# The spec comes from $(PAPERS_DIR), or from RANKE_SPEC when you are working
+# against a copy of your own:  make rule-citations RANKE_SPEC=path/to/spec.typ
+rule-citations:
+	@./scripts/rule-citations.sh
 
-# One-shot "is everything green": compile all packages, vet, lint, and
-# run the FULL test suite (feature suite + every adapter's conformance
-# test), not just ./tests/... like `make test`.
-check:
-	go build ./...
-	go vet ./...
-	brokkr lint
-	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) ./...
+# The static gates: build the binaries, check formatting, run the lint gate, check
+# rule citations, and reproduce the scenario bundles. Everything that reads the tree
+# rather than running the suite — the tests are `test` (fast) and `test/full`
+# (everything). Around 2s on top of the build.
+#
+# Needs the spec: rule-citations reads $(PAPERS_DIR), which is gitignored, so on
+# a fresh clone `make verify` fails until `make docs` has fetched the papers. A
+# gate that cannot see the spec cannot check it, and a skip would turn green
+# exactly where it is blind.
+#
+# WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
+# which `make clean` owns and .gitignore covers — no hand-written file is touched,
+# but a bundle you were reading is rebuilt under you. It is here because the
+# scenario references are checked nowhere a change is made: CI checks them
+# (.github/workflows/ci.yml), which is a verdict arriving after the work has left
+# the desk, and that is how the 0.18.0 signature framing landed against a bundle
+# it had invalidated. `release` depends on this target, so an id-moving release
+# now stops here rather than shipping a reference that reproduces nothing.
+verify: build fmt-check lint rule-citations verify-scenarios
+
+# One-shot "is everything green", and the name people reach for, so it costs what
+# that name promises: the static gates, vet, and the fast suite. Seconds. The full
+# suite against live services is `RANKE_FULL=1 make test/full`, which CI runs on
+# every push.
+check: verify vet test
+
+# check/full — check with the full suite instead of the fast one: the gate CI runs,
+# and what to run by hand before a release. Guarded through test/full, so it needs
+# GITHUB_ACTIONS, CI or RANKE_FULL.
+check/full: verify vet test/full
