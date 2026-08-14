@@ -70,6 +70,7 @@ func TestGenerateCornersPresent(t *testing.T) {
 	require.NotEmpty(t, m.Derivations, "derivations")
 	require.NotNil(t, m.HighDegree, "a high-degree derivation")
 	require.NotEmpty(t, m.Entities, "entities")
+	require.NotEmpty(t, m.HandMade, "entities carrying no derivation edge")
 	require.NotEmpty(t, m.Relations, "relations")
 	require.NotNil(t, m.DiffChainHead, "a long diff chain")
 	require.NotEmpty(t, m.Expiries, "contribution/expiry claims (key expiry)")

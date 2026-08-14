@@ -224,10 +224,10 @@ func TestSignedContributorForwarding(t *testing.T) {
 
 // --- attribution, which is what provenance means here -------------------
 
-// TestProvenanceSatisfied: these classes build carrying a derivation/* edge to a
-// source. Once the edge was optional this stopped being a requirement's control and
-// became the other bound — citing a source stays legal.
-func TestProvenanceSatisfied(t *testing.T) {
+// TestDerivationEdgeBuildsOnEveryClass: these classes build carrying a derivation/*
+// edge to a source. Once the edge was optional this stopped being a requirement's
+// control and became the other bound — citing a source stays legal.
+func TestDerivationEdgeBuildsOnEveryClass(t *testing.T) {
 	ctr := contributor(t)
 	source := srcClaim(t, ctr, "the source")
 	for _, typ := range []string{

@@ -109,7 +109,9 @@ func SpecForSize(seed int64, size int) Spec {
 const spineClaims = 350
 
 // SpecForNodes scales an archive to roughly nodes total claims, as the CLI's
-// --size (1k, 1m, …) does: content claims run ~5× the size unit, plus spine.
+// --size (1k, 1m, …) does: content claims run ~5.2× the size unit, plus spine. The
+// divisor below stays 5, so the count overshoots by about 4% — Size is a dimension,
+// not a promise (-> tests/performance/harness.go).
 func SpecForNodes(seed int64, nodes int) Spec {
 	s := SpecForSize(seed, clampMin((nodes-spineClaims)/5, 1))
 	s.Size = nodes // the headline reflects the requested node count, not the unit

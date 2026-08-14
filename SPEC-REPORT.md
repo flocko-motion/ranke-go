@@ -79,10 +79,13 @@ accounted for. Seventeen of those cited here are still rules:
 `V-ALIAS` `V-ARCHIVE` `V-CONTENT` `V-DIFF` `V-DIFFEDGE` `V-HASH` `V-HEIGHT` `V-ID`
 `V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TABLEREF` `V-TIME` `V-TYPE`
 
-`V-MONO` is the nineteenth, uncited because unenforced — see above. The eighteenth,
-a derivation requirement on semantic claims, was withdrawn from the spec after this
-report and its enforcement removed (sd-7fe3b2); its id is deliberately not repeated
-here, since a withdrawn rule left in a list reads as one that still exists.
+`V-MONO` is the nineteenth, uncited because unenforced — see above.
+
+`V-PROV` was the eighteenth and is **withdrawn**: a derivation edge is a recommended
+practice for automatic extraction, not a requirement, and enforcement was removed in
+sd-7fe3b2. Named rather than omitted, so a reader who meets the id in an older record
+finds out here that it is gone — the failure mode being someone re-adding it as a
+missing check. `rule-citations` scans `*.go`, so naming it here breaks no gate.
 
 Two of the eighteen are cited where they are implemented rather than verified, worth
 knowing if the citation set is ever read as a verification inventory: `V-ALIAS` at the
