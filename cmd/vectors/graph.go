@@ -58,8 +58,9 @@ func (g *gen) toyGraph(ctx context.Context) error {
 	return g.secondContributor(ctx)
 }
 
-// derived adds a claim citing the note through a derivation edge, so the provenance
-// invariant (§3.5) and height = 1 + max(refs) are both exercised.
+// derived adds a claim citing the note through a derivation edge, which exercises
+// height = 1 + max(refs). Citing a source is a practice, not a requirement, so the
+// edge's presence is what this case shows and nothing rests on it.
 func (g *gen) derived(who ranke.Contributor, note ranke.Claim) error {
 	e, err := ranke.NewEdge(ranke.EdgeConfig{
 		Reference: note.ID(),

@@ -131,26 +131,6 @@ func HeightOf(refs ...Claim) uint64 {
 	return max + 1
 }
 
-// requiresProvenance reports whether claims of this class need at least
-// one derivation/* edge (§3.5, `V-PROV`).
-func requiresProvenance(c NodeClass) bool {
-	switch c {
-	case NodeClassDerivation, NodeClassEntity, NodeClassRelation:
-		return true
-	}
-	return false
-}
-
-// hasDerivationEdge reports whether edges contains a derivation/* edge.
-func hasDerivationEdge(edges []*edge) bool {
-	for _, e := range edges {
-		if e.typeClass == EdgeClassDerivation {
-			return true
-		}
-	}
-	return false
-}
-
 // asConcreteEdge unwraps an Edge into the concrete *edge, rejecting nil.
 func asConcreteEdge(e Edge) (*edge, error) {
 	if e == nil {

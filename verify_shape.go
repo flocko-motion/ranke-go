@@ -1,8 +1,8 @@
 // package: ranke / verify
 // type:    logic
 // job:     the per-claim rules read off a claim's own shape — `V-TYPE` type classes, `V-REL`
-// relation_direction, `V-PROV` provenance, `R-DREQUEST` a delete mark's target — the
-// first three enforced at construction too, the fourth only from here
+// relation_direction, `R-DREQUEST` a delete mark's target — the first two enforced at
+// construction too, the third only from here
 // limits:  needs no Universe read and no reference resolution, so it judges a record that
 // arrived as bytes or through AssembleClaim as readily as one this library built
 package ranke
@@ -37,21 +37,6 @@ func ruleRelationDirection(_ context.Context, e Edge, _ *claimUnderVerification)
 		return WithDetail(ErrRelationDirection, e.Type())
 	}
 	return nil
-}
-
-// ruleProvenance: `V-PROV` — a derivation/*, entity/* or relation/* node carries at
-// least one derivation/* edge. A contribution/contributor edge does not satisfy it.
-func ruleProvenance(_ context.Context, t *claimUnderVerification) error {
-	n := t.claim.Node()
-	if !requiresProvenance(NodeClass(n.TypeClass())) {
-		return nil
-	}
-	for _, e := range t.claim.Edges() {
-		if e.TypeClass() == EdgeClassDerivation {
-			return nil
-		}
-	}
-	return WithDetail(ErrProvenanceMissing, n.Type())
 }
 
 // ruleDeleteMarkShape: `R-DREQUEST` — a contribution/delete claim documents a deletion

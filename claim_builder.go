@@ -271,8 +271,8 @@ func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, st
 }
 
 // assembleEdges builds the edge set (caller edges, the auto contributor edge, a
-// diff edge), enforces diff naming, cardinality and §3.5 provenance, and returns
-// the edges in canonical (raw-multihash) order.
+// diff edge), enforces diff naming and cardinality, and returns the edges in
+// canonical (raw-multihash) order.
 func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	edges := make([]*edge, 0, len(cfg.Edges)+1)
 	for _, e := range cfg.Edges {
@@ -306,9 +306,6 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	}
 	if err := checkEdgeCardinality(edges); err != nil {
 		return nil, err
-	}
-	if requiresProvenance(cfg.TypeClass) && !hasDerivationEdge(edges) {
-		return nil, WithDetail(errProvenanceRequired, string(cfg.TypeClass)+"/"+cfg.TypeSub)
 	}
 	sort.SliceStable(edges, func(i, j int) bool {
 		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0

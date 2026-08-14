@@ -38,6 +38,7 @@ type Manifest struct {
 	Sources      []ranke.Id
 	Derivations  []ranke.Id
 	Entities     []ranke.Id
+	HandMade     []ranke.Id // entity claims carrying no derivation edge
 	Relations    []ranke.Id
 
 	DiffChainHead ranke.Id   // head of the longest contribution/diff chain
@@ -75,6 +76,7 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	b.diffChain()
 	b.derivations()
 	b.entities()
+	b.handMadeEntities()
 	b.relations()
 	b.expiries()
 	b.deletes()
@@ -297,8 +299,8 @@ func (b *builder) diffChain() {
 		Sign())
 	prev := base
 	for r := 1; r <= b.spec.DiffChainLen && prev != nil && b.err == nil; r++ {
-		// Each revision re-affirms its §3.5 derivation/source edge, checked per
-		// delta, under a stable name so it stays one edge through the chain.
+		// Each revision restates its derivation/source edge under a stable name, so
+		// it stays one edge through the chain rather than accumulating.
 		re, err := ranke.NewEdge(ranke.EdgeConfig{
 			Reference: src.ID(),
 			Type:      ranke.TypeDerivation("source"),
@@ -357,8 +359,26 @@ func (b *builder) derivations() {
 	}
 }
 
-// entities builds spec.Entities entity/* claims, each with a derivation edge
-// to a source (the §3.5 provenance a semantic claim requires).
+// handMadeEntities builds spec.HandMadeEntities entity/* claims carrying no
+// derivation edge — the shape a person typing an entity in produces, legal since the
+// derivation requirement went. Attribution still holds: the contributor edge is
+// auto-built, so these are attributed without citing anything.
+func (b *builder) handMadeEntities() {
+	for i := 0; i < b.spec.HandMadeEntities && b.err == nil; i++ {
+		c := b.add(ranke.NewClaim(ranke.TypeEntity("person"), b.who(i)).
+			WithInlineContent([]byte("hand-made " + nameFor(b.spec.Seed, i))).
+			WithEncoding(ranke.EncodingPlain).
+			WithCreatedAt(b.clock.Tick()).
+			WithHeight(ranke.HeightOf(b.who(i))).
+			Sign())
+		if c != nil {
+			b.manifest.HandMade = append(b.manifest.HandMade, c.ID())
+		}
+	}
+}
+
+// entities builds spec.Entities entity/* claims, each with a derivation edge to a
+// source — the citation an extraction pipeline has and a person does not.
 func (b *builder) entities() {
 	for i := 0; i < b.spec.Entities && len(b.srcClaims) > 0 && b.err == nil; i++ {
 		src := b.srcClaims[i%len(b.srcClaims)]

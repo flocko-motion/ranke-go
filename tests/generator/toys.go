@@ -55,6 +55,15 @@ func ToyUnwiredEntity(seed int64) Spec {
 	return s
 }
 
+// ToyHandMadeEntity is the smallest archive holding an entity that cites nothing —
+// no derivation edge, only the contributor edge every claim carries. A read looking
+// for provenance-by-derivation finds none here and the claim is still valid.
+func ToyHandMadeEntity(seed int64) Spec {
+	s := toyBase(seed)
+	s.HandMadeEntities = 1
+	return s
+}
+
 // ToyExternalContent is the smallest archive whose source content lives in the
 // Universe by hash rather than inline — the content a projection layer must serve
 // from a durable tier.

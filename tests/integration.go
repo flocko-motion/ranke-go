@@ -142,8 +142,8 @@ func (f *fixture) email(t *testing.T, ctr ranke.Contributor, from, to, body stri
 	return c
 }
 
-// entity builds an entity/<sub> claim with a derivation/source edge back to
-// source (the §3.5 provenance a semantic claim requires).
+// entity builds an entity/<sub> claim with a derivation/source edge back to source —
+// the extraction-pipeline shape, which cites what it read.
 func (f *fixture) entity(t *testing.T, ctr ranke.Contributor, sub, label string, source ranke.Claim) ranke.Claim {
 	t.Helper()
 	de, err := ranke.NewEdge(ranke.EdgeConfig{Reference: source.ID(), Type: ranke.TypeDerivation("source")})

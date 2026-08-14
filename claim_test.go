@@ -228,8 +228,7 @@ func TestClaimRoundTrip_InlineContentNodeAndEdges(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	// A derivation/source edge that itself carries inline content — the
-	// provenance edge an entity claim requires (§3.5).
+	// A derivation/source edge that itself carries inline content.
 	provEdge, err := NewEdge(EdgeConfig{
 		Reference:     source.ID(),
 		Type:          TypeDerivation("source"),

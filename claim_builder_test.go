@@ -222,25 +222,11 @@ func TestSignedContributorForwarding(t *testing.T) {
 // Construction guarantees — invariants ClaimBuilder.Sign enforces.
 // ============================================================
 
-// --- §3.5 provenance invariant -----------------------------------------
+// --- attribution, which is what provenance means here -------------------
 
-// TestProvenanceRequired: derivation/*, entity/*, and relation/* claims —
-// interpretations of existing claims — must cite at least one derivation/*
-// edge. The auto-built contribution/contributor edge does NOT satisfy it.
-func TestProvenanceRequired(t *testing.T) {
-	ctr := contributor(t)
-	for _, typ := range []string{
-		TypeDerivation("summary"),
-		TypeEntity("person"),
-		TypeRelation("likes"),
-	} {
-		_, err := NewClaim(typ, ctr).WithInlineContent([]byte("...")).WithHeight(HeightOf(ctr)).Sign()
-		require.Error(t, err, "%s without a derivation/* edge must be rejected (§3.5)", typ)
-	}
-}
-
-// TestProvenanceSatisfied: the same claims build fine once they carry a
-// derivation/* edge to a source (the positive control for §3.5).
+// TestProvenanceSatisfied: these classes build carrying a derivation/* edge to a
+// source. Once the edge was optional this stopped being a requirement's control and
+// became the other bound — citing a source stays legal.
 func TestProvenanceSatisfied(t *testing.T) {
 	ctr := contributor(t)
 	source := srcClaim(t, ctr, "the source")
@@ -259,17 +245,27 @@ func TestProvenanceSatisfied(t *testing.T) {
 	}
 }
 
-// TestSourceCarriesProvenance: a source/* claim needs no derivation/* edge
-// (it is an external artifact, not an interpretation of other claims), but
-// it is NOT provenance-free — it still carries a contribution/contributor
-// edge naming who ingested it. Provenance is universal (§4.5); only the
-// initial claim is exempt (see TestInitialClaimMayLackProvenance).
-func TestSourceCarriesProvenance(t *testing.T) {
+// TestEveryClassCarriesItsContributor: this was source/*'s test alone, and it read as
+// "source is the class that needs no derivation edge" — a negative control that went
+// vacuous the moment every class stopped needing one. What it actually pins survives
+// and now covers all of them: `V-ROOT`'s contributor edge is on every claim, so a
+// claim citing no source is still attributed to whoever made it.
+func TestEveryClassCarriesItsContributor(t *testing.T) {
 	ctr := contributor(t)
-	c, err := NewClaim(TypeSource("note"), ctr).WithInlineContent([]byte("x")).WithEncoding(EncodingPlain).WithHeight(HeightOf(ctr)).Sign()
-	require.NoError(t, err, "source/* builds without a derivation edge")
-	require.Len(t, c.Edges(EdgeFilterType{Type: EdgeTypeContributor}), 1,
-		"a source claim still carries its contribution/contributor edge — its provenance")
+	for _, typ := range []string{
+		TypeSource("note"),
+		TypeDerivation("summary"),
+		TypeEntity("person"),
+		TypeRelation("likes"),
+	} {
+		t.Run(typ, func(t *testing.T) {
+			c, err := NewClaim(typ, ctr).WithInlineContent([]byte("x")).
+				WithEncoding(EncodingPlain).WithHeight(HeightOf(ctr)).Sign()
+			require.NoError(t, err, "%s builds without a derivation edge", typ)
+			require.Len(t, c.Edges(EdgeFilterType{Type: EdgeTypeContributor}), 1,
+				"%s still names who made it", typ)
+		})
+	}
 }
 
 // TestInitialClaimMayLackProvenance: a contribution/contributor claim MAY
@@ -414,7 +410,7 @@ func TestClaimDiffRestatesNodeChanges(t *testing.T) {
 // TestClaimDiffAddsEdges: a diff adds new edges alongside the diff edge —
 // edges participate in the overlay just as node content does. The added
 // edge is NAMED, since a diff claim's edges are overlaid by name (see
-// TestClaimDiffRejectsUnnamedEdge). The derivation/* edge also satisfies §3.5.
+// TestClaimDiffRejectsUnnamedEdge).
 func TestClaimDiffAddsEdges(t *testing.T) {
 	alice := contributor(t)
 	pred := srcClaim(t, alice, "v1")

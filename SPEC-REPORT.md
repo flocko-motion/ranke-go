@@ -73,14 +73,16 @@ and needs its own tests.
 
 ## Coverage
 
-Against ranke-graph 0.16.2, which took the `V-*` set from 17 to 19. All 19 are
-accounted for. Eighteen are cited in the code:
+Against ranke-graph 0.16.2, which took the `V-*` set from 17 to 19. All 19 were
+accounted for. Seventeen of those cited here are still rules:
 
 `V-ALIAS` `V-ARCHIVE` `V-CONTENT` `V-DIFF` `V-DIFFEDGE` `V-HASH` `V-HEIGHT` `V-ID`
-`V-PROV` `V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TABLEREF` `V-TIME`
-`V-TYPE`
+`V-REF` `V-REL` `V-ROOT` `V-SER` `V-SIG` `V-SIGN` `V-TABLEREF` `V-TIME` `V-TYPE`
 
-`V-MONO` is the nineteenth, uncited because unenforced — see above.
+`V-MONO` is the nineteenth, uncited because unenforced — see above. The eighteenth,
+a derivation requirement on semantic claims, was withdrawn from the spec after this
+report and its enforcement removed (sd-7fe3b2); its id is deliberately not repeated
+here, since a withdrawn rule left in a list reads as one that still exists.
 
 Two of the eighteen are cited where they are implemented rather than verified, worth
 knowing if the citation set is ever read as a verification inventory: `V-ALIAS` at the
