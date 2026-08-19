@@ -71,6 +71,9 @@ func run(ctx context.Context, dir string, p vectors.Provenance) error {
 	if err := g.broken(ctx); err != nil {
 		return fmt.Errorf("broken records: %w", err)
 	}
+	if err := g.malformed(); err != nil {
+		return fmt.Errorf("malformed records: %w", err)
+	}
 	return g.writeManifest()
 }
 
@@ -119,26 +122,27 @@ func (g *gen) addClaim(name string, c ranke.Claim, why string) error {
 	return nil
 }
 
-// addBroken writes a record that must be rejected under the id it names.
-func (g *gen) addBroken(name string, raw []byte, id, reason, why string) error {
+// addBroken writes a record that must be rejected under the id it names, naming the
+// rules it breaks so the coverage gate can count them.
+func (g *gen) addBroken(name string, raw []byte, id, reason, why string, violates ...string) error {
 	file := filepath.Join("claims", name+".cbor")
 	if err := os.WriteFile(filepath.Join(g.dir, file), raw, 0o644); err != nil {
 		return err
 	}
 	g.claims = append(g.claims, vectors.ClaimCase{
-		File: file, Id: id, Verify: false, Reason: reason, Why: why,
+		File: file, Id: id, Verify: false, Reason: reason, Why: why, Violates: violates,
 	})
 	return nil
 }
 
 // addContent writes a blob under the hash it is offered as.
-func (g *gen) addContent(name string, blob []byte, hash ranke.Id, ok bool, reason, why string) error {
+func (g *gen) addContent(name string, blob []byte, hash ranke.Id, ok bool, reason, why string, violates ...string) error {
 	file := filepath.Join("content", name+".bin")
 	if err := os.WriteFile(filepath.Join(g.dir, file), blob, 0o644); err != nil {
 		return err
 	}
 	g.content = append(g.content, vectors.ContentCase{
-		File: file, Hash: hash.String(), Verify: ok, Reason: reason, Why: why,
+		File: file, Hash: hash.String(), Verify: ok, Reason: reason, Why: why, Violates: violates,
 	})
 	return nil
 }

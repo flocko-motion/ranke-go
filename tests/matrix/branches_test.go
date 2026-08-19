@@ -56,6 +56,56 @@ func TestBranchIsolation(t *testing.T) {
 	})
 }
 
+// TestBranchConfinesAReverseStep: a step walking backward stays inside the scope's graph
+// (`R-QCSCOPE`). The toy's source sits in both branches, each holding one derivation that
+// cites it, so the other branch's referrer is backward-reachable and must stay out. The
+// answer is stated outright: both engines confine, so a gap they shared would satisfy an
+// agreement check.
+func TestBranchConfinesAReverseStep(t *testing.T) {
+	matrix.Each(t, matrix.FromSpec(generator.ToyBranches(1)), func(t *testing.T, u ranke.Universe, m *generator.Manifest) {
+		require.Len(t, m.Branches, 2, "needs a second branch to leave out")
+		require.Equal(t, rql.Branch, m.Branches[0], "main takes the first contribution")
+		other := m.Branches[1]
+
+		src, here, there := m.Sources[0], m.DiffChainHead, m.Derivations[0]
+		members := map[string][]string{rql.Branch: branchMembers(t, u, m.Head, rql.Branch),
+			other: branchMembers(t, u, m.Head, other)}
+		require.Subset(t, members[rql.Branch], []string{src.String(), here.String()},
+			"%q holds the source and the derivation citing it", rql.Branch)
+		require.Subset(t, members[other], []string{src.String(), there.String()},
+			"%q holds the same source and a derivation of its own", other)
+		require.NotContains(t, members[rql.Branch], there.String(),
+			"that far derivation is the other branch's alone")
+
+		// Backward from the source along the edges that cite it, unbounded: a segment
+		// free to run as far as the graph allows is the one confinement must bound.
+		uses := func(branch string) []string {
+			return reached(t, u, m.Head, ranke.Query{
+				Select: ranke.Select{Branch: branch, Claim: src,
+					Path: []ranke.PathStep{{Dir: ranke.DirUses, Edges: []string{"derivation/*"}}}},
+			})
+		}
+		require.ElementsMatch(t, idStrings([]ranke.Id{here, there}), uses(ranke.BranchArchive),
+			"across the archive the walk reaches both referrers, so each is backward-reachable")
+		require.Equal(t, []string{here.String()}, uses(rql.Branch),
+			"under %q the walk reaches that branch's referrer alone", rql.Branch)
+		require.Equal(t, []string{there.String()}, uses(other),
+			"under %q likewise, so neither answer is the whole set narrowed by luck", other)
+
+		// A path shape lowers through a pipeline of its own, so its route is confined
+		// separately: one route, ending at the branch's own referrer.
+		route, err := rql.Run(context.Background(), u, ranke.Query{
+			Select: ranke.Select{Branch: rql.Branch, Claim: src,
+				Path: []ranke.PathStep{{Dir: ranke.DirUses, Edges: []string{"derivation/*"}}}},
+			Output: ranke.Output{Shape: ranke.ShapePath, Detail: ranke.DetailID},
+		}, m.Head)
+		require.NoError(t, err)
+		require.Len(t, route, 1, "one endpoint in reach under %q, hence one route", rql.Branch)
+		require.Contains(t, route[0], "path["+src.String()+" "+here.String()+"]",
+			"the route runs from the source to the referrer the branch holds")
+	})
+}
+
 // Universe.ClaimsInBranches decides which references a contribution may read, so a
 // backend answering from its own index has to agree with one that walks for it.
 

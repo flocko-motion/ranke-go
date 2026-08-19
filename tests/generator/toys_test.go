@@ -39,6 +39,23 @@ func TestToys(t *testing.T) {
 		require.Len(t, m.Entities, 2, "wiring two entities")
 	})
 
+	t.Run("ToyHandMadeEntity", func(t *testing.T) {
+		u := ranke.NewMemoryUniverse()
+		m, err := Generate(ctx, u, ToyHandMadeEntity(1))
+		require.NoError(t, err)
+		require.Len(t, m.HandMade, 1, "must produce one hand-made entity")
+
+		// The corner is the ABSENCE, so assert it: a contributor edge and nothing else.
+		c, err := ranke.GetClaim(ctx, u, m.HandMade[0])
+		require.NoError(t, err)
+		for _, e := range c.Edges() {
+			require.NotEqual(t, ranke.EdgeClassDerivation, e.TypeClass(),
+				"a hand-made entity cites no source")
+		}
+		require.Len(t, c.Edges(ranke.EdgeFilterType{Type: ranke.EdgeTypeContributor}), 1,
+			"and is still attributed")
+	})
+
 	t.Run("ToyExternalContent", func(t *testing.T) {
 		u := ranke.NewMemoryUniverse()
 		m, err := Generate(ctx, u, ToyExternalContent(1))

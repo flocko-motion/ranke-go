@@ -172,6 +172,13 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 		{"path/uses-of-sources", ranke.Query{Select: archivePath(
 			ranke.PathStep{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
 			ranke.PathStep{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}})}},
+		// The same walk confined to one branch, so every row runs a reverse step whose
+		// referrers the scope may exclude (`R-QCSCOPE`). Its $archive twin above cannot:
+		// under $archive nothing is out of scope, so the confinement goes unexercised.
+		{"path/uses-of-sources-branch", ranke.Query{Select: ranke.Select{Branch: Branch,
+			Path: []ranke.PathStep{
+				{Min: ranke.Hops(0), Nodes: []string{"source/*"}},
+				{Dir: ranke.DirUses, Edges: []string{"derivation/*"}, Nodes: []string{"derivation/*"}}}}}},
 		{"path/connections-relation", ranke.Query{Select: archivePath(
 			ranke.PathStep{Nodes: []string{"entity/person"}},
 			ranke.PathStep{Dir: ranke.DirConnections, Edges: []string{"relation/*"}, Max: 2})}},

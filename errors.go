@@ -95,7 +95,6 @@ var (
 	// Used with wrap/wrapDetail: the sentinel is the operation prefix, the
 	// detail carries the stage or a dynamic value, the cause is wrapped.
 	errNewClaim              = errors.New("ranke.NewClaim")
-	errProvenanceRequired    = errors.New("ranke.NewClaim: this claim class must carry at least one derivation/* edge (§3.5 provenance invariant); type")
 	errNewEdge               = errors.New("ranke.NewEdge")
 	errRelationDirNonRel     = errors.New("ranke.NewEdge: RelationDirection must be 0 for non-relation edges")
 	errBuildGraph            = errors.New("ranke.NewGraphFromClosure")
@@ -115,6 +114,8 @@ var (
 	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
 	ErrQueryBounds           = errors.New("ranke.Query: value below the minimum the schema fixes for its field")
+	ErrQueryOrderField       = errors.New("ranke.Query: a sort key names the field it orders on")
+	ErrQueryLayerName        = errors.New("ranke.Query: execution.layer names a layer, so a stated one may not be empty")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
 	ErrFutureDated           = errors.New("ranke.Contribution: claim is dated after the base the contribution opened against")
 	ErrBranchNotCreatable    = errors.New("ranke.Contribution: branch is absent from the base, and creating one is a right of its own")
@@ -169,7 +170,6 @@ var (
 	ErrContentBothSlots  = errors.New("ranke: a record carries both content and content_hash, which are mutually exclusive")
 	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
 	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
-	ErrProvenanceMissing = errors.New("ranke.verify: a derivation/*, entity/* or relation/* node carries at least one derivation/* edge")
 	// ErrDeleteMarkNoTarget: a mark that names nothing explains no gap (`R-DGAP`).
 	ErrDeleteMarkNoTarget = errors.New("ranke.verify: a contribution/delete claim must carry a contribution/delete edge naming its target")
 	ErrTimestampForm      = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// V-TYPE, V-REL, V-PROV and V-CONTENT's XOR were enforced at construction alone, so a
+// V-TYPE, V-REL and V-CONTENT's XOR were enforced at construction alone, so a
 // record that arrived as bytes or through AssembleClaim broke them and verified clean.
 // Those fixtures are built AROUND the builder — NewClaim refuses them — by assembling
 // parts or marshalling a record literal.
@@ -136,36 +136,41 @@ func TestVerifyRelationDirectionOnOtherClass(t *testing.T) {
 		"a contribution edge carrying a relation_direction must fail verification")
 }
 
-// TestVerifyProvenanceMissing: `V-PROV` — a derivation/*, entity/* or relation/*
-// node carries at least one derivation/* edge, and a contributor edge is not one.
-func TestVerifyProvenanceMissing(t *testing.T) {
+// TestHandMadeClaimNeedsNoDerivation: a derivation edge is a recommended practice for
+// automatic extraction, not a requirement — a person who types an entity in has nothing
+// to cite. Attribution is untouched: `V-ROOT` still demands the contributor edge, which
+// is what these shapes carry and all they carry.
+//
+// Both halves matter. Construction refused these outright, and verification failed them
+// a second time, so a claim had to pass both to prove the freedom is real.
+func TestHandMadeClaimNeedsNoDerivation(t *testing.T) {
 	ctr := contributor(t)
-	for _, typ := range []string{"derivation/summary", "entity/person", "relation/knows"} {
+	for _, typ := range []string{TypeDerivation("summary"), TypeEntity("person"), TypeRelation("knows")} {
 		t.Run(typ, func(t *testing.T) {
-			bad := signedShape(t, ctr, ClaimParts{
-				Type: typ, CreatedAt: ctr.Node().CreatedAt(), Height: 1,
-				Edges: []EdgeParts{contributorEdge(t, ctr)}, // a contributor edge is not provenance
-			})
-			require.True(t, fired(verifyOne(t, bad, ctr, bad), ErrProvenanceMissing),
-				"%s without a derivation edge must fail verification", typ)
+			built, err := NewClaim(typ, ctr).
+				WithInlineContent([]byte("typed in by hand, citing nothing")).
+				WithEncoding(EncodingPlain).
+				WithHeight(HeightOf(ctr)).
+				Sign()
+			require.NoError(t, err, "%s must build with no derivation edge", typ)
+			require.Empty(t, verifyOne(t, built, ctr, built),
+				"%s must verify with no derivation edge", typ)
 		})
 	}
 }
 
-// TestVerifyProvenanceSatisfied is the control: the same shape with a derivation
-// edge passes, so the rule is not simply always firing.
-func TestVerifyProvenanceSatisfied(t *testing.T) {
+// TestDerivationEdgeStillAllowed is the other bound: the rule's removal permits the
+// edge's ABSENCE, it does not forbid its presence.
+func TestDerivationEdgeStillAllowed(t *testing.T) {
 	ctr := contributor(t)
 	derivation, err := NewEdge(EdgeConfig{Reference: ctr.ID(), Type: TypeDerivation("source")})
 	require.NoError(t, err)
-	good := signedShape(t, ctr, ClaimParts{
-		Type: "entity/person", CreatedAt: ctr.Node().CreatedAt(), Height: 1,
-		Edges: []EdgeParts{
-			contributorEdge(t, ctr),
-			{ID: derivation.ID(), Reference: ctr.ID(), Type: TypeDerivation("source")},
-		},
-	})
-	require.False(t, fired(verifyOne(t, good, ctr, good), ErrProvenanceMissing))
+	good, err := NewClaim(TypeEntity("person"), ctr).
+		WithEdges(derivation).
+		WithHeight(HeightOf(ctr)).
+		Sign()
+	require.NoError(t, err)
+	require.Empty(t, verifyOne(t, good, ctr, good))
 }
 
 // bothSlotsRecord marshals a claim record carrying content AND content_hash, which

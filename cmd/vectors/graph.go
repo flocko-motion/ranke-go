@@ -16,10 +16,13 @@ import (
 // externalBlob is the content the external-content claim addresses.
 var externalBlob = []byte("externalized content, addressed by hash")
 
+// rootSeed derives the identity that signs most of the set, patched records included.
+const rootSeed = "ranke-vectors/root"
+
 // toyGraph builds the claims that must verify: a contributor, a source note, a
 // derived claim citing it, external content, node fields, and a second contributor.
 func (g *gen) toyGraph(ctx context.Context) error {
-	root, who, err := contributorClaim(ctx, signer("ranke-vectors/root"), epoch)
+	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
 		return err
 	}
@@ -55,8 +58,9 @@ func (g *gen) toyGraph(ctx context.Context) error {
 	return g.secondContributor(ctx)
 }
 
-// derived adds a claim citing the note through a derivation edge, so the provenance
-// invariant (§3.5) and height = 1 + max(refs) are both exercised.
+// derived adds a claim citing the note through a derivation edge, which exercises
+// height = 1 + max(refs). Citing a source is a practice, not a requirement, so the
+// edge's presence is what this case shows and nothing rests on it.
 func (g *gen) derived(who ranke.Contributor, note ranke.Claim) error {
 	e, err := ranke.NewEdge(ranke.EdgeConfig{
 		Reference: note.ID(),

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -73,13 +74,22 @@ func ValidateQuery(q Query) error {
 	if q.Limit.Time < 0 {
 		return WithDetail(ErrQueryBounds, "limit.time "+q.Limit.Time.String())
 	}
-	for _, key := range q.Order {
+	for i, key := range q.Order {
+		// A sort key names the field it orders on; an empty one names nothing.
+		if key.Field == "" {
+			return WithDetail(ErrQueryOrderField, "order["+strconv.Itoa(i)+"]")
+		}
 		if err := oneOf("order.compare", string(key.Compare), "", string(CompareNumeric), string(CompareLexical)); err != nil {
 			return err
 		}
 		if err := oneOf("order.dir", string(key.Dir), "", string(SortAsc), string(SortDesc)); err != nil {
 			return err
 		}
+	}
+	// A Go caller's empty Layer is an ABSENT one; whitespace states a name and gives
+	// none. The wire tells absent from empty and refuses the latter (`R-QLAYER`).
+	if q.Execution.Layer != "" && strings.TrimSpace(q.Execution.Layer) == "" {
+		return WithDetail(ErrQueryLayerName, "execution.layer")
 	}
 	return oneOf("execution.report", string(q.Execution.Report), "",
 		string(ReportError), string(ReportWarn), string(ReportInfo), string(ReportDebug), string(ReportTrace))
@@ -260,8 +270,10 @@ type wireLimit struct {
 }
 
 type wireExecution struct {
-	Layer  string `json:"layer,omitempty"`
-	Report string `json:"report,omitempty"`
+	// Layer is a pointer so an ABSENT layer (the backend chooses) stays distinct from
+	// a stated empty one, which pins nothing while asking to (`R-QLAYER`, minLength 1).
+	Layer  *string `json:"layer,omitempty"`
+	Report string  `json:"report,omitempty"`
 }
 
 // wireComparison names the one operator applied, so a false or 0 value survives.
@@ -334,7 +346,13 @@ func (w wireQuery) query() (Query, error) {
 		q.Limit = limit
 	}
 	if w.Execution != nil {
-		q.Execution = Execution{Layer: w.Execution.Layer, Report: ReportLevel(w.Execution.Report)}
+		if w.Execution.Layer != nil && strings.TrimSpace(*w.Execution.Layer) == "" {
+			return q, WithDetail(ErrQueryLayerName, "execution.layer")
+		}
+		q.Execution = Execution{Report: ReportLevel(w.Execution.Report)}
+		if w.Execution.Layer != nil {
+			q.Execution.Layer = *w.Execution.Layer
+		}
 	}
 	if err := w.wireOnlyEnums(); err != nil {
 		return q, err
@@ -531,7 +549,11 @@ func newWireQuery(q Query) wireQuery {
 		w.Limit = &limit
 	}
 	if q.Execution.Layer != "" || q.Execution.Report != "" {
-		w.Execution = &wireExecution{Layer: q.Execution.Layer, Report: string(q.Execution.Report)}
+		w.Execution = &wireExecution{Report: string(q.Execution.Report)}
+		if q.Execution.Layer != "" {
+			layer := q.Execution.Layer
+			w.Execution.Layer = &layer
+		}
 	}
 	return w
 }

@@ -33,8 +33,11 @@ type Spec struct {
 	// Derivations is the count of derivation/* claims, each citing one or more
 	// sources via derivation edges.
 	Derivations int
-	// Entities is the count of entity/* claims.
+	// Entities is the count of entity/* claims, each citing a source.
 	Entities int
+	// HandMadeEntities is the count of entity/* claims carrying NO derivation
+	// edge — what a person typing an entity in produces, with nothing to cite.
+	HandMadeEntities int
 	// Relations is the count of relation/* claims, each wiring two entities
 	// with a from/to edge pair.
 	Relations int
@@ -82,11 +85,12 @@ func SpecForSize(seed int64, size int) Spec {
 		Base: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		Step: time.Second,
 
-		Contributors: clampMin(size/10, 2),
-		Sources:      size * 2,
-		Derivations:  size,
-		Entities:     size,
-		Relations:    size,
+		Contributors:     clampMin(size/10, 2),
+		Sources:          size * 2,
+		Derivations:      size,
+		Entities:         size,
+		HandMadeEntities: clampMin(size/5, 1),
+		Relations:        size,
 
 		DiffChainLen:        clampMin(ilog2(size)*2, 3),
 		ExternalBlobs:       clampMin(size/5, 1),
@@ -105,7 +109,9 @@ func SpecForSize(seed int64, size int) Spec {
 const spineClaims = 350
 
 // SpecForNodes scales an archive to roughly nodes total claims, as the CLI's
-// --size (1k, 1m, …) does: content claims run ~5× the size unit, plus spine.
+// --size (1k, 1m, …) does: content claims run ~5.2× the size unit, plus spine. The
+// divisor below stays 5, so the count overshoots by about 4% — Size is a dimension,
+// not a promise (-> tests/performance/harness.go).
 func SpecForNodes(seed int64, nodes int) Spec {
 	s := SpecForSize(seed, clampMin((nodes-spineClaims)/5, 1))
 	s.Size = nodes // the headline reflects the requested node count, not the unit

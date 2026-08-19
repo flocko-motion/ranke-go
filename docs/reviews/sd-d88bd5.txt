@@ -1,0 +1,193 @@
+# The R-A* access rules — is "another layer's" the right verdict?
+
+Task sd-d88bd5. Four rules, read against docs/papers/spec/ranke-spec.typ and the code as
+it stands. Report only; no code changed.
+
+## The answer, up front: the allowlist is WRONG on three of four
+
+"another layer's" holds for R-AGRANT alone. R-ABRANCH and R-ATABLE are PARTIAL — this
+library provides the mechanism and the server the policy — and the allowlist saying
+otherwise is the exact hazard the task names: a caller reads "the server enforces access",
+the server reads "the library refuses what it must not do", and the half each side actually
+holds is never written down anywhere. R-AUNIVERSE is OUT OF SCOPE but for a reason worth
+stating precisely, since it is the one rule where the library is a silent pass-through.
+
+The evidence that these are jointly held is in the code's own prose. `WithCreatableBranches`
+(contribution.go:56-58) says "TargetBranches admits any, the surface §Access holds a
+creation grant against", and `AdmitBranch` (contribution.go:63-64) says "creating one is a
+right of its own (§Access, C over $branches)". Constraints is not a bystander to the access
+rules; it is the object they are written against.
+
+---
+
+### R-AGRANT — OUT OF SCOPE (the server's configuration)
+
+Rule: "A *grant* is a triple: a system account, a target, and the rights it holds there,
+written as the letters *C*, *R*, *U*, and *D*. Accounts and their grants are fixed in the
+configuration; a target is a branch-name glob or a reserved `$`-prefixed target. Every
+operation requires its letter on its target, and the rules below fix what each letter does
+at each target."
+
+Code: NONE, and I checked rather than assumed. The library holds no account, no grant, no
+caller identity and no configuration of either: `grep -rn "grant\|Grant"` over non-test Go
+finds four hits, all of them PROSE in comments pointing at §Access (contribution.go:58,
+contribution.go:122, query.go:30, codec_wire.go:227); `account` appears in no non-test
+identifier. There is no type that could hold a triple and nothing that could evaluate one.
+
+Test: NONE, and none is possible — there is nothing to test.
+
+Note: this is the rule that makes the other three joint rather than the library's. The
+letters are the server's to hold and to check; what the library offers is the surface a
+checked letter is turned INTO. Which is why "another layer's" is right here and wrong
+below: R-AGRANT is the layer boundary, not a description of all four rules.
+
+### R-ABRANCH — PARTIAL (mechanism here, policy above)
+
+Rule: "On a branch: *C* contributes a claim, *R* reads, *U* requests an early expiry
+(`R-DEXPIRY`), and *D* requests a deletion — the `contribution/delete` mark and the
+physical removal that follows (`R-DREQUEST`). *U* and *D* are each required on every branch
+reaching the claim, since a limiting claim propagates to all of them (`R-C3LIMIT`)."
+
+Code, letter by letter — the mechanism exists for two of the four:
+
+- *C* (contributes a claim): `Constraints.AdmitBranch` (contribution.go:63) refuses a
+  branch the base does not carry unless the caller declared it creatable. A server holding
+  C over that branch expresses it as `WithCreatableBranches`; without the declaration the
+  contribution is refused. Mechanism present.
+- *R* (reads): `Constraints.AdmitReferences` (contribution.go:81) enforces step 3's read
+  requirement — every claim the contribution references from OUTSIDE itself must lie in a
+  scope the caller declared referencable (`WithReferencableBranches`). So the read letter
+  is expressible for the contribution path. Mechanism present.
+- *U* (requests an early expiry) and *D* (requests a deletion): `WithLiftedTypes`
+  (contribution.go:38) is the nearest mechanism — the contribution/expiry and
+  contribution/delete types are reserved to the Sequencer, and a caller holding the letter
+  lifts them. But the rule's second sentence is the part with teeth: "*U* and *D* are each
+  required on every branch reaching the claim". Nothing in the library computes the set of
+  branches reaching a claim for this purpose, so a server cannot ask the library which
+  branches a letter must be held on. That half is a GAP, recorded below rather than as its
+  own verdict since the rule is one rule.
+
+Test: `adapter/sequencer/dev/dev_test.go:214` TestNewBranchNeedsTheRight (C, the creatable
+declaration), `:380` TestReferenceOutsideDeclaredBranchesDenied (R, the referencable
+declaration), `:320`/`:342`/`:363` TestReservedTypeDenied / TestReservedTypeLifted /
+TestLiftIsPerType (the lift, and that lifting one type lifts no other). Each fires: they
+assert refusal, and TestReservedTypeLifted is the control against passing by refusing
+everything.
+
+Note: PARTIAL, not OUT OF SCOPE. Two of the four letters have a named mechanism here with
+tests that fire; a server implements R-ABRANCH by translating a held letter into a
+Constraints option, and the library refuses what was not declared. Calling that "another
+layer's" understates it in the direction that hurts — a reader takes it to mean the library
+checks nothing, when in fact it checks precisely what it was told and nothing more.
+
+### R-ATABLE — PARTIAL (one letter mechanised, two not)
+
+Rule: "On `$branches`, the branch tables: *C* adds a new branch to the table, *R* reads it,
+and *D* soft-deletes a branch by creating a new table that omits it."
+
+Code:
+
+- *C*: the same `AdmitBranch` path, and `TargetBranches` (query.go:30-32) is the reserved
+  `$branches` target itself, defined in the library and admitted by
+  `WithCreatableBranches` as the wildcard. So the reserved target of this rule is a library
+  constant, which is hard to square with the rule being another layer's entirely.
+- *R* (reads the table): honoured, never gated. `Archive.GetBranches` and the `$archive`
+  scope read the table with no notion of a caller.
+- *D* (soft-deletes a branch by a new table omitting it): no mechanism. Nothing in the
+  library mints a table that omits a branch; `mintBranchTable` in both Sequencers restates
+  the branches that advanced and inherits the rest by diff. A server cannot express this
+  operation through the library at all.
+
+Test: TestNewBranchNeedsTheRight covers C. NONE for R or D.
+
+Note: query.go:30-32 defines TargetBranches with the comment "names the branch table itself
+(§Access), the surface a grant over branch creation is held against", and adds that it
+scopes no read so Select.Branch rejects it. That is the library deliberately shaping itself
+to this rule — which is a joint holding, not another layer's.
+
+### R-AUNIVERSE — OUT OF SCOPE, and the library is a silent pass-through
+
+Rule: "On `$universe`: *R* alone, and *privileged* — a head id bypasses the branch table,
+so it reaches any graph the Universe holds."
+
+Code: archive.go:129-130 — `if q.Select.Branch == BranchUniverse { return Scope{Branch:
+BranchUniverse}, nil }`. The scope is honoured with no check of any kind. The only
+condition attached is structural, not privileged: `ErrQueryNoHead` (query_codec.go:55)
+requires Select.Head under $universe, because the scope has no natural head to read from —
+that is R-QHEAD, not an access check. Everything the rule describes as the PRIVILEGE
+(bypassing the branch table, reaching any graph the Universe holds) is exactly what the
+code does, unconditionally, for anyone who asks.
+
+Test: `tests/matrix/semantics_test.go` TestToyUniverseNeedsRoot pins the head requirement.
+NONE for privilege, and none is possible: there is no caller identity to test against.
+
+Note: OUT OF SCOPE is the right verdict — the library holds no identity, so it cannot gate
+this. But the plain statement the task asked for is: **the gate must be above.** A server
+that passes an untrusted caller's Select.Branch through to Archive.Query grants that caller
+the whole Universe, and nothing in this library will stop it or say so. That is the most
+consequential sentence in this report, and it is currently written down nowhere in the
+code: neither `BranchUniverse` (query.go:24-26) nor `resolveScope` says the caller must
+have been checked first. The constant's comment says "unconfined, privileged access rooted
+at Select.Claim, which it therefore requires" — which is doubly unhelpful: it names the
+privilege without saying who enforces it, and it names the wrong field (the code requires
+Select.Head; Select.Claim is the anchor).
+
+---
+
+## Summary
+
+| verdict | count | rules |
+| --- | --- | --- |
+| OUT OF SCOPE | 2 | R-AGRANT, R-AUNIVERSE |
+| PARTIAL (not one of the five verdicts) | 2 | R-ABRANCH, R-ATABLE |
+| VERIFIED | 0 | — |
+| UNTESTED | 0 | — |
+| GAP | 0 as a whole rule; two halves recorded below | — |
+| DIVERGENCE | 0 | — |
+
+PARTIAL is not one of the task's five verdicts. It is the task's own sixth, offered in the
+brief, and I am using it because none of the five fits a rule the library half-holds:
+VERIFIED overstates, OUT OF SCOPE understates in the dangerous direction, and GAP is wrong
+where a mechanism exists and works.
+
+### Findings, in the order I would fix them
+
+1. **The allowlist is wrong on R-ABRANCH and R-ATABLE.** Both are jointly held: the library
+   provides Constraints and the reserved targets, the server provides the letters. Marked
+   "another layer's", a reader concludes the library checks nothing — while
+   AdmitBranch and AdmitReferences are checking, and their tests fire. Re-word both entries
+   to name the mechanism, or cite §Access from Constraints so they leave the allowlist.
+
+2. **R-AUNIVERSE's privilege has no stated owner in the code.** $universe is honoured
+   unconditionally and correctly, but neither the constant nor resolveScope says a caller
+   must be checked above. One sentence at query.go:24 would close the gap between "the
+   library cannot gate this" and "someone must". Cheapest item here and the one with the
+   worst failure mode.
+
+3. **R-ABRANCH's second sentence has no mechanism.** "*U* and *D* are each required on every
+   branch reaching the claim" — nothing computes the branches reaching a claim for a
+   limiting operation. `ClaimsInBranches` answers the question for a KNOWN branch set, so
+   the primitive is close, but a server holding U over one branch cannot ask this library
+   which others it must also hold it on. Fixing it is a task of its own.
+
+4. **R-ATABLE's *D* has no mechanism at all** — no path mints a table omitting a branch.
+   Whether that is a gap or a deliberate absence is a spec-team question; I record it as
+   absent rather than judging it.
+
+5. **query.go:25 names the wrong field.** "$universe is unconfined, privileged access rooted
+   at Select.Claim, which it therefore requires" — the code requires Select.**Head**
+   (ErrQueryNoHead, pinned by TestToyUniverseNeedsRoot). A one-word doc defect, but it is in
+   the comment a reader consults to learn what $universe demands.
+
+### What I did NOT check, and why
+
+- **Whether any server built on this library enforces the letters.** No such server is in
+  this repo, so the claim "the policy lives above" is unverifiable from here; I have only
+  confirmed it does not live below. Where I say a server must do something, that is what
+  the rule requires of someone, not an observation about code I have read.
+- **The R-C3LIMIT propagation R-ABRANCH leans on.** It is a contribution rule, verified by
+  another task in this set, and I did not re-derive it — I took only that the library
+  computes no branch-reaching set for access purposes, which I checked directly.
+- **Runtime behaviour.** This is a reading of code against rules; I ran no tests, since the
+  verdicts turn on what exists rather than on what passes today. The tests I name are ones I
+  read and traced to their assertions, not ones I executed for this report.

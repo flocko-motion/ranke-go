@@ -78,6 +78,29 @@ func TestDecodeRefusesMalformedTimestamps(t *testing.T) {
 	}
 }
 
+// TestDecodeRefusesMalformedCreatedAt: created_at is `V-TIME`'s too, and its parse
+// failure returned the bare time.Parse error — unmatchable, so a caller could not tell
+// a timestamp violation from any other malformed record. The near-miss is the case
+// that matters: RFC 3339 without the fraction, which a naive writer emits.
+func TestDecodeRefusesMalformedCreatedAt(t *testing.T) {
+	for name, value := range map[string]string{
+		"unparsable":   badTime,
+		"no-fraction":  "2026-01-02T03:04:05Z",
+		"not-utc":      "2026-01-02T03:04:05.000000000+01:00",
+		"milliseconds": "2026-01-02T03:04:05.000Z",
+	} {
+		t.Run(name, func(t *testing.T) {
+			en := encNode{TypeClass: "source", TypeSub: "note", CreatedAt: value}
+			raw, err := encodingMode.Marshal(encClaimFile{Node: en})
+			require.NoError(t, err)
+			id, err := hashContent(raw)
+			require.NoError(t, err)
+			_, err = DecodeClaim(id, raw)
+			require.ErrorIs(t, err, ErrTimestampForm)
+		})
+	}
+}
+
 // TestDecodeAcceptsCanonicalAndAbsentTimestamps is the control that keeps the check
 // from being a blanket refusal: an ABSENT field is no violation, since all three are
 // optional, and a canonical value passes.

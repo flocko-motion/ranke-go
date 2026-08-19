@@ -1,0 +1,553 @@
+# R-C* contribution rules — verification
+
+Task sd-9ffda1. Eleven rules, quoted from `docs/papers/spec/ranke-spec.typ`
+(@sec:v-contribution, lines 253–312), read in full rather than summarised.
+
+No code changed. Two mutation runs were made to answer a question reading could not
+settle, both reverted and both named at the rule they belong to (`R-C6MERGE`); every
+other verdict comes from reading the code and the assertions.
+
+One correction to the task brief before the rules. It says ten of the eleven are
+listed in `scripts/rule-citations.allow` as "citation owed". Eight are: R-C1BASE,
+R-C2DATE, R-C2TYPE, R-C3CLOSE, R-C4KEY, R-C4SEAL, R-C5PERSIST, R-C6SIGN
+(`rule-citations.allow:33-40`). The other three are cited in Go comments and so are
+absent from the list — R-C3LIMIT at `verify_expiry.go:18` and `verify.go:101`,
+R-C6MERGE at `verify.go:438` and `verify_spec_rules_test.go:45`, R-C6REQUEST at
+`verify_reference.go:92`. All three citations are load-bearing in the same way: each
+names R-C* as the reason some *other* rule's check is sound. None of the three
+enforces the rule it cites, and two of the three rules turn out to be unimplemented.
+That is the "citation is not verification" trap arriving from an unexpected direction:
+each of these citations states a *reliance*, and a reliance on an unimplemented rule is
+itself the defect — see `R-C3LIMIT`.
+
+On the family question — enforced once in the shared contract, or twice with a chance
+of drifting. The step-2 rules are genuinely shared: `AdmitCreatedAt` and `AdmitType`
+live in `contribution.go` and each Sequencer's `admissible` calls both, so neither
+rule can drift in substance. What is duplicated is the *calling*, and what is
+asymmetric is the testing: each Sequencer's package tests a different subset, and
+nothing compares the two rule by rule. The gaps are recorded per rule and collected in
+the summary.
+
+---
+
+### R-C1BASE — VERIFIED
+
+Rule: "Opening a contribution takes its *base* $(k, t)$: $k$ the archive's current
+head, $t$ the current system time. (RankeDB paper §Sequencer, step 1)"
+
+Code: `adapter/sequencer/dev/dev.go:118` `NewContribution` reads `base, at := s.head,
+s.tick()` at `dev.go:120` under `s.mu`, so the two are read at one instant — the doc
+comment says exactly that. `adapter/sequencer/concurrent/concurrent.go:139` does the
+same under the sequencing mutex (`concurrent.go:144-145`). Both store the pair on the
+contribution and return it unchanged from `Base()`
+(`dev/contribution.go:37`, `concurrent/contribution.go:49`), so the base is pinned for
+the contribution's life.
+
+Test: `concurrent/concurrent_test.go:342` `TestBaseIsTheSnapshotItOpenedAt` — opens a
+contribution, merges another writer's contribution so the head moves, and asserts
+`Base()` still reports the older head. It then merges the pinned contribution
+successfully, which is the reason the rule matters.
+
+Note: nothing in `adapter/sequencer/dev` reads `Base()` at all
+(`grep '\.Base()' **/*_test.go` returns only the three sites in
+`concurrent_test.go`). The dev Sequencer holds the lock across a whole merge, so it
+has less room to get this wrong, but the pinning is a separate line of code in a
+separate file and no test in its package touches it.
+
+Note on "current system time": both Sequencers take `t` from an injected `Clock`
+(`dev.go:37`, `concurrent.go:32`) rather than `time.Now()`. That is the testability
+seam, not a divergence — the clock is a constructor argument a deployment supplies —
+but it does mean nothing in the library asserts that `t` advances with the wall clock.
+
+---
+
+### R-C2DATE — VERIFIED
+
+Rule: "Every claim added in a contribution MUST be dated `created_at`$lt.eq t$, the
+base time. Since $t$ precedes the merge, no claim can be future-dated. (RankeDB paper
+§Sequencer, step 2; §Timestamping)"
+
+Code: `contribution.go:231` `AdmitCreatedAt` refuses a claim whose `created_at` is
+`After(base)`, returning `ErrFutureDated` with both dates in the detail. Called from
+`dev/contribution.go:69` and `concurrent/contribution.go:104`, both inside
+`admissible`, which `AddClaims` runs over every claim before staging any of them
+(`dev/contribution.go:52`, `concurrent/contribution.go:66`). The wire path reaches the
+same check: `AddWire` → `ranke.DrainWire` → `AddClaims` (`contribution.go:275`).
+
+Test: `dev/dev_test.go:282` `TestFutureDatedClaimRefused` asserts
+`ErrorIs ErrFutureDated` and that the head did not move;
+`concurrent/concurrent_test.go:317` `TestFutureDatedClaimRefused` builds the claim at
+`base.Add(time.Hour)` read off `Base()` and asserts `AddClaims` errors. Both engines,
+both firing on the one shared check. This is the rule the family's premise was written
+for, and it is the one that holds up best.
+
+Note: the Sequencer's own minted claims are dated later than the base — dev stamps the
+consolidating head and the branch table from `s.tick()` (`dev.go:218`, `dev.go:250`),
+concurrent stamps the contribution head with the base time (`concurrent/contribution.go:185`)
+and the table from the clock (`concurrent.go:344`). R-C2DATE binds claims "added in a
+contribution", not claims the Sequencer creates at step 6, so this is outside the rule;
+`V-MONO` is what holds those.
+
+---
+
+### R-C2TYPE — VERIFIED, with the request half unimplemented
+
+Rule: "A contribution from a system account MUST NOT contain *limiting claims*
+(`contribution/delete`, `contribution/expiry`) or *branch-table* claims
+(`contribution/branches`): these types are created by the Sequencer alone. A system
+account MAY commit a *request* instead — a `contribution/expires_after_request` or
+`contribution/delete_request` edge — which the Sequencer honours at merge
+(`R-C6REQUEST`)."
+
+Code: `contribution.go:151` `reservedTypes` is exactly those three node types;
+`contribution.go:241` `AdmitType` refuses one unless `c.lifted` carries it, returning
+`ErrReservedType`. Called from both `admissible` implementations
+(`dev/contribution.go:72`, `concurrent/contribution.go:107`), so a reserved type is
+refused before anything is staged.
+
+Test: `dev/dev_test.go:320` `TestReservedTypeDenied` (a `contribution/delete` refused,
+head unmoved), `dev_test.go:342` `TestReservedTypeLifted` (the control — lifted, it
+merges), `dev_test.go:363` `TestLiftIsPerType` (a delete lift does not admit a branch
+table), `concurrent/concurrent_test.go:298` `TestReservedTypeRefused` (a
+client-authored branch table refused, head unmoved). `codec_wire_test.go:159`
+`TestWireConstraintsBecomeOptions` holds the wire-declared form to the same check.
+
+Note — the prohibition is wider than the rule: `AdmitType` applies to *every*
+contribution, not only one from a system account. Nothing in the library models an
+account at all (`R-AGRANT` is listed as another layer's), so "refuse unless lifted" is
+the only reading it can implement. Stricter, and I think right.
+
+Note — is the lift a grant or a bypass? `WithLiftedTypes` (`contribution.go:39`) is a
+caller-supplied option, and for a wire contribution the *stream itself* declares its
+lift: `WireConstraints.Lifted` → `Options()` (`codec_wire.go:95`) →
+`WithLiftedTypes`. Read alone that is a bypass — a client naming its own lift. The
+contract's answer is `Narrow` (`codec_wire.go:59`, "Declaring restricts"), which
+intersects a declaration with the holder's, and `dev_test.go:439`
+`TestAddWireAdvancesDeclaredBranches` drives the intended sequence, asserting
+`cons.Lifted` is empty before opening and commenting that a server "check[s] them
+against the caller's grants". So the mechanism exists and is tested, but nothing binds
+`Options()` to a narrowed declaration: a server that passes `wr.Constraints().Options()`
+straight through grants whatever the client asked for, and no test or type says
+otherwise. I would not call this a rule violation — the grant is the server's by
+`R-AGRANT` — but it is the sharpest edge in this family and worth a line in whatever
+document tells a server implementor what it owes.
+
+Note — the request half has no implementation. `contribution/expires_after_request`
+and `contribution/delete_request` appear nowhere in Go (only in
+`docs/papers/spec/ranke-spec.typ:265` and `docs/papers/02-ranke-db/ranke-db.typ:285`).
+See `R-C6REQUEST`.
+
+---
+
+### R-C3CLOSE — VERIFIED
+
+Rule: "Before verification a contribution MUST be *closed*: each claim's references
+are followed, drawing in every referenced claim outside the contribution — from
+another branch or the wider Universe — recursively, until every path reaches a claim
+already in the base's closure. Drawing in a branch-external claim requires read access
+to its branch (*R-ABRANCH*) and carries its limiting claims with it (`R-C3LIMIT`)."
+
+Code: closing and verifying are one traversal in both engines, and their
+`CompleteAndVerify` doc comments say so (`dev/contribution.go:96`,
+`concurrent/contribution.go:113`). The staged claims go into `𝒰`
+(`graph.go:100` `AddClaims` → `PutClaim`), and `runVerification` (`verify.go:99`)
+walks every edge of every claim it reaches, enqueueing the reference
+(`verify.go:210-218`) and failing the run when the bytes are absent and no deletion
+mark explains the gap (`verify.go:147-152`). So "closed" is enforced as *no
+unresolvable reference*, recursively, rather than as a separate closing pass.
+
+The read-access clause is `Constraints.AdmitReferences` (`contribution.go:81`): it
+collects every reference leaving the contribution's own set and requires
+`ClaimsInBranches` to hold it in a branch the contribution may read, resolved at the
+base (`dev/contribution.go:77`, `concurrent/contribution.go:90`). A claim in `𝒰` that
+no branch holds fails that test, which is what makes the base's closure the boundary
+in practice.
+
+Test: `dev/dev_test.go:68` and `concurrent/concurrent_test.go:259`
+`TestInvalidContributionDenied` — a contribution referencing a claim that does not
+exist is refused and the head does not move, in both engines, each with its positive
+control (`TestValidContributionAccepted`). The read-access clause:
+`dev/dev_test.go:380` `TestReferenceOutsideDeclaredBranchesDenied`.
+
+Note: `AdmitReferences` returns early when the constraints name `BranchUniverse`
+(`contribution.go:82`, `unconfined`). Under that privileged read the closure boundary
+is `𝒰` itself, so a contribution may cite a claim no branch holds — for instance one
+left in the add-only store by a contribution that failed. The archive stays closed
+(the citation makes the claim reachable from the new branch head), so I do not read
+this as a violation, but it is the one path where "the base's closure" is not what
+bounds the drawing-in.
+
+Note: the read-access clause is tested in dev only; `concurrent` has no equivalent of
+`TestReferenceOutsideDeclaredBranchesDenied`, and it calls `AdmitReferences` from its
+own line (`concurrent/contribution.go:98`).
+
+Note: the third clause — "carries its limiting claims with it" — is unimplemented. See
+`R-C3LIMIT`.
+
+---
+
+### R-C3LIMIT — GAP
+
+Rule: "A branch that holds a claim MUST also hold every limiting claim against it — a
+`contribution/delete` or `contribution/expiry` naming it as target. (RankeDB paper
+§Cross Branch Propagation)"
+
+Code: nothing. No propagation exists anywhere in the library: `grep -rn propagat
+--include=*.go` returns two hits, one of which is `dev.go:6` saying the Sequencer
+"manages named branches without propagating between them (paper 2's cross-branch
+merge)", and the other an unrelated test message. `concurrent.go:8` states the same
+limit ("no cross-branch merge, no limiting/expiry claims"). Neither `Merge` nor
+`commit` looks at limiting claims at all: step 6 folds heads and mints a table
+(`dev.go:134`, `concurrent.go:208`). Nothing places a `contribution/delete` or
+`contribution/expiry` into a second branch that reaches its target, and — since both
+types are reserved and nothing mints them — nothing creates one in the first place
+outside a fixture that lifts the type.
+
+Test: NONE. Worse than untested: the library *depends* on the rule holding.
+`verify_expiry.go:18` says so outright — "`R-C3LIMIT` is what makes it findable: the
+branch holding a claim holds every limiting claim against it, so the edge lies in the
+closure the run already walks" — and `verify.go:101` repeats it for the run's roots.
+The expiry index (`verify_expiry.go:35` `endFor`, `:56` `sweepForExpiry`) searches only
+the closure it was given, so a revocation that R-C3LIMIT would have propagated into
+this branch, and which nothing propagates, is simply not found: `verifyKeyWindow`
+(`verify.go:367`) then admits a claim signed under a revoked key.
+
+The tests that cover the expiry window build the revocation into the same graph as the
+claim it revokes (`verify_expiry_test.go:49` `revokedGraph`, used by
+`TestExpiryEdgeShortensTheWindow:80` and the three around it), so the fixture
+satisfies R-C3LIMIT by construction. That is the failure mode the task names, and it
+is why this gap is invisible: every test that needs a limiting claim to be findable
+puts it where it will be found.
+
+I would fix this first. It is the one rule in the family whose absence makes another
+rule's check quietly wrong rather than merely unenforced, and the spec's own reference
+fixture leans on it (`ranke-spec.typ:794`, `:928`: "Because `src₁` is reached from
+every content branch, the delete propagates to each (`R-C3LIMIT`)"; "the fixture keeps
+`del₁` only in `$system`; `R-C3LIMIT` places a reference to it in every content branch
+that reaches `src₁`").
+
+---
+
+### R-C4KEY — VERIFIED
+
+Rule: "Each claim MUST be dated within the validity of the key it is signed under —
+the `pubkey` of the contributor it references, valid as `R-DEXPIRY` defines. (RankeDB
+paper §Sequencer, step 4)"
+
+Code: `verify.go:344` registers the "key validity" rule, `verify.go:355`
+`ruleKeyWindow` delegates to `verify.go:367` `verifyKeyWindow`, which compares the
+claim's `created_at` against `pubkey_valid_from` / `pubkey_expires_after` read off the
+signer, shortened by any expiry edge the closure holds. `ErrKeyNotYetValid` /
+`ErrKeyExpired`.
+
+The contribution path does enforce it, and does so by running verification, which is
+what the rule's own citation says step 4 is: both engines call `g.Verify()`
+unconditionally inside `CompleteAndVerify` and refuse the contribution on any failure
+(`dev/contribution.go:129-136`, `concurrent/contribution.go:149-157`). Neither passes
+`WithSkipRules`, so the rule is in the set. Concurrent adds
+`WithTrusted(s.isCommitted)`, which prunes the walk at already-merged claims
+(`concurrent/contribution.go:149`); a claim under contribution is not committed, so it
+is verified. So: enforced at verification, and the contribution path runs verification.
+That is what the rule says, not a reliance the rule leaves open.
+
+Test: `verify_test.go:80` `TestVerifyKeyWindow` — nine cases including both bounds,
+both open-ended forms, and both failure sentinels, each asserted through a real
+`g.Verify()` run. `verify_expiry_test.go:80` `TestExpiryEdgeShortensTheWindow` covers
+the revocation arm with `TestExpiryEdgeAdmitsWhatPrecedesIt` as its control.
+
+Note on the seam: every test drives the rule through `Graph.Verify` directly. Nothing
+drives an out-of-window claim through a Sequencer, so a change that skipped this one
+rule on the contribution path — `g.Verify(ranke.WithSkipRules("key validity"))` — would
+leave the whole suite green. The rule is enforced and tested; the *wiring* from step 4
+to the rule set is not.
+
+Note: `verifyKeyWindow` returns nil when the signer is the claim itself
+(`verify.go:368`), the initial-claim case `V-ROOT` defines. Correct, and the only
+window a root claim could be checked against is its own.
+
+---
+
+### R-C4SEAL — VERIFIED
+
+Rule: "Once verified, a contribution is *sealed*: its contents are fixed and admit no
+further addition or removal. By immutability, whatever verified against the base stays
+valid however long it waits before merging. (RankeDB paper §Sequencer, step 4)"
+
+Code: both contributions carry a `sealed` flag set at the end of a successful
+`CompleteAndVerify` (`dev/contribution.go:153`, `concurrent/contribution.go:174`) and
+refuse both mutating entry points once it is set: `AddClaims`
+(`dev/contribution.go:42`, `concurrent/contribution.go:56`) and a second
+`CompleteAndVerify` (`dev/contribution.go:99`, `concurrent/contribution.go:118`), each
+returning that package's `errSealed`. There is no removal API on the interface
+(`contribution.go:250`), so "no removal" holds by construction. The `verified` handle
+exposes only `Ids()` and `Persist()` (`contribution.go:285`), both read-only over
+copies (`dev/contribution.go:166`, `concurrent/contribution.go:201`).
+
+Test: `concurrent/concurrent_test.go:376` `TestSealedContributionRefusesMoreClaims` —
+asserts both refusals, the added claim and the re-seal.
+
+Note: nothing in `adapter/sequencer/dev` tests sealing. `errSealed` is declared at
+`dev/dev.go:25` and checked at two sites; deleting either check breaks no test in that
+package.
+
+Note: the flag is set only on success, so a contribution whose verification *failed*
+is not sealed and can be refilled and re-verified. The rule says "once verified", so
+this is admissible, and it is what lets a caller correct a rejected batch.
+
+---
+
+### R-C5PERSIST — UNTESTED
+
+Rule: "The sealed contribution's whole closure MUST be durably present in the
+Universe — stored and propagated across the storage layers — *before* the Sequencer
+merges it. (RankeDB paper §Sequencer, step 5)"
+
+Code: the ordering is enforced by types. `Sequencer.Merge` takes a
+`ranke.MergableContribution` (`sequencer.go`, `dev.go:134`, `concurrent.go:154`), and
+the only constructor of one is `Persist` (`dev/contribution.go:174`,
+`concurrent/contribution.go:209`), which both engines additionally refuse to accept
+from another Sequencer (`errForeign`, `errForeignContribution`). So no merge can
+precede a persist. `Persist` itself re-reads: `HasClaims` over every staged id plus
+every branch head, failing with "did not land in the Universe" on any false
+(`dev/contribution.go:179-187`, `concurrent/contribution.go:216-228`).
+
+Test: NONE for the barrier. No test asserts `Persist` failing, and none could without
+a Universe that accepts a write and then denies it — nothing in `tests/backends`
+offers that. `tests/integration_test.go:69` `TestFsDurability` proves the *outcome*
+for one backend (a cold `fs` handle reads the merged archive back), which would fail if
+the write path stopped being durable, but it would not notice the `HasClaims` check
+being deleted.
+
+Note on "propagated across the storage layers", which is the part worth the spec
+team's attention. `Persist`'s read-back cannot prove it. `stack.HasClaims`
+(`adapter/storage/stack/stack.go:316`) returns true at the *first* layer that holds the
+id and never asks the ones below, and a stack is ordered cache-first
+(`neo4j` is `StorageTierEager`, `mem`/`blob` are `StorageTierAuthoritative`), so on the
+`neo4j/mem` row the check is answered entirely by the top layer. What actually makes
+the claim durable is the earlier write: `stack.PutClaims` (`stack.go:85`) awaits every
+synchronous layer and returns the *authoritative* layers' error (`writeSync`,
+`stack.go:154`), while background-tier layers get a detached goroutine
+(`stack.go:180`). So the obligation is met — at `PutClaims`, during step 3 — and
+`Persist`'s `HasClaims` is a weaker confirmation than its own comment implies ("since a
+head may not outrun its closure"). Two consequences: the check would pass on a stack
+whose authoritative tier had silently lost the write, and an eager layer's failure is
+swallowed at `stack.go:168`.
+
+---
+
+### R-C6MERGE — VERIFIED, with one clause unimplemented
+
+Rule: "Every branch table MUST hold its predecessor in provenance, so the chain from
+the archive's head reaches the initial table unbroken (foundation paper
+§Ranke-Archive). A table restating only what changed carries a `contribution/diff` to
+its predecessor; one restating every entry carries a `contribution/branches` instead,
+making it a base claim, so the overlay that materialises the table stops there while
+the chain beyond it stays reachable. Its `contribution/branch` edges MUST name, for
+each branch they bind, the head claims of the contribution merged there."
+
+Code, first sentence: `dev.go:252` and `concurrent.go:346` both do
+`b = b.WithDiff(s.head)` for every table past the bootstrap, guarded by `s.head !=
+nil` so the initial table (`k₀`, minted at `dev.go:87` / `concurrent.go:104`) carries
+no predecessor and terminates the chain.
+
+Code, third sentence: both mint one `contribution/branch` edge per advanced branch,
+carrying the branch name in `FieldName` and referencing that branch's new head
+(`dev.go:256-264`, `concurrent.go:348-358`). The reference is the *folded* head — the
+contribution's head consolidated with the branch's prior head (`dev.go:164-179`,
+`concurrent.go:279` `foldBranch`) — so it reaches the merged contribution's heads
+rather than being one of them. That is what makes concurrent merges lossless, and the
+rule's "name … the head claims of the contribution merged there" is satisfied through
+reachability, not identity. Worth the spec team's eye, since a literal reading asks for
+the contribution's own head.
+
+Test: this is the one I could not settle by reading, so I ran it twice, disabling the
+`WithDiff` line and restoring it.
+
+  * dev (`dev.go:252` disabled): `go test ./adapter/sequencer/dev/` fails at
+    `TestReferenceOutsideDeclaredBranchesDenied` (`dev_test.go:434`) — the second
+    revision's table no longer reaches the first branch, so resolving a readable branch
+    fails. `RANKE_ROWS=mem go test ./tests/matrix/ -run
+    'TestBranchesArePopulated|TestBranchIsolation'` fails both with
+    "ranke.Archive.GetBranch: branch not found".
+  * concurrent (`concurrent.go:346` disabled): `go test
+    ./adapter/sequencer/concurrent/` fails `TestConcurrentBranchesAllSurvive`,
+    `TestOneContributionAdvancesSeveralBranches` and
+    `TestSameClaimToAnotherBranchAdvances`, all with "branch not found".
+
+Both lines are back; `sindri git status` reports the workspace clean. So the chain is
+held by tests in both engines — indirectly, through branches disappearing, because
+materialising the table is materialising the diff chain (`archive.go:72`,
+`universe_default.go:54` `materializeOne`, recursing at `:68`).
+
+Note — nothing *verifies* the chain. The only archive-scoped rule is `ruleArchiveHead`
+(`verify.go:501`, `V-ARCHIVE`: the head is a `contribution/branches` claim).
+`ruleBranchTableReference` (`verify.go:437`, `V-TABLEREF`) constrains how a table may be
+*referenced*, not that one carries a predecessor; `verify_spec_rules_test.go:46`'s own
+control builds a predecessor-less table and expects it to pass. So a received archive
+whose spine is broken verifies clean, and only a read notices, as a missing branch.
+Given the rule's "so the chain … reaches the initial table unbroken", I think this
+library owes an archive-scoped check: walk `contribution/diff` /
+`contribution/branches` from the head and require it to terminate at a table with
+neither. The taggers already walk exactly that chain
+(`universe_default_tagger.go:108`, `adapter/storage/neo4j/tag.go:150`).
+
+Note — the second sentence is unimplemented, which is the open decision the task
+points at. No code anywhere mints a `contribution/branches` *edge*: the only uses of
+`EdgeTypeBranches` are the two tagger spine walks and `verify.go:441` tolerating it.
+Every table this library writes is a diff. Two observations:
+
+  * In a single-branch archive every table restates every entry, so a literal reading
+    puts each of them in the second clause's case — carrying `contribution/branches`,
+    being a base claim — and the code always writes `contribution/diff`. The effect is
+    the same (the overlay still resolves), so this is form, not correctness. The spec's
+    own reference fixture says "Every revision restates only its delta"
+    (`ranke-spec.typ:920`), which suggests the clause is meant for a *compacting*
+    implementation rather than triggered incidentally by a total restatement. Whether
+    it is a MUST when the restatement happens to be total is the question I would put
+    back to the spec team.
+  * The clause's stated purpose is unrealised, and it is a real cost. Because no table
+    is ever a base claim, opening an archive at revision N materialises N tables:
+    `NewArchive` (`archive.go:65`) resolves the head through `GetClaim`, whose comment
+    at `archive.go:72` says "GetClaim materialises the diff chain", and
+    `materializeOne` recurses to the predecessor per revision. The overlay never stops.
+    Nothing caps or measures that depth.
+
+---
+
+### R-C6REQUEST — GAP
+
+Rule: "Every request a merged contribution carries (`R-C2TYPE`) MUST produce its
+limiting claim in the same merge. That claim MUST carry the same `created_at` as the
+branch table (`V-MONO` admits equality), and a `pubkey_expires_after` it sets MUST fall
+no earlier than that date. Every claim already in the archive stays valid, and so does
+every claim in a contribution still open, whose base time precedes the merge
+(`R-C1BASE`)."
+
+Code: nothing. Neither `contribution/expires_after_request` nor
+`contribution/delete_request` appears in any Go file. Step 6 in both engines folds
+heads, mints a table, appends history and publishes (`dev.go:134`,
+`concurrent.go:208`); neither looks at the contribution's edges, and neither creates a
+limiting claim under any circumstance. `concurrent.go:8` says so in its limits header.
+
+A request edge is expressible today, which is what makes this a gap rather than a
+vacancy. Edge *classes* are closed but subtypes are open vocabulary
+(`edge_taxonomy.go:9,21`, `V-TYPE`), so a `contribution/delete_request` edge is
+constructible, passes verification, and merges — and is then silently ignored for ever.
+A system account can therefore commit a request and be left believing the Sequencer
+will honour it.
+
+Test: NONE, and nothing to test. `verify_reference.go:92` cites the rule for a
+different purpose: it explains why `V-MONO` admits equality ("a contribution commits
+its claims at one instant (`R-C6REQUEST`)"). That citation is sound as a rationale and
+is not enforcement of anything in this rule.
+
+Ranked below `R-C3LIMIT` because the two travel together — a merge that honoured
+requests would mint limiting claims, which is precisely the thing nothing propagates —
+and because an unhonoured request is inert, where an unfound revocation makes
+verification answer wrongly.
+
+---
+
+### R-C6SIGN — UNTESTED
+
+Rule: "Every claim the Sequencer creates (`R-C2TYPE`) MUST carry a
+`contribution/contributor` edge naming the contributor claim configured as the
+Sequencer's identity. (RankeDB paper §Sequencer)"
+
+Code: the Sequencer creates three kinds of claim, and every one is built through
+`ranke.NewClaim(..., s.self)`: the branch table (`dev.go:250`, `concurrent.go:344`,
+including the bootstrap `k₀`), the consolidating head over branch heads
+(`dev.go:238`, `concurrent.go:325`), and the contribution's own consolidated head
+(`Graph.Consolidate` called with `s.self` at `dev.go:218` and `c.s.self` at
+`concurrent/contribution.go:185`). The edge itself is not written by the Sequencer:
+`assembleEdges` (`claim_builder.go:276`) adds the `contribution/contributor` edge for
+every non-root claim, and `checkEdgeCardinality` (`:342`) allows at most one. So the
+rule holds by construction in both engines, and `self` is required to carry a signing
+key at construction (`dev.go:77`, `concurrent.go:90`).
+
+Test: NONE for the identity. The edge's *presence* is covered by any verification run:
+`resolveSigner` (`verify.go:527`) fails with `errNoContributorEdge` on a claim that has
+edges but no contributor edge, so `tests/generator` `TestGenerateVerifies` and every
+archive verification would catch its removal. What nothing checks is "naming the
+contributor claim configured as the Sequencer's identity": `GetContributor` is never
+called in any test (`grep -rn GetContributor --include=*.go` returns only the two
+implementations and the interface), and a Sequencer that minted its tables under some
+other contributor would verify clean and pass the whole suite. A test worth having is
+three lines: read the head, find its `contribution/contributor` edge, require the
+reference to equal `seq.GetContributor().ID()`.
+
+---
+
+## Summary
+
+VERIFIED      7 — R-C1BASE, R-C2DATE, R-C2TYPE, R-C3CLOSE, R-C4KEY, R-C4SEAL, R-C6MERGE
+UNTESTED      2 — R-C5PERSIST, R-C6SIGN
+GAP           2 — R-C3LIMIT, R-C6REQUEST
+DIVERGENCE    0
+OUT OF SCOPE  0
+
+Two VERIFIED verdicts carry an unimplemented clause of their own rule rather than a
+clean bill: R-C2TYPE's request sentence (which is R-C6REQUEST's gap) and R-C6MERGE's
+base-table sentence. Both are recorded at the rule and in the findings below.
+
+Findings, in the order I would fix them:
+
+1. **R-C3LIMIT (GAP) — nothing propagates limiting claims, and `verify_expiry.go`
+   depends on it.** A revocation that is not in the branch's closure is not found, so
+   `verifyKeyWindow` admits a claim signed under a revoked key. Every test that needs a
+   limiting claim to be findable builds it into the same graph, so the suite cannot see
+   this. Fixing it is a step-6 propagation obligation plus a test whose fixture puts the
+   revocation in another branch — which is the shape no current fixture has.
+2. **R-C6MERGE — no verification rule holds a received archive's spine to the rule.**
+   Enforced by construction in both Sequencers and caught by tests when broken there,
+   but a foreign archive with a broken chain verifies clean. An archive-scoped rule
+   walking the lineage edges to a base table would close it, and the taggers already
+   walk that chain.
+3. **R-C5PERSIST (UNTESTED) — the barrier's read-back cannot see the durable tier.**
+   `stack.HasClaims` answers from the topmost layer holding the id, so on a stacked
+   Universe `Persist` confirms nothing about the authoritative store; durability rests
+   on `PutClaims`' synchronous authoritative write, one step earlier. Either say that in
+   the comment or make the check ask the tier that matters.
+4. **R-C6REQUEST (GAP) — a request edge is expressible and silently ignored.** Open
+   subtype vocabulary means a client can commit `contribution/delete_request` today; no
+   merge honours it. Travels with finding 1.
+5. **R-C6SIGN (UNTESTED) — nothing asserts the Sequencer's claims name its own
+   identity.** Cheap to close.
+6. **The per-engine test asymmetry.** No rule in this family is tested in both
+   Sequencers except R-C2DATE, R-C2TYPE and R-C3CLOSE's dangling-reference half. dev has
+   no test for R-C1BASE (base pinning) or R-C4SEAL; concurrent has none for
+   R-C3CLOSE's read-access clause or the type-lift matrix. The rules cannot drift —
+   `AdmitCreatedAt` and `AdmitType` are shared, as `contribution.go:230` says — but the
+   *calls* are per-engine lines of code, and deleting one of the untested ones breaks
+   nothing. A shared conformance suite run against both `ranke.Sequencer`
+   implementations would close the whole class; `tests/backends` already shows the shape
+   for storage.
+7. **R-C2TYPE — `Options()` will lift whatever a wire stream declares.** Not a rule
+   violation (grants are the server's, `R-AGRANT`), but the only thing standing between
+   a client's declared lift and a reserved type is the server remembering to call
+   `Narrow`. Worth stating as an obligation wherever server implementors are told what
+   they owe.
+
+What I did not check, and why:
+
+* **`R-A…` access rules.** Named by R-C3CLOSE (`R-ABRANCH`) and step 1, and listed as
+  another layer's in `rule-citations.allow:28-31`. I read `AdmitReferences` and
+  `AdmitBranch` because R-C3CLOSE's second sentence points at them, and stopped there.
+* **`V-…` rules the contribution path runs.** `CompleteAndVerify` runs the whole
+  verification registry, so every `V-*` rule is on the contribution path. I judged only
+  R-C4KEY, which R-C* names. `V-MONO` is now implemented (`verify.go:335`,
+  `verify_reference.go:97`) — `SPEC-REPORT.md:55` still reports it as enforced nowhere,
+  which was true when that document was written and is not now. Worth correcting there.
+* **`R-DEXPIRY`, `R-DPLANNED`, `R-DGAP`, `R-DSTRUCT`, `R-DREQUEST`.** Reached through
+  the same code (`StrandedByDeletion`, `ruleDeleteByCopied`, `CheckDeletable`) and
+  verified under sd-2276f6; I did not redo them.
+* **The history adapter.** Both engines append a revision inside step 6
+  (`dev.go:200`, `concurrent.go:250`) and neither R-C6* rule mentions history, so I
+  left `ranke.History` and its dev implementation alone.
+* **Whether the six steps are correct under concurrency.** `concurrent`'s group commit
+  is a design this family's rules do not constrain: R-C6MERGE binds the table it mints,
+  which I checked, and the rest is throughput. `tests/concurrency_test.go` and the
+  group-commit tests own that.
+* **`make test` / `make test/full`.** Not run. The only runs I made are the two
+  mutation experiments named under R-C6MERGE, plus the two-line matrix invocation they
+  needed.

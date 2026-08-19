@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -370,6 +370,24 @@ lint:
 rule-citations:
 	@./scripts/rule-citations.sh
 
+# Rule-coverage gate for the published reference vectors: every ADT (V-*) rule the
+# spec declares either has a case that BREAKS it, or is listed in
+# scripts/rule-vectors.allow with a reason. It generates the set and reads the
+# manifest, so what is gated is the artifact downstream receives.
+#
+# Coverage is per RULE, not per clause — see the script's header for what that misses.
+# Needs the spec, like rule-citations; RANKE_SPEC points it at a copy.
+rule-vectors:
+	@./scripts/rule-vectors.sh
+
+# rql-schema: the machine-readable projection of the query language against the Go
+# constants that implement it. Every constraint the schema states is probed against
+# DecodeQuery, and a keyword the gate cannot check FAILS rather than passing silently.
+# Needs the schema, which `make docs` fetches into gitignored docs/papers/, so it fails
+# on a bare checkout rather than passing blind. RANKE_RQL_SCHEMA points it elsewhere.
+rql-schema:
+	@go run ./scripts/rqlgate
+
 # The static gates: build the binaries, check formatting, run the lint gate, check
 # rule citations, and reproduce the scenario bundles. Everything that reads the tree
 # rather than running the suite — the tests are `test` (fast) and `test/full`
@@ -388,7 +406,7 @@ rule-citations:
 # the desk, and that is how the 0.18.0 signature framing landed against a bundle
 # it had invalidated. `release` depends on this target, so an id-moving release
 # now stops here rather than shipping a reference that reproduces nothing.
-verify: build fmt-check lint rule-citations verify-scenarios
+verify: build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios
 
 # One-shot "is everything green", and the name people reach for, so it costs what
 # that name promises: the static gates, vet, and the fast suite. Seconds. The full

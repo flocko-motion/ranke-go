@@ -80,6 +80,8 @@ var (
 	errQuery     = errors.New("adapter/neo4j: query")
 	errDeltaForm = ranke.WithDetail(ranke.ErrUnsupported,
 		"adapter/neo4j: delta form — this cache stores materialised claims only")
+	errByteForm = ranke.WithDetail(ranke.ErrUnsupported,
+		"adapter/neo4j: serialised form — this cache keeps no canonical bytes")
 )
 
 // query runs a Cypher statement in an auto-commit transaction, scoped to the

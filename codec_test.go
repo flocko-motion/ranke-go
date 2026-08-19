@@ -109,8 +109,8 @@ func TestEncodeJSONCarriesEveryEdgeSlot(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
-	// A relation claim rests on its provenance (§3.5), so it cites the source it
-	// was read from as well as the entity it relates.
+	// This relation cites the source it was read from as well as the entity it
+	// relates, so the fixture carries both edge classes.
 	prov, err := NewEdge(EdgeConfig{Reference: target.ID(), Type: TypeDerivation("register")})
 	require.NoError(t, err)
 	person, err := NewClaim(TypeEntity("person"), alice).

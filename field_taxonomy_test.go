@@ -117,8 +117,7 @@ func TestEdgeFieldNameNamespace_Rejected(t *testing.T) {
 // TestSubtypeNamespace_Valid: open-vocabulary subtypes within the strict
 // charset are accepted.
 func TestSubtypeNamespace_Valid(t *testing.T) {
-	// All source/* so no provenance edge is required (§3.5) — this test
-	// isolates the subtype charset, nothing else.
+	// All source/*, so this test isolates the subtype charset, nothing else.
 	for _, typ := range []string{
 		"source/email",
 		"source/fact_extraction", // "_" allowed
