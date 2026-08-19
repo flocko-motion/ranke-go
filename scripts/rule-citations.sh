@@ -24,10 +24,11 @@
 # here, since two gates for one job with two definitions of a citation — one
 # backticked, one a bare word — is worse than either alone.
 #
-# It needs the spec, which `make docs` fetches into docs/papers/ (gitignored), so
-# it fails on a bare checkout rather than passing blind — as does `make verify`
-# through it. RANKE_SPEC points it at a copy of your own, for working offline or
-# against a spec not published yet.
+# It needs the spec, which lands in gitignored docs/papers/. Run through `make
+# verify` that copy has just been brought up to the ranke-graph ref; run on its own
+# it reads whatever is there, and fails on a bare checkout rather than passing
+# blind. RANKE_SPEC points it at a copy of your own, for working offline or against
+# a spec not published yet.
 #
 # Usage: scripts/rule-citations.sh   (from any directory; `make verify` runs it)
 #   RANKE_SPEC=<path>  a spec to read instead; a relative path is repo-relative.

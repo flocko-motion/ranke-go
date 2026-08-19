@@ -52,7 +52,10 @@ jobs:
 
       # The spec the rule-citation gate reads (`RANKE_SPEC`, else docs/papers/) lives
       # in ranke-graph, so it is infrastructure like the services: fetched, not
-      # skipped. `make verify` fails without it rather than passing blind.
+      # skipped. `make verify` fetches it too, through `docs-current`, which finds the
+      # stamp this step just wrote and re-clones nothing. Kept as its own step so an
+      # unreachable papers repo is named here rather than inside a gate — and named
+      # in seconds, before the services are waited on.
       - name: Fetch the spec
         run: make docs
 

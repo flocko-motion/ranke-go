@@ -127,15 +127,19 @@ cross-universe copy to `adapter.DefaultCopyClaims` / `DefaultCopyContents`.
 make            # run the tests
 make build      # verify the library compiles
 make test-verbose
-make docs       # fetch the spec and papers into docs/papers/ (gitignored)
-make verify     # build, gofmt, lint, citations, scenarios — after `make docs`
+make docs       # re-fetch the spec and papers into docs/papers/ (gitignored)
+make verify     # build, gofmt, lint, citations, scenarios
 ```
 
 `make verify` checks the rule ids comments cite — a backticked `V-…` or `R-…` —
-against the spec's own declarations, so it reads `docs/papers/`. That directory
-is fetched rather than committed, and a gate that cannot see the spec fails
-rather than passing: run `make docs` once on a fresh clone, or set `RANKE_SPEC`
-to a copy of your own.
+against the spec's own declarations, so it reads `docs/papers/`. That directory is
+fetched rather than committed, and `verify` brings it up to the ranke-graph ref
+first: one `git ls-remote` against the commit stamped in `docs/papers/.ranke-graph-sha`,
+cloning only when the ref has moved. A gate that cannot see the spec fails rather
+than passing, and so does one that cannot establish the copy's age — an expiring
+cache reads green against whatever it happens to hold. Working without the network
+is a deliberate ask: `RANKE_DOCS_OFFLINE=1` keeps the copy on disk, and `RANKE_SPEC`
+points the citation gates at one of your own.
 
 It also reproduces each conformance scenario and diffs the result against the
 committed bundle, which is what holds the claim ids in

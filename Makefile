@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -339,17 +339,24 @@ conformance-bundle: verify-scenarios scenarios-docs
 # Pull the latest ranke-graph papers into docs/papers/ for reference.
 # Not committed — fetched fresh (see .gitignore).
 docs:
-	@echo ">> fetching ranke-graph papers into $(PAPERS_DIR)/"
-	@tmp=$$(mktemp -d) && \
-		git clone --depth 1 --branch $(RANKE_GRAPH_REF) $(RANKE_GRAPH_REPO) $$tmp >/dev/null 2>&1 && \
-		rm -rf $(PAPERS_DIR) && mkdir -p $(PAPERS_DIR) && \
-		cp -r $$tmp/[0-9]*-* $(PAPERS_DIR)/ && \
-		for d in shared spec glossary; do \
-			[ -d $$tmp/$$d ] && cp -r $$tmp/$$d $(PAPERS_DIR)/; \
-		done; \
-		cp $$tmp/LICENSE $(PAPERS_DIR)/LICENSE 2>/dev/null || true; \
-		rm -rf $$tmp; \
-		echo ">> pulled $$(find $(PAPERS_DIR) -name '*.typ' | wc -l | tr -d ' ') paper(s)"
+	@RANKE_GRAPH_REPO=$(RANKE_GRAPH_REPO) RANKE_GRAPH_REF=$(RANKE_GRAPH_REF) \
+		PAPERS_DIR=$(PAPERS_DIR) ./scripts/fetch-papers.sh
+
+# The freshness check the gates run: `git ls-remote` against the stamp
+# scripts/fetch-papers.sh writes, cloning only when the ref has moved — 40 bytes on
+# the common path, 1.8 MB when there is something new to read.
+#
+# `verify` depends on this because the papers directory is gitignored and never
+# expires: a copy fetched last week reads exactly like one fetched a minute ago, so
+# every gate over it was reporting green against whatever happened to be on disk.
+# That is how ranke-ts came to gate on six-day-old vectors, and the release path is
+# where it costs most — `release` runs `verify`, so a stale spec ships.
+#
+# It needs the network. RANKE_DOCS_OFFLINE=1 keeps the copy on disk instead, and
+# RANKE_SPEC / RANKE_RQL_SCHEMA point the individual gates at a copy of your own.
+docs-current:
+	@RANKE_GRAPH_REPO=$(RANKE_GRAPH_REPO) RANKE_GRAPH_REF=$(RANKE_GRAPH_REF) \
+		PAPERS_DIR=$(PAPERS_DIR) ./scripts/fetch-papers.sh --if-moved
 
 # Remove the pulled paper references.
 docs-clean:
@@ -383,8 +390,9 @@ rule-vectors:
 # rql-schema: the machine-readable projection of the query language against the Go
 # constants that implement it. Every constraint the schema states is probed against
 # DecodeQuery, and a keyword the gate cannot check FAILS rather than passing silently.
-# Needs the schema, which `make docs` fetches into gitignored docs/papers/, so it fails
-# on a bare checkout rather than passing blind. RANKE_RQL_SCHEMA points it elsewhere.
+# Needs the schema from gitignored docs/papers/, which `verify` fetches through
+# `docs-current` before this runs; on its own it fails on a bare checkout rather than
+# passing blind. RANKE_RQL_SCHEMA points it elsewhere.
 rql-schema:
 	@go run ./scripts/rqlgate
 
@@ -393,10 +401,11 @@ rql-schema:
 # rather than running the suite — the tests are `test` (fast) and `test/full`
 # (everything). Around 2s on top of the build.
 #
-# Needs the spec: rule-citations reads $(PAPERS_DIR), which is gitignored, so on
-# a fresh clone `make verify` fails until `make docs` has fetched the papers. A
-# gate that cannot see the spec cannot check it, and a skip would turn green
-# exactly where it is blind.
+# Needs the spec, and now fetches it: `docs-current` brings $(PAPERS_DIR) up to the
+# remote ref before any gate reads it, so a bare clone no longer fails here and a
+# stale copy no longer passes. A gate that cannot see the spec cannot check it, and
+# one reading a copy of unknown age is blind in the same way — a skip would turn
+# green exactly there.
 #
 # WRITES to the tree: verify-scenarios regenerates conformance/scenarios/*/data/,
 # which `make clean` owns and .gitignore covers — no hand-written file is touched,
@@ -406,7 +415,7 @@ rql-schema:
 # the desk, and that is how the 0.18.0 signature framing landed against a bundle
 # it had invalidated. `release` depends on this target, so an id-moving release
 # now stops here rather than shipping a reference that reproduces nothing.
-verify: build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios
+verify: docs-current build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios
 
 # One-shot "is everything green", and the name people reach for, so it costs what
 # that name promises: the static gates, vet, and the fast suite. Seconds. The full
