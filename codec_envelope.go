@@ -10,6 +10,7 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"reflect"
+	"strconv"
 
 	cose "github.com/veraison/go-cose"
 )
@@ -86,10 +87,25 @@ func verifyEnvelope(pubkey, raw []byte) error {
 
 // decodeEnvelope parses the stored bytes as a COSE_Sign1. go-cose refuses an
 // untagged message and an empty signature, so what parses here is a signed record.
+//
+// `V-ENV` pins the headers to alg and nothing else, which is what makes the envelope
+// canonical: the id hashes these bytes, so a spare header would give one claim a
+// second stored form and a second id, both verifying.
 func decodeEnvelope(raw []byte) (*cose.Sign1Message, error) {
 	var msg cose.Sign1Message
 	if err := msg.UnmarshalCBOR(raw); err != nil {
 		return nil, Wrap(errDecodeEnvelope, err)
+	}
+	if len(msg.Headers.Unprotected) != 0 {
+		return nil, WithDetail(ErrEnvelopeHeaders, "unprotected header carries "+
+			strconv.Itoa(len(msg.Headers.Unprotected))+" parameter(s), want none")
+	}
+	if _, ok := msg.Headers.Protected[cose.HeaderLabelAlgorithm]; !ok {
+		return nil, WithDetail(ErrEnvelopeHeaders, "protected header names no algorithm")
+	}
+	if len(msg.Headers.Protected) != 1 {
+		return nil, WithDetail(ErrEnvelopeHeaders, "protected header carries "+
+			strconv.Itoa(len(msg.Headers.Protected))+" parameters, want alg alone")
 	}
 	return &msg, nil
 }

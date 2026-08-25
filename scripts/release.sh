@@ -8,7 +8,25 @@
 #
 # Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix)
 #   Needs `gh` when run from a feature branch.
+#
+# `make release pre <bump>` cuts a PRERELEASE instead: it pushes the branch and tags
+# it vX.Y.Z-rc.N, merging nothing. That gives a version the module proxy resolves —
+# which is what regenerating the cross-implementation vectors in ranke-graph needs —
+# without a tag on the default branch. It exists because those vectors are generated
+# BY a released ranke-go and checked BY its own suite, so an encoder change cannot go
+# green until a version of it exists: tag an rc, regenerate, publish, and the real
+# release then merges a branch CI has actually passed, which is what ci.yml promises.
+#
+# An rc tag can dangle. It points at a branch commit, and a later squash or rebase
+# leaves it outside the default branch's history. That is fine for scaffolding and
+# wrong for anything archival: regenerate from the real tag once it exists.
 set -euo pipefail
+
+prerelease=""
+if [ "${1:-}" = "pre" ]; then
+	prerelease=1
+	shift
+fi
 
 bump="${1:-}"
 case "$bump" in
@@ -16,10 +34,18 @@ case "$bump" in
 	minor | feature)  bump=minor ;; # backwards-compatible feature
 	patch | fix)      bump=patch ;; # backwards-compatible fix
 	*)
-		echo "usage: make release <major|breaking | minor|feature | patch|fix>" >&2
+		echo "usage: make release [pre] <major|breaking | minor|feature | patch|fix>" >&2
 		exit 1
 		;;
 esac
+shift || true
+
+# A word left over means `pre` came second, and taking the first as the bump would
+# cut the real release this invocation asked not to.
+if [ "$#" -gt 0 ]; then
+	echo "unexpected argument '$1' — 'pre' comes first: make release pre <bump>" >&2
+	exit 1
+fi
 
 # 1. Clean tree — a release must capture a committed state.
 if [ -n "$(git status --porcelain)" ]; then
@@ -35,7 +61,18 @@ start="$(git rev-parse --abbrev-ref HEAD)"
 # Always end back on the branch we started on — never park on the default branch.
 trap 'git checkout --quiet "$start" 2>/dev/null || true' EXIT
 
-if [ "$start" != "$default" ]; then
+if [ -n "$prerelease" ]; then
+	# 2p. Prerelease: the point is a resolvable version WITHOUT touching the default
+	#     branch, so the branch is pushed and nothing is merged. From the default
+	#     branch there is nothing to be a candidate for — release instead.
+	if [ "$start" = "$default" ]; then
+		echo "on '$default' — a prerelease is cut from a branch; release from here instead" >&2
+		exit 1
+	fi
+	echo "pushing '$start'…"
+	git push --force-with-lease -u origin "$start"
+	target="HEAD"
+elif [ "$start" != "$default" ]; then
 	# 2. Feature branch: push it, open a PR if there isn't one, and merge it into
 	#    the default branch — without switching this checkout — so the tag comes
 	#    off the merged tip.
@@ -95,7 +132,18 @@ case "$bump" in
 esac
 next="v${maj}.${min}.${pat}"
 
-echo "tagging ${latest} -> ${next} on ${default}"
+if [ -n "$prerelease" ]; then
+	# The candidate names the version it is for, numbered past whatever candidates
+	# that version already has, so a second attempt does not collide with the first.
+	n=1
+	while git rev-parse --quiet --verify "refs/tags/${next}-rc.${n}" >/dev/null; do
+		n=$((n + 1))
+	done
+	next="${next}-rc.${n}"
+	echo "tagging ${next} on '${start}' — no merge, nothing on ${default}"
+else
+	echo "tagging ${latest} -> ${next} on ${default}"
+fi
 git tag -a "$next" "$target" -m "release $next"
 git push origin "$next"
 

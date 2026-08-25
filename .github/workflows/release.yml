@@ -18,7 +18,13 @@ jobs:
 
       # No build assets: consumers take the library with `go get`, and the
       # cross-implementation artifacts live with the spec in ranke-graph.
+      #
+      # A tag carrying a hyphen is a release candidate (`make release pre`), and says
+      # so: unmarked it would take the repo's "latest release", which is what a reader
+      # lands on. Go already excludes prereleases from @latest by semver, so this is
+      # about what a person sees rather than what a build resolves.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

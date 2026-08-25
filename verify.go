@@ -336,6 +336,7 @@ var verifyRules = []verifyRule{
 	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
 	{name: "relation direction", rule: "a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0 (`V-REL`)", edge: ruleRelationDirection},
+	{name: "edge order", rule: "a claim's edges are inlined ascending by id(e), compared as byte strings (`V-EORDER`)", claim: ruleEdgeOrder},
 	{name: "delete mark target", rule: "a contribution/delete claim carries a contribution/delete edge naming the claim it deletes (`R-DREQUEST`)", claim: ruleDeleteMarkShape},
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},

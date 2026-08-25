@@ -231,9 +231,10 @@ func TestEdgeCarriesTargetDeleteBy(t *testing.T) {
 
 // --- honest graphs verify ----------------------------------------------
 
-// TestVerifyIdentityGraph: an honestly-built identity-Sign graph verifies —
-// the walk finishes with no failures and no terminal error.
-func TestVerifyIdentityGraph(t *testing.T) {
+// TestVerifyGraphSignedByItsContributor: a claim signs under the key its contributor
+// carries, with no key passed at the call — the other half of TestVerifySignedGraph,
+// which hands one over explicitly.
+func TestVerifyGraphSignedByItsContributor(t *testing.T) {
 	root := contributor(t)
 	g := newGraph(t, root)
 	require.NoError(t, g.AddClaims(context.Background(), srcClaim(t, root, "hello")))
@@ -241,7 +242,7 @@ func TestVerifyIdentityGraph(t *testing.T) {
 	run := g.Verify()
 	run.Wait()
 	require.NoError(t, run.Err(), "no terminal error")
-	require.Empty(t, run.Failures(), "identity-Sign closure verifies")
+	require.Empty(t, run.Failures(), "the closure verifies")
 }
 
 // TestVerifySignedGraph: an honestly-built signed graph verifies — the

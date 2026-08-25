@@ -99,6 +99,48 @@ that works here:
   {{.TestImports}}' ./...` is authoritative. A text search is not: it misses
   build constraints and cannot tell a test import from a real one.
 
+# Releasing a change that moves every id
+
+An encoder change — a new record key, an alias, anything touching `S(v)` or the
+envelope around it — moves every claim id in every archive. Two artifacts then have
+to catch up, and they catch up in different places.
+
+The **scenario bundles** are local: `make update-references`, read the diff, confirm
+each scenario still reports every claim valid, and commit them with the change.
+
+The **published vector set** lives in ranke-graph, and is generated *by* a released
+ranke-go and checked *by* ranke-go's own suite. So `TestPublishedClaimVectors` cannot
+go green until a version of the new code exists — and cutting a release from a red
+`main` is what `ci.yml` exists to prevent. A release candidate breaks that circle:
+
+```sh
+make release pre minor          # tags vX.Y.Z-rc.N on the branch, merges nothing
+```
+
+Then in ranke-graph, regenerate the set at that tag and publish it:
+
+```sh
+go run github.com/flocko-motion/ranke-go/cmd/vectors@vX.Y.Z-rc.N -out <testdata-dir>
+```
+
+Point `expectedGenerator` in `tests/vectors_test.go` at the version that generated
+the set. It is what lets a failing vector run say whether the bundle is out of step
+with the code or the encoder has broken; left behind, it explains the next failure
+with the wrong story.
+
+With the set published the suite goes green, so the real release merges a branch CI
+has passed:
+
+```sh
+make release minor              # PR, merge, tag from a tested main
+```
+
+Regenerating the set once more at the final tag is optional — the bytes are identical
+either way, since only the manifest's `GeneratedAt` and version differ — but it leaves
+the published set naming a release rather than a candidate. Do it, or set
+`expectedGenerator` to the candidate; leaving the two disagreeing is what the pin is
+there to prevent.
+
 # Writing code
 
 - Comments are short. Two lines is already long; a 10-line block is wrong.

@@ -254,12 +254,16 @@ tidy:
 # Cut a release: verify → rebase onto the default branch → merge via PR → tag the
 # merged tip → push the tag → watch the release workflow, failing here if it fails.
 # Usage: make release <major|minor|patch> (aliases: breaking|feature|fix).
+#
+# `make release pre <bump>` tags a candidate on the branch instead, merging nothing —
+# a version the proxy resolves, so ranke-graph can regenerate the vectors before the
+# real release is cut. See scripts/release.sh for why that order matters.
 release: verify
-	@./scripts/release.sh $(filter major minor patch breaking feature fix,$(MAKECMDGOALS))
+	@./scripts/release.sh $(filter pre major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
 # as a missing target.
-major minor patch breaking feature fix:
+pre major minor patch breaking feature fix:
 	@:
 
 # Run every conformance scenario from a clean state.

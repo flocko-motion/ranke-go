@@ -38,8 +38,8 @@ func matchAll(e Edge, filters []Filter) bool {
 }
 
 // checkSigningConsistency verifies the SigningKey matches the pubkey this claim
-// declares (§5.7) and classifies the identity-Sign case. Resolved pubkeys match
-// on bytes, an external root declaration on H(key.Public()) — so no Universe.
+// declares (§5.7). Resolved pubkeys match on bytes, an external root declaration on
+// H(key.Public()) — so no Universe.
 func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 	hasSigner := cfg.SigningKey != nil && !isTypedNil(cfg.SigningKey)
 	if !isRoot {
@@ -66,21 +66,22 @@ func checkSigningConsistency(cfg ClaimBuilder, isRoot bool) error {
 		}
 		return nil
 	default:
-		// No declared pubkey: identity-Sign, or a key with nothing to attest to.
+		// A contributor claim declaring no pubkey at all: nothing to sign under, and
+		// nothing for its own claims to verify against (`V-SIG`).
 		if hasSigner {
 			return errResolvedNoPubkey
 		}
-		return nil
+		return errEnvelopeNoKey
 	}
 }
 
-// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes.
-// Neither half present is identity-Sign; one half alone is an error.
+// checkKeyAgainstPubkey matches a signing key against a pubkey given as bytes. Every
+// claim is signed, so both halves are required and either alone is an error.
 func checkKeyAgainstPubkey(hasSigner bool, key crypto.Signer, pubkey []byte) error {
 	hasPubkey := len(pubkey) > 0
 	switch {
 	case !hasSigner && !hasPubkey:
-		return nil // identity-Sign case
+		return errEnvelopeNoKey
 	case hasSigner && !hasPubkey:
 		return errResolvedNoPubkey
 	case !hasSigner && hasPubkey:

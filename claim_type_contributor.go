@@ -15,8 +15,8 @@ import (
 // Claim.AsContributor or Claim.Contributor.
 type Contributor interface {
 	Claim
-	// SigningKey is the private key matching this contributor's pubkey, nil for
-	// identity-Sign (§5.7) or a contributor loaded from disk.
+	// SigningKey is the private key matching this contributor's pubkey (§5.7), nil
+	// on one loaded for reading, which verifies claims rather than making them.
 	SigningKey() crypto.Signer
 	// Pubkey is the multikey public key (§5.7), which AsContributor resolves once
 	// and caches, so signing can check a key without a Universe.
@@ -32,7 +32,7 @@ func (c *claim) SigningKey() crypto.Signer { return nil }
 func (c *claim) Pubkey() []byte { return c.node.content }
 
 // WithSigningKey returns a Contributor carrying the key matching c's pubkey, so
-// later calls sign on its behalf. A nil key collapses to identity-Sign.
+// later calls sign on its behalf. A nil key leaves it able to read, not to build.
 func WithSigningKey(c Contributor, key crypto.Signer) Contributor {
 	return &signedContributor{contributor: c, key: key}
 }
