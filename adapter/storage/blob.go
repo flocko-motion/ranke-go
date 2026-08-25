@@ -181,8 +181,7 @@ func (u *blobUniverse) PutClaims(ctx context.Context, cs []ranke.Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		// As written: the stored record is what the id derives from.
-		data, err := c.EncodeCBOR(ranke.FormOriginal)
+		data, err := c.Envelope()
 		if err != nil {
 			return err
 		}

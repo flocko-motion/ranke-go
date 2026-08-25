@@ -114,6 +114,7 @@ var (
 	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
 	ErrQueryBounds           = errors.New("ranke.Query: value below the minimum the schema fixes for its field")
+	ErrQueryEnvelopeAxis     = errors.New("ranke.Query: detail envelope returns the stored bytes, which this axis would have to change (`R-QDETAIL`)")
 	ErrQueryOrderField       = errors.New("ranke.Query: a sort key names the field it orders on")
 	ErrQueryLayerName        = errors.New("ranke.Query: execution.layer names a layer, so a stated one may not be empty")
 	ErrReservedType          = errors.New("ranke.Contribution: node type is the Sequencer's alone (lift it to add one)")
@@ -148,8 +149,13 @@ var (
 	errID                    = errors.New("ranke.Id")
 	errEncodePubkey          = errors.New("ranke: unsupported public key type")
 	errDecodePubkey          = errors.New("ranke.DecodePublicKey")
-	errSignHash              = errors.New("ranke.signHash")
-	errVerifySig             = errors.New("ranke.verifySignature")
+	errSignEnvelope          = errors.New("ranke.signEnvelope")
+	errDecodeEnvelope        = errors.New("ranke.decodeEnvelope")
+	errVerifyEnvelope        = errors.New("ranke.verifyEnvelope")
+	errEnvelopeNoKey         = errors.New("ranke.signEnvelope: a claim is signed, so a signing key is required (`V-SIG`)")
+	errEnvelopeNoPubkey      = errors.New("ranke.verifyEnvelope: the contributor carries no pubkey, so nothing verifies its claims (`V-SIG`)")
+	errEnvelopeNoPayload     = errors.New("ranke: the envelope carries no payload, so there is no claim in it")
+	errNoEnvelope            = errors.New("ranke.Claim.Envelope: this claim holds no stored record — it was rebuilt from parts, which carry no signature; id")
 	errLoadKeypair           = errors.New("ranke.LoadPrivateKey")
 	errLoadPrivKey           = errors.New("ranke.LoadEd25519PrivateKeyPEM")
 	errLoadPubKey            = errors.New("ranke.LoadEd25519PublicKeyPEM")
@@ -168,6 +174,7 @@ var (
 	// --- ADT shape, checked wherever a claim arrives rather than at the builder
 	// alone: a record decoded or assembled meets these too.
 	ErrContentBothSlots  = errors.New("ranke: a record carries both content and content_hash, which are mutually exclusive")
+	ErrIDMismatch        = errors.New("ranke.verify: the claim's id is not the hash of the envelope it is stored as")
 	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
 	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
 	// ErrDeleteMarkNoTarget: a mark that names nothing explains no gap (`R-DGAP`).

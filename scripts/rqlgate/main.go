@@ -200,8 +200,8 @@ func run() error {
 	return nil
 }
 
-// readSchema resolves the schema, failing rather than passing when it is absent: it is
-// fetched into gitignored docs/papers, so a bare checkout must be told to fetch it.
+// readSchema resolves the schema, failing rather than passing when it is absent: it
+// lands in gitignored docs/papers, which `make verify` fetches before this runs.
 func readSchema() (string, []byte, error) {
 	for _, p := range []string{os.Getenv(schemaEnv), "docs/papers/spec/rql.schema.json"} {
 		if p == "" {

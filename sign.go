@@ -1,13 +1,13 @@
 // package: ranke / sign
 // type:    crypto
-// job:     multikey-framed Sign/verify (§4.1) plus Ed25519 key encoding and PEM loading
-// limits:  does not compute the hash being signed (-> hash); supports only Ed25519 today
+// job:     multikey pubkey framing (`V-SIGN`) plus Ed25519 key encoding and PEM loading
+// limits:  signs and verifies nothing — a claim's signature lives in its envelope
+// (-> envelope); supports only Ed25519 today
 package ranke
 
 import (
 	"crypto"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/pem"
@@ -18,21 +18,8 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
-// Multikey framing (§4.1): pubkey and signature bytes each lead with a multicodec
-// varint naming the scheme (`V-SIGN`), and the two schemes differ, so the code alone
-// says which a byte string is.
-
-// signatureCodeFor is the signature scheme a pubkey scheme signs with. Distinct codes
-// are what keep the two apart; a shared one leaves only payload length to tell them by.
-func signatureCodeFor(pubCode multicodec.Code) (multicodec.Code, bool) {
-	if pubCode == multicodec.Ed25519Pub {
-		return multicodec.Eddsa, true
-	}
-	return 0, false
-}
-
-// EncodePublicKey wraps a Go public key as a multikey:
-// <multicodec varint><raw key bytes>.
+// EncodePublicKey wraps a Go public key as a multikey, the framing `V-SIGN` fixes:
+// <multicodec varint naming the scheme><raw key bytes>.
 func EncodePublicKey(pub crypto.PublicKey) ([]byte, error) {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
@@ -56,69 +43,6 @@ func DecodePublicKey(b []byte) (multicodec.Code, crypto.PublicKey, error) {
 		return code, ed25519.PublicKey(rest), nil
 	default:
 		return code, nil, WithDetail(errDecodePubkey, "unsupported multicodec "+code.String()+" (0x"+strconv.FormatUint(uint64(code), 16)+")")
-	}
-}
-
-// signHash returns the multikey-wrapped signature over hash, or hash itself
-// when signingKey is nil — the identity Sign case (§4.1).
-func signHash(signingKey crypto.Signer, hash []byte) ([]byte, error) {
-	if signingKey == nil {
-		return hash, nil
-	}
-	switch pub := signingKey.Public().(type) {
-	case ed25519.PublicKey:
-		// crypto.Hash(0) per the stdlib Ed25519 signer contract.
-		sig, err := signingKey.Sign(rand.Reader, hash, crypto.Hash(0))
-		if err != nil {
-			return nil, WrapDetail(errSignHash, "ed25519 sign", err)
-		}
-		return prependCode(multicodec.Eddsa, sig), nil
-	default:
-		return nil, WithDetail(errSignHash, "unsupported signer public key type "+reflect.TypeOf(pub).String())
-	}
-}
-
-// verifySignature checks idPayload as a signature by pubkey's owner over hash;
-// an empty pubkey means idPayload must equal hash (identity Sign).
-func verifySignature(pubkey, hash, idPayload []byte) error {
-	if len(pubkey) == 0 {
-		// Identity Sign: id is just the hash.
-		if !bytesEqual(hash, idPayload) {
-			return errIdentitySignMismatch
-		}
-		return nil
-	}
-	pubCode, pub, err := DecodePublicKey(pubkey)
-	if err != nil {
-		return WrapDetail(errVerifySig, "decode pubkey", err)
-	}
-	sigCode, sig, err := splitCode(idPayload)
-	if err != nil {
-		return WrapDetail(errVerifySig, "decode signature", err)
-	}
-	want, paired := signatureCodeFor(pubCode)
-	if !paired {
-		return WithDetail(errVerifySig, "unsupported scheme "+pubCode.String())
-	}
-	if sigCode != want {
-		return WithDetail(errVerifySig, "scheme mismatch (pubkey="+pubCode.String()+
-			" signs with "+want.String()+", sig="+sigCode.String()+")")
-	}
-	switch pubCode {
-	case multicodec.Ed25519Pub:
-		edPub, ok := pub.(ed25519.PublicKey)
-		if !ok {
-			return WithDetail(errVerifySig, "ed25519 pubkey type "+reflect.TypeOf(pub).String())
-		}
-		if len(sig) != ed25519.SignatureSize {
-			return WithDetail(errVerifySig, "ed25519 sig has "+strconv.Itoa(len(sig))+" bytes, want "+strconv.Itoa(ed25519.SignatureSize))
-		}
-		if !ed25519.Verify(edPub, hash, sig) {
-			return errEd25519Verify
-		}
-		return nil
-	default:
-		return WithDetail(errVerifySig, "unsupported scheme "+pubCode.String())
 	}
 }
 
@@ -211,17 +135,4 @@ func splitCode(b []byte) (multicodec.Code, []byte, error) {
 // readCode reads the leading code and returns the rest.
 func readCode(b []byte) (multicodec.Code, []byte, error) {
 	return splitCode(b)
-}
-
-// bytesEqual compares two byte slices, keeping "bytes" out of the imports.
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

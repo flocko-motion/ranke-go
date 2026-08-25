@@ -38,9 +38,12 @@ type ClaimBuilder struct {
 	// reachable only through the chained setter.
 	autoHeightU   Universe
 	autoHeightCtx context.Context
-	// SigningKey signs this claim's id; nil plus an empty pubkey is identity Sign
-	// (§5.7). A contributor claim's pubkey is its InlineContent, multikey-encoded.
+	// SigningKey signs this claim's envelope. A contributor claim's pubkey is its
+	// InlineContent, multikey-encoded.
 	SigningKey crypto.Signer
+	// allowInvalid backs AllowInvalid: the rules go unapplied, the sealing still
+	// happens. Unexported, so the mode is reachable only through the setter.
+	allowInvalid bool
 }
 
 // NewClaim seeds a ClaimBuilder with the required type and attributing
@@ -104,6 +107,14 @@ func (b ClaimBuilder) WithContributor(c Contributor) ClaimBuilder { b.Contributo
 // WithSigningKey sets the key used to sign the claim id.
 func (b ClaimBuilder) WithSigningKey(k crypto.Signer) ClaimBuilder { b.SigningKey = k; return b }
 
+// AllowInvalid builds a claim the rules refuse: the type vocabulary, field limits,
+// edge cardinality, the content slots and the key/pubkey pairing all go unjudged.
+// What still happens is the sealing — canonical bytes, envelope, id — so the result
+// is a real record breaking exactly what its caller aimed at, which is what a
+// conformance case needs. A Sequencer verifies on admission, so such a claim reaches
+// no archive through the front door.
+func (b ClaimBuilder) AllowInvalid() ClaimBuilder { b.allowInvalid = true; return b }
+
 // WithEdges appends the given edges to the builder's Edges slice.
 func (b ClaimBuilder) WithEdges(edges ...Edge) ClaimBuilder {
 	b.Edges = append(b.Edges, edges...)
@@ -127,9 +138,13 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err := resolveType(&cfg); err != nil {
 		return nil, err
 	}
-	hasInline, hasExternal, err := resolveContentState(&cfg)
-	if err != nil {
-		return nil, err
+	hasInline, hasExternal := resolveContentState(&cfg)
+	// Ahead of the encoding, which a claim carrying both slots would be judged for
+	// first, naming the wrong defect.
+	if !cfg.allowInvalid {
+		if err := checkContentState(cfg, hasInline, hasExternal); err != nil {
+			return nil, err
+		}
 	}
 	if err := resolveEncoding(&cfg, hasInline || hasExternal); err != nil {
 		return nil, err
@@ -146,10 +161,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkFields(cfg.Fields); err != nil {
-		return nil, err
-	}
-	if err := CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields); err != nil {
+	if err := checkClaim(cfg); err != nil {
 		return nil, err
 	}
 
@@ -175,11 +187,14 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	}
 	n.height = height
 
-	if err := signNode(n, edges, &cfg, isRootContributor); err != nil {
+	env, err := signNode(n, edges, &cfg, isRootContributor)
+	if err != nil {
 		return nil, err
 	}
 
-	c := &claim{node: n, edges: edges}
+	// The envelope the id was taken over, kept as the stored record: a built claim
+	// and a decoded one then answer Encode() with the same bytes.
+	c := &claim{node: n, edges: edges, raw: env}
 	if isRootContributor {
 		c.contributor = c // self-attribute
 	} else {
@@ -188,8 +203,23 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	return c, nil
 }
 
-// resolveType fills TypeClass/TypeSub from the combined Type, which wins, and
-// validates the class vocabulary and the subtype.
+// checkClaim applies the rules a claim must satisfy, which AllowInvalid skips. The
+// steps around it resolve and seal, so what it governs is validity alone.
+func checkClaim(cfg ClaimBuilder) error {
+	if cfg.allowInvalid {
+		return nil
+	}
+	if err := checkType(cfg); err != nil {
+		return err
+	}
+	if err := checkFields(cfg.Fields); err != nil {
+		return err
+	}
+	return CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields)
+}
+
+// resolveType fills TypeClass/TypeSub from the combined Type, which wins. A type is
+// needed whatever the mode: without one there is nothing to serialize.
 func resolveType(cfg *ClaimBuilder) error {
 	if cfg.Type != "" {
 		class, sub, err := splitType(cfg.Type)
@@ -202,6 +232,11 @@ func resolveType(cfg *ClaimBuilder) error {
 	if cfg.TypeClass == "" || cfg.TypeSub == "" {
 		return errClaimTypeRequired
 	}
+	return nil
+}
+
+// checkType judges the vocabulary `V-TYPE` fixes and the subtype's shape.
+func checkType(cfg ClaimBuilder) error {
 	if !validNodeClass(cfg.TypeClass) {
 		return WithDetail(errUnknownNodeClass, string(cfg.TypeClass))
 	}
@@ -209,17 +244,20 @@ func resolveType(cfg *ClaimBuilder) error {
 }
 
 // resolveContentState reports the content mode — none / inline / external.
-// Inline and external are mutually exclusive; setting both is an error.
-func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool, err error) {
-	hasInline = cfg.InlineContent != nil
-	hasExternal = cfg.ContentHash != nil
+func resolveContentState(cfg *ClaimBuilder) (hasInline, hasExternal bool) {
+	return cfg.InlineContent != nil, cfg.ContentHash != nil
+}
+
+// checkContentState judges the slots: `V-CONTENT` makes inline and external
+// exclusive, and `R-FIELDS` caps what may be inlined.
+func checkContentState(cfg ClaimBuilder, hasInline, hasExternal bool) error {
 	if hasInline && hasExternal {
-		return false, false, errClaimContentXOR
+		return errClaimContentXOR
 	}
 	if hasInline && len(cfg.InlineContent) > maxInlineContent {
-		return false, false, errInlineContentTooLarge
+		return errInlineContentTooLarge
 	}
-	return hasInline, hasExternal, nil
+	return nil
 }
 
 // maxInlineContent caps inline content at construction only (NewClaim/NewEdge);
@@ -271,8 +309,8 @@ func resolveContentEncoding(encoding string, hasContent bool) (EncodingClass, st
 }
 
 // assembleEdges builds the edge set (caller edges, the auto contributor edge, a
-// diff edge), enforces diff naming and cardinality, and returns the edges in
-// canonical (raw-multihash) order.
+// diff edge), enforces diff naming and cardinality, and returns the edges ascending
+// by id(e) (`V-EORDER`).
 func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 	edges := make([]*edge, 0, len(cfg.Edges)+1)
 	for _, e := range cfg.Edges {
@@ -304,8 +342,10 @@ func assembleEdges(cfg ClaimBuilder, isRootContributor bool) ([]*edge, error) {
 			return nil, err
 		}
 	}
-	if err := checkEdgeCardinality(edges); err != nil {
-		return nil, err
+	if !cfg.allowInvalid {
+		if err := checkEdgeCardinality(edges); err != nil {
+			return nil, err
+		}
 	}
 	sort.SliceStable(edges, func(i, j int) bool {
 		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0
@@ -428,31 +468,31 @@ func normalizeCreatedAt(t time.Time) time.Time {
 	return t.UTC()
 }
 
-// signNode computes id = Sign(H(S(node))) and stores it on n, falling back to
-// the Contributor's session key and rejecting a key/pubkey mismatch (§5.7).
-func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool) error {
+// signNode seals the claim into its envelope and sets the id it is filed under:
+// S(v) signed (`V-ENV`), the id that envelope's hash (`V-ID`). It falls back to the
+// Contributor's session key and rejects a key/pubkey mismatch (§5.7). The envelope
+// is returned so the claim keeps the bytes rather than re-signing to recover them.
+func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool) ([]byte, error) {
 	if cfg.SigningKey == nil && cfg.Contributor != nil {
 		cfg.SigningKey = cfg.Contributor.SigningKey()
 	}
-	if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
-		return Wrap(errNewClaim, err)
+	if !cfg.allowInvalid {
+		if err := checkSigningConsistency(*cfg, isRootContributor); err != nil {
+			return nil, Wrap(errNewClaim, err)
+		}
 	}
-	encoded, err := encodeNode(n, edges)
+	encoded, err := encodeNode(n, edges, nil)
 	if err != nil {
-		return WrapDetail(errNewClaim, "canonical encode", err)
+		return nil, WrapDetail(errNewClaim, "canonical encode", err)
 	}
-	hash, err := hashContent(encoded)
+	env, err := signEnvelope(cfg.SigningKey, encoded)
 	if err != nil {
-		return WrapDetail(errNewClaim, "hash", err)
+		return nil, WrapDetail(errNewClaim, "sign envelope", err)
 	}
-	idPayload, err := signHash(cfg.SigningKey, hash.raw)
+	nodeID, err := hashContent(env)
 	if err != nil {
-		return WrapDetail(errNewClaim, "sign", err)
-	}
-	nodeID, err := idFromBytes(idPayload)
-	if err != nil {
-		return WrapDetail(errNewClaim, "wrap id", err)
+		return nil, WrapDetail(errNewClaim, "hash envelope", err)
 	}
 	n.id = nodeID
-	return nil
+	return env, nil
 }

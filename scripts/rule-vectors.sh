@@ -22,9 +22,10 @@
 # Coverage is read from the generated manifest, not from the source, so what is gated
 # is the artifact a downstream implementation would actually receive.
 #
-# It needs the spec, which `make docs` fetches into docs/papers/ (gitignored), so it
-# fails on a bare checkout rather than passing blind — as does `make verify` through
-# it. RANKE_SPEC points it at a copy of your own.
+# It needs the spec, which lands in gitignored docs/papers/. Run through `make verify`
+# that copy has just been brought up to the ranke-graph ref; run on its own it reads
+# whatever is there, and fails on a bare checkout rather than passing blind.
+# RANKE_SPEC points it at a copy of your own.
 #
 # Usage: scripts/rule-vectors.sh   (from any directory; `make verify` runs it)
 #   RANKE_SPEC=<path>  a spec to read instead; a relative path is repo-relative.

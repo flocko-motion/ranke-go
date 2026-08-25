@@ -15,12 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Foundation unit tests for the signing primitives (§4.1, §5.7) exercised
-// DIRECTLY — no Graph, no claim. (The end-to-end signing story through a
-// Graph lives a layer up in tests/sign_test.go.) These pin: multikey
-// public-key encoding round-trips and rejects the unsupported; sign then
-// verify accepts, and tampering / wrong key / identity-Sign behave per
-// spec. Authenticity (D3) and verifiability (D5) reduce to these.
+// Foundation unit tests for the signing primitives exercised DIRECTLY — no Graph, no
+// claim. (The end-to-end story lives a layer up in tests/sign_test.go.) These pin
+// multikey pubkey encoding, and the envelope: seal then verify accepts, while
+// tampering, a wrong key and a missing key are each refused. Authenticity (D3) and
+// verifiability (D5) reduce to these.
 
 func ed25519Keys(t *testing.T) (ed25519.PrivateKey, []byte) {
 	t.Helper()
@@ -71,84 +70,70 @@ func TestDecodePublicKeyRejectsWrongLength(t *testing.T) {
 
 // --- sign / verify ------------------------------------------------------
 
-// TestSignVerifyRoundTrip: a signature by a key verifies against that
-// key's pubkey over the same hash.
+// TestSignVerifyRoundTrip: an envelope sealed under a key verifies against that key's
+// pubkey.
 func TestSignVerifyRoundTrip(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
-	hash, err := hashContent([]byte("the record bytes"))
-	require.NoError(t, err)
 
-	sig, err := signHash(priv, hash.raw)
+	env, err := signEnvelope(priv, []byte("the record bytes"))
 	require.NoError(t, err)
-	require.NoError(t, verifySignature(pubkey, hash.raw, sig),
-		"honest signature must verify")
+	require.NoError(t, verifyEnvelope(pubkey, env), "an honest envelope must verify")
 }
 
-// TestVerifyRejectsTamperedHash: a signature over hash H does not verify
-// against a different hash H' — the §5.10 tamper-evidence at the crypto
-// layer.
-func TestVerifyRejectsTamperedHash(t *testing.T) {
+// TestVerifyRejectsTamperedPayload: the signature covers the payload, so swapping it
+// inside an otherwise intact envelope is caught.
+func TestVerifyRejectsTamperedPayload(t *testing.T) {
 	priv, pubkey := ed25519Keys(t)
-	h1, _ := hashContent([]byte("original"))
-	h2, _ := hashContent([]byte("modified"))
 
-	sig, err := signHash(priv, h1.raw)
+	env, err := signEnvelope(priv, []byte("original"))
 	require.NoError(t, err)
-	require.Error(t, verifySignature(pubkey, h2.raw, sig),
-		"signature over a different hash must not verify")
+
+	msg, err := decodeEnvelope(env)
+	require.NoError(t, err)
+	msg.Payload = []byte("modified")
+	tampered, err := msg.MarshalCBOR()
+	require.NoError(t, err)
+
+	require.Error(t, verifyEnvelope(pubkey, tampered),
+		"a signature over different bytes must not verify")
 }
 
-// TestVerifyRejectsWrongKey: a signature by key A does not verify against
-// key B's pubkey — Bob cannot pass off a claim as Alice's (§5.7).
+// TestVerifyRejectsWrongKey: a signature by key A does not verify against key B's
+// pubkey — Bob cannot pass off a claim as Alice's (`V-SIG`).
 func TestVerifyRejectsWrongKey(t *testing.T) {
 	alicePriv, _ := ed25519Keys(t)
 	_, bobPubkey := ed25519Keys(t)
-	hash, _ := hashContent([]byte("attributed to alice"))
 
-	sig, err := signHash(alicePriv, hash.raw)
+	env, err := signEnvelope(alicePriv, []byte("attributed to alice"))
 	require.NoError(t, err)
-	require.Error(t, verifySignature(bobPubkey, hash.raw, sig),
-		"a signature must not verify against a different key")
+	require.Error(t, verifyEnvelope(bobPubkey, env),
+		"an envelope must not verify against a different key")
 }
 
-// TestIdentitySign: with no key and an empty pubkey, id IS the hash and
-// verification reduces to byte equality (§5.7 identity-Sign).
-func TestIdentitySign(t *testing.T) {
-	hash, _ := hashContent([]byte("unsigned claim"))
+// TestEnvelopeNeedsKeyAndPubkey: every claim is signed (`V-SIG`), so sealing without a
+// key and verifying without a pubkey are both refused rather than waved through.
+func TestEnvelopeNeedsKeyAndPubkey(t *testing.T) {
+	priv, _ := ed25519Keys(t)
 
-	idPayload, err := signHash(nil, hash.raw)
+	_, err := signEnvelope(nil, []byte("unsigned claim"))
+	require.ErrorIs(t, err, errEnvelopeNoKey, "a claim cannot be sealed without a key")
+
+	env, err := signEnvelope(priv, []byte("a signed claim"))
 	require.NoError(t, err)
-	require.Equal(t, hash.raw, idPayload, "identity-Sign leaves the hash unchanged")
-
-	require.NoError(t, verifySignature(nil, hash.raw, idPayload),
-		"identity-Sign verifies when id equals the hash")
-	require.Error(t, verifySignature(nil, hash.raw, []byte("something else")),
-		"identity-Sign fails when id does not equal the hash")
+	require.ErrorIs(t, verifyEnvelope(nil, env), errEnvelopeNoPubkey,
+		"a contributor with no pubkey answers for nothing")
 }
 
-// TestVerifySchemeMismatch: a pubkey and an id payload naming different
-// schemes are rejected before any curve math runs.
-func TestVerifySchemeMismatch(t *testing.T) {
-	_, pubkey := ed25519Keys(t)
-	hash, _ := hashContent([]byte("x"))
+// TestVerifyRejectsForeignScheme: a pubkey framed under another multicodec is refused
+// before any curve math runs (`V-SIGN`).
+func TestVerifyRejectsForeignScheme(t *testing.T) {
+	priv, _ := ed25519Keys(t)
+	env, err := signEnvelope(priv, []byte("x"))
+	require.NoError(t, err)
 
-	// An id payload framed with a non-ed25519 multicodec prefix.
-	var wrongScheme []byte
-	wrongScheme = appendUvarint(wrongScheme, uint64(multicodec.Sha2_256))
-	wrongScheme = append(wrongScheme, make([]byte, 64)...)
-
-	require.Error(t, verifySignature(pubkey, hash.raw, wrongScheme),
-		"pubkey scheme and signature scheme must match")
-}
-
-// appendUvarint is a tiny local varint writer so the test doesn't reach
-// for an internal helper.
-func appendUvarint(b []byte, v uint64) []byte {
-	for v >= 0x80 {
-		b = append(b, byte(v)|0x80)
-		v >>= 7
-	}
-	return append(b, byte(v))
+	foreign := prependCode(multicodec.Sha2_256, make([]byte, ed25519.PublicKeySize))
+	require.Error(t, verifyEnvelope(foreign, env),
+		"only the schemes `V-SIGN` names may answer for a signature")
 }
 
 // --- PEM key loading ----------------------------------------------------
@@ -204,51 +189,23 @@ func TestLoadEd25519PEMErrors(t *testing.T) {
 	require.Error(t, err, "LoadPrivateKey propagates the load error")
 }
 
-// TestSignatureAndPubkeyCarryDistinctCodes: the leading code alone says which a byte
-// string is (`V-SIGN`). Sharing one left payload length as the only difference, which is
-// a fact about Ed25519 rather than about the framing.
-func TestSignatureAndPubkeyCarryDistinctCodes(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+// TestEveryIdIsAMultihash: with the signature moved into the envelope, one framing
+// serves every id — a claim's, an edge's, and a content address (`V-ID`, `V-HASH`).
+func TestEveryIdIsAMultihash(t *testing.T) {
+	alice := contributor(t)
+	c, err := NewClaim(TypeSource("note"), alice).
+		WithInlineContent([]byte("a note")).
+		WithEncoding(EncodingPlain).
+		WithHeight(HeightOf(alice)).
+		Sign()
 	require.NoError(t, err)
 
-	pubkey, err := EncodePublicKey(pub)
-	require.NoError(t, err)
-	hash, err := HashContent([]byte("a claim's canonical bytes"))
-	require.NoError(t, err)
-	sig, err := signHash(priv, idBytes(hash))
-	require.NoError(t, err)
-
-	pubCode, _, err := DecodePublicKey(pubkey)
-	require.NoError(t, err)
-	sigCode, raw, err := splitCode(sig)
-	require.NoError(t, err)
-
-	require.Equal(t, multicodec.Ed25519Pub, pubCode)
-	require.Equal(t, multicodec.Eddsa, sigCode, "an EdDSA signature, not a public key")
-	require.NotEqual(t, pubCode, sigCode, "the code alone tells them apart")
-	require.Len(t, raw, ed25519.SignatureSize, "the payload survives the reframing")
-
-	// And the pairing is what verification checks, so a signature framed as a pubkey is
-	// refused rather than verified on the strength of its length.
-	require.NoError(t, verifySignature(pubkey, idBytes(hash), sig))
-	mislabelled := prependCode(multicodec.Ed25519Pub, raw)
-	require.Error(t, verifySignature(pubkey, idBytes(hash), mislabelled),
-		"a signature under the pubkey's code is not a signature")
-}
-
-// TestAlgorithmNamesTheSignatureScheme: an id's leading code names what produced it, so
-// a reader can tell a signed id from an identity-signed one (a bare multihash).
-func TestAlgorithmNamesTheSignatureScheme(t *testing.T) {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
 	hash, err := HashContent([]byte("some bytes"))
 	require.NoError(t, err)
 
-	require.Equal(t, "sha2-256", hash.Algorithm(), "an identity-signed id is the multihash")
-
-	sig, err := signHash(priv, idBytes(hash))
-	require.NoError(t, err)
-	signed, err := idFromBytes(sig)
-	require.NoError(t, err)
-	require.Equal(t, multicodec.Eddsa.String(), signed.Algorithm())
+	require.Equal(t, "sha2-256", c.ID().Algorithm(), "a claim id hashes its envelope")
+	require.Equal(t, "sha2-256", hash.Algorithm(), "a content address hashes its bytes")
+	for _, e := range c.Edges() {
+		require.Equal(t, "sha2-256", e.ID().Algorithm(), "an edge id hashes its record")
+	}
 }

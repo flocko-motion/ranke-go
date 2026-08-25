@@ -125,8 +125,8 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		e.id = ep.ID
 		edges[i] = e
 	}
-	// Canonical edge order (by raw multihash), matching construction, so
-	// node.edges and Encode() reproduce the original bytes.
+	// Ascending by id(e) (`V-EORDER`), matching construction, so node.edges and the
+	// serialized claim reproduce the original bytes.
 	sort.SliceStable(edges, func(i, j int) bool {
 		return bytes.Compare(idBytes(edges[i].id), idBytes(edges[j].id)) < 0
 	})

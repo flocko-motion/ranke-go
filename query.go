@@ -154,7 +154,11 @@ type Detail string
 
 const (
 	DetailID     Detail = "id"     // identities only
-	DetailClaims Detail = "claims" // claim parts: node + all outgoing edges (default; empty == claims)
+	DetailClaims Detail = "claims" // the serialized claim, as Form and Content shape it (default; empty == claims)
+	// DetailEnvelope is the stored record copied out: the bytes whose hash is the id,
+	// carrying the signature over them (`R-QCANON`). Form and Content do not apply,
+	// and it is CBOR alone — the bytes are what they are.
+	DetailEnvelope Detail = "envelope"
 )
 
 // OrderKey is one sort key; keys apply in priority order, ties by (created_at, id).
@@ -248,6 +252,11 @@ const (
 	KindPathNative   ResultKind = "path_native"
 	KindClaimEncoded ResultKind = "claim_encoded"
 	KindPathEncoded  ResultKind = "path_encoded"
+	// KindClaimEnvelope / KindPathEnvelope tag stored bytes copied out under
+	// DetailEnvelope, apart from an encoded serialized claim, since a reader parses
+	// the one and hands the other on as bytes (`R-QSTREAM`).
+	KindClaimEnvelope ResultKind = "claim_envelope"
+	KindPathEnvelope  ResultKind = "path_envelope"
 	// KindReport tags the final element of a run that asked for a report
 	// (`R-QREPORT`). The value is the one ranke-ts discriminates its framed report
 	// record under, the wire having carried the report in band all along.

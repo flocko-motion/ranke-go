@@ -72,9 +72,14 @@ func (s *signedContributor) SetTag(ctx context.Context, u Universe) error {
 	return s.contributor.SetTag(ctx, u)
 }
 func (s *signedContributor) unwrap() *claim { return s.contributor.unwrap() }
-func (s *signedContributor) verifyID(pubkey, raw []byte) error {
-	return s.contributor.verifyID(pubkey, raw)
+func (s *signedContributor) verifyID(raw []byte) error {
+	return s.contributor.verifyID(raw)
+}
+
+func (s *signedContributor) verifySignature(pubkey, raw []byte) error {
+	return s.contributor.verifySignature(pubkey, raw)
 }
 func (s *signedContributor) EncodeCBOR(f Form) ([]byte, error) { return s.contributor.EncodeCBOR(f) }
+func (s *signedContributor) Envelope() ([]byte, error)         { return s.contributor.Envelope() }
 func (s *signedContributor) EncodeJSON(f Form) ([]byte, error) { return s.contributor.EncodeJSON(f) }
 func (s *signedContributor) SigningKey() crypto.Signer         { return s.key }

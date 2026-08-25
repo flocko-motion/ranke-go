@@ -39,7 +39,7 @@ func TestContentBudgetSpendsAcrossTheClaim(t *testing.T) {
 		t.Helper()
 		raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(oc))
 		require.NoError(t, err)
-		got, err := DecodeClaim(nil, raw)
+		got, err := decodeSerializedClaim(nil, raw)
 		require.NoError(t, err)
 		for _, e := range got.Edges() {
 			if e.GetContentSize() != uint64(len("edgeone")) {
@@ -146,7 +146,7 @@ func TestACappedRecordDeclaresTheTrueSize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(tc.oc))
 			require.NoError(t, err)
-			got, err := DecodeClaim(nil, raw)
+			got, err := decodeSerializedClaim(nil, raw)
 			require.NoError(t, err)
 
 			inline, err := got.Node().GetInlineContent()
@@ -178,7 +178,7 @@ func TestContentCompleteDistinguishesAPrefix(t *testing.T) {
 		&OutputContent{Max: 3, Overflow: OverflowCutoff}),
 	)
 	require.NoError(t, err)
-	prefix, err := DecodeClaim(nil, raw)
+	prefix, err := decodeSerializedClaim(nil, raw)
 	require.NoError(t, err)
 	require.Equal(t, ContentInline, prefix.Node().ContentKind(), "as a whole content does")
 	require.NotZero(t, prefix.Node().GetContentSize(), "as a whole content does")
@@ -208,7 +208,7 @@ func TestWithheldContentKeepsItsSize(t *testing.T) {
 	raw, err := c.unwrap().encodeCBOR(FormOriginal, newContentBudget(nil))
 	require.NoError(t, err)
 
-	got, err := DecodeClaim(nil, raw)
+	got, err := decodeSerializedClaim(nil, raw)
 	require.NoError(t, err)
 	require.Equal(t, uint64(len(body)), got.Node().GetContentSize())
 	require.Equal(t, ContentInline, got.Node().ContentKind(),
@@ -217,7 +217,7 @@ func TestWithheldContentKeepsItsSize(t *testing.T) {
 	// And it survives a second trip, so a hop through a cache does not lose it either.
 	again, err := got.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
-	twice, err := DecodeClaim(nil, again)
+	twice, err := decodeSerializedClaim(nil, again)
 	require.NoError(t, err)
 	require.Equal(t, uint64(len(body)), twice.Node().GetContentSize())
 }

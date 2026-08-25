@@ -9,7 +9,7 @@ import (
 )
 
 // A real id, so the codec's ParseId path runs on something that parses.
-const testQueryId = "b5uazx2ehcgywsboft2k52zg7oqep4dre4h4hkmdnc5d2ztw5vqiizhcclmfjkag5pjvp73sbwdzrq527chphuojvxsk7k4e4sfnze6loaq"
+const testQueryId = "bciqmi5j5hnobbrzqrcqeeodhegnb3o4rozbeh24woow3sxdxbzb2qsi"
 
 // Every document here was also run through the published rql.schema.json with ajv and
 // accepted. A case added here belongs there too, or the two drift apart.

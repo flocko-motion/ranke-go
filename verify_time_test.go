@@ -42,19 +42,32 @@ func recordWith(t *testing.T, onEdge bool, field, value string) []byte {
 	} else {
 		en.Fields = map[string]string{field: value}
 	}
-	raw, err := encodingMode.Marshal(encClaimFile{Node: en})
-	require.NoError(t, err)
+	raw := sealed(t, en)
 
 	// The fixture must really carry the field, or the test proves nothing.
-	var back encClaimFile
-	require.NoError(t, cbor.Unmarshal(raw, &back))
+	payload, err := envelopePayload(raw)
+	require.NoError(t, err)
+	var back encNode
+	require.NoError(t, cbor.Unmarshal(payload, &back))
 	if onEdge {
 		var ee encEdge
-		require.NoError(t, cbor.Unmarshal(back.Node.Edges[0], &ee))
+		require.NoError(t, cbor.Unmarshal(back.Edges[0], &ee))
 		require.Equal(t, value, ee.Fields[field])
 	} else {
-		require.Equal(t, value, back.Node.Fields[field])
+		require.Equal(t, value, back.Fields[field])
 	}
+	return raw
+}
+
+// sealed wraps a record as the envelope a Universe stores, which is what DecodeClaim
+// reads. Authorship goes unexamined: these fixtures exercise the decode.
+func sealed(t *testing.T, en encNode) []byte {
+	t.Helper()
+	payload, err := encodingMode.Marshal(en)
+	require.NoError(t, err)
+	priv, _ := ed25519Keys(t)
+	raw, err := signEnvelope(priv, payload)
+	require.NoError(t, err)
 	return raw
 }
 
@@ -91,8 +104,7 @@ func TestDecodeRefusesMalformedCreatedAt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			en := encNode{TypeClass: "source", TypeSub: "note", CreatedAt: value}
-			raw, err := encodingMode.Marshal(encClaimFile{Node: en})
-			require.NoError(t, err)
+			raw := sealed(t, en)
 			id, err := hashContent(raw)
 			require.NoError(t, err)
 			_, err = DecodeClaim(id, raw)
@@ -117,8 +129,7 @@ func TestDecodeAcceptsCanonicalAndAbsentTimestamps(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
 		en := encNode{TypeClass: "source", TypeSub: "note",
 			CreatedAt: "2026-01-02T03:04:05.000000000Z"}
-		raw, err := encodingMode.Marshal(encClaimFile{Node: en})
-		require.NoError(t, err)
+		raw := sealed(t, en)
 		id, err := hashContent(raw)
 		require.NoError(t, err)
 		_, err = DecodeClaim(id, raw)

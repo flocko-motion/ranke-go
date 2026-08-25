@@ -330,7 +330,8 @@ type verifyRule struct {
 // verifyRules is the ordered rule set. Register an invariant here; its
 // statement, scope, and implementation all live on this one entry.
 var verifyRules = []verifyRule{
-	{name: "§5.7 signature", rule: "a claim's id is a valid signature over H(S(v)) by its contributor's key (`V-ID`, `V-SIG`)", claim: ruleSignature},
+	{name: "id", rule: "a claim's id is the hash of the envelope it is stored as (`V-ID`)", claim: ruleID},
+	{name: "signature", rule: "a claim's envelope is signed by its contributor's key (`V-ENV`, `V-SIG`)", claim: ruleSignature},
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial claim (`V-HEIGHT`)", claim: ruleHeight},
 	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
@@ -345,9 +346,14 @@ var verifyRules = []verifyRule{
 	{name: "structure not deletable", rule: "a contribution/{contributor,branches,delete,expiry} claim takes no delete_by (`R-DSTRUCT`)", claim: ruleStructureNotDeletable},
 }
 
-// ruleSignature: id(v) signs H(preimage(raw)) under the claim's signing pubkey (`V-ID`, `V-SIG`).
+// ruleID: the id is H over the envelope as stored (`V-ID`).
+func ruleID(_ context.Context, t *claimUnderVerification) error {
+	return t.claim.verifyID(t.raw)
+}
+
+// ruleSignature: the envelope's signature is the contributor's (`V-ENV`, `V-SIG`).
 func ruleSignature(_ context.Context, t *claimUnderVerification) error {
-	return t.claim.verifyID(t.pubkey, t.raw)
+	return t.claim.verifySignature(t.pubkey, t.raw)
 }
 
 // ruleKeyWindow: a signature proves who signed, the window that they still could (`R-DEXPIRY`).
@@ -504,20 +510,27 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 	return nil
 }
 
-// verifyID checks that this claim's id is a valid signature by pubkey over
-// H(S(node)), the preimage extracted from the stored raw CBOR (`V-ID`, `V-SIG`).
-// Hashing stored bytes keeps verification stable as the alias taxonomy grows: a newer
-// encoder emits the same claim more compactly, so a re-encode would shift the hash.
-func (c *claim) verifyID(pubkey, raw []byte) error {
-	preimage, err := nodePreimage(raw)
-	if err != nil {
-		return WrapDetail(errVerify, "preimage", err)
-	}
-	recomputed, err := hashContent(preimage)
+// verifyID checks the id names the bytes stored under it: id = H(S(env(v)))
+// (`V-ID`). Hashing the record as stored is what keeps verification stable as the
+// alias taxonomy grows — a newer encoder emits the same claim more compactly, so a
+// re-encode would shift the hash. It needs no key, so integrity is checkable without
+// resolving a contributor.
+func (c *claim) verifyID(raw []byte) error {
+	recomputed, err := hashContent(raw)
 	if err != nil {
 		return WrapDetail(errVerify, "hash", err)
 	}
-	return verifySignature(pubkey, recomputed.raw, idBytes(c.node.id))
+	if !recomputed.Equal(c.node.id) {
+		return WithDetail(ErrIDMismatch, "stored as "+recomputed.String())
+	}
+	return nil
+}
+
+// verifySignature checks the envelope's signature against the contributor's pubkey
+// (`V-SIG`). What it proves is authorship of the stored bytes, since that is what the
+// envelope covers.
+func (c *claim) verifySignature(pubkey, raw []byte) error {
+	return verifyEnvelope(pubkey, raw)
 }
 
 // resolveSigner returns the claim whose content is the key that signed c's id (§5.7,

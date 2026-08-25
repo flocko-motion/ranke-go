@@ -40,7 +40,6 @@ R-C5PERSIST    citation owed: closure durable before the merge, adapter/sequence
 R-C6SIGN       citation owed: Sequencer claims name its own contributor, adapter/sequencer
 
 # Field syntax.
-R-FIELDS       citation owed: field-name form and limit, field_taxonomy.go
 
 # RQL — the query type and the native engine that is the conformance oracle.
 R-QEVAL        citation owed: fixed evaluation order, query.go

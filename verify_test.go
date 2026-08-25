@@ -352,12 +352,7 @@ func TestVerifyWithCreatedAfter(t *testing.T) {
 	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	recent := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 
-	rootClaim, err := NewClaim(NodeContributor, nil). // empty content = identity-Sign
-								WithCreatedAt(old).
-								Sign()
-	require.NoError(t, err)
-	root, err := rootClaim.AsContributor(context.Background(), nil)
-	require.NoError(t, err)
+	root, _ := windowedContributor(t, "", "", old)
 
 	g := newGraph(t, root)
 	em, err := NewClaim(TypeSource("note"), root).
@@ -680,7 +675,9 @@ func TestVerifyRuleSet(t *testing.T) {
 		names[r.Name] = r.Rule
 	}
 	require.Contains(t, names, "branch-table reference")
-	require.Contains(t, names, "§5.7 signature")
+	require.Contains(t, names, "id")
+	require.Contains(t, names, "signature")
+	require.Contains(t, names["id"], "`V-ID`", "the id check stands on its own, needing no key")
 	require.Contains(t, names, "created_at monotonicity", "a FORCED rule is skippable like the rest")
 	require.Contains(t, names["created_at monotonicity"], "`V-MONO`", "and states the rule it enforces")
 }

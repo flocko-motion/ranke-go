@@ -27,8 +27,12 @@ docs/papers/
 # Local Claude config
 /.claude/
 
-# Sindri runtime hub (sockets, local db) — not source.
-/.sindri/
+# Sindri runtime hub (sockets, local db) — not source. The contents rather than the
+# directory, so config.yaml can be re-included: git re-includes nothing under a
+# directory it has already excluded, and the gate reads that file from a fresh
+# checkout of the commit.
+/.sindri/*
+!/.sindri/config.yaml
 
 # sindri hub artifacts (agent worktrees + hub state) — not for the repo
 .worktrees/

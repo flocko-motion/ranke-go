@@ -146,7 +146,7 @@ func (ww *WireWriter) WriteClaim(branch string, c Claim) error {
 	if !slices.Contains(ww.cons.Branches, branch) {
 		return WithDetail(ErrWireUndeclared, branch)
 	}
-	raw, err := c.EncodeCBOR(FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}

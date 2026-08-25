@@ -10,10 +10,10 @@ V-TYPE a record with a type class outside the fixed set — buildable by hand, n
 V-ROOT a non-initial claim carrying no contributor edge, and one carrying two
 V-MONO a claim whose created_at predates a reference; needs a two-claim case, unlike the single records here
 V-SER a record whose keys are not CBOR Deterministic order — the set's own encoder cannot emit one
-V-HASH a content_hash under a multicodec other than sha2-256
 V-ALIAS a record mixing a name's alias and long form, which the set never exercises either way
 V-DIFF a diff claim whose overlay contradicts the rule; the set carries no diff chain
 V-DIFFEDGE the edge half of the same, and it needs the diff case first
 V-ARCHIVE an archive-level rule: it judges a head and its branch table, not one record
 V-TABLEREF a branch table reaching its predecessor through the wrong edge type; needs a table pair
 V-REL a relation edge whose endpoints break the rule; the toy graph has no relation edge
+V-SIGN an envelope whose protected header names an algorithm other than EdDSA; the signer here holds Ed25519 keys alone, so a header naming another scheme cannot carry a signature made under it, and the case would break the signature rule too
