@@ -401,130 +401,14 @@ func TestCapabilitiesDerivation(t *testing.T) {
 	}
 }
 
-// --- structure-only cache: models a neo4j-style cache in a stack ---
+// TestQueryEnvelopeIsTheStoredRecord: `detail: envelope` through a stack whose engine
+// layer keeps no stored bytes must answer with the RawClaims layer's record, byte for
+// byte (`R-QCANON`). The engine does the selection — reconstructed claims, or ids
+// alone — and the stack re-reads those ids from the layer holding the bytes.
 //
-// It holds claim STRUCTURE but reconstructs claims WITHOUT their inline content
-// bytes (like neo4j, which cannot inline binary content), and keeps no verbatim
-// CBOR (RawClaims=false) and no content blobs (ExternalContent=false). So a
-// content read cannot be served from this layer: it must fall through to the
-// byte layer below, addressed BY CLAIM (GetClaimContent) — a bare hash lookup
-// would miss, since inline content is not a standalone blob.
-type structOnlyCache struct{ ranke.Universe }
-
-func (s structOnlyCache) GetClaims(ctx context.Context, ids []ranke.Id, opts ...ranke.GetOption) ([]ranke.Claim, error) {
-	cs, err := s.Universe.GetClaims(ctx, ids, opts...)
-	if err != nil {
-		return nil, err
-	}
-	for i, c := range cs {
-		stripped, err := stripContent(c)
-		if err != nil {
-			return nil, err
-		}
-		cs[i] = stripped
-	}
-	return cs, nil
-}
-
-func (s structOnlyCache) GetClaimsRaw(context.Context, []ranke.Id) ([][]byte, error) {
-	return nil, ranke.ErrNotFound // structure-only: keeps no verbatim CBOR
-}
-
-func (s structOnlyCache) GetContents(context.Context, []ranke.ContentRef) ([][]byte, error) {
-	return nil, ranke.ErrNotFound // holds no content blobs
-}
-
-func (s structOnlyCache) HasContents(_ context.Context, hashes []ranke.Id) ([]bool, error) {
-	return make([]bool, len(hashes)), nil
-}
-
-func (s structOnlyCache) StreamContent(context.Context, ranke.Id, uint64) (io.ReadCloser, error) {
-	return nil, ranke.ErrNotFound
-}
-
-func (s structOnlyCache) Capabilities() ranke.Capabilities {
-	c := s.Universe.Capabilities()
-	c.RawClaims = false
-	c.ExternalContent = false
-	c.ContentCap = 0
-	c.Tier = ranke.StorageTierEager // a lossy projection can't be authoritative (like neo4j)
-	return c
-}
-
-// projectionEngine is a structure-only cache in the engine seat: its Query
-// reconstructs each claim from parts, so a result carries no stored record — the
-// shape a graph-native engine (neo4j) returns.
-type projectionEngine struct{ structOnlyCache }
-
-func (p projectionEngine) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	return reshape(ctx, p.Universe, q, scope, func(r ranke.QueryResult) (ranke.QueryResult, error) {
-		if r.ClaimNative == nil {
-			return r, nil
-		}
-		c, err := stripContent(r.ClaimNative)
-		if err != nil {
-			return r, err
-		}
-		r.ClaimNative = c
-		return r, nil
-	})
-}
-
-// idOnlyEngine answers with identities alone, holding no canonical bytes to
-// serialise — what neo4j does for a cbor read: it selects, a byte layer encodes.
-type idOnlyEngine struct{ structOnlyCache }
-
-func (e idOnlyEngine) Query(ctx context.Context, q ranke.Query, scope ranke.Scope) (ranke.ResultStream, error) {
-	return reshape(ctx, e.Universe, q, scope, func(r ranke.QueryResult) (ranke.QueryResult, error) {
-		return ranke.QueryResult{Kind: ranke.KindClaimId, ClaimId: r.ClaimId, PathId: r.PathId}, nil
-	})
-}
-
-// reshape runs the query on u and rewrites every result through f.
-func reshape(ctx context.Context, u ranke.Universe, q ranke.Query, scope ranke.Scope,
-	f func(ranke.QueryResult) (ranke.QueryResult, error)) (ranke.ResultStream, error) {
-	rs, err := u.Query(ctx, q, scope)
-	if err != nil {
-		return nil, err
-	}
-	defer rs.Close()
-	var out []ranke.QueryResult
-	for rs.Next() {
-		r, err := f(rs.Result())
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rs.Err(); err != nil {
-		return nil, err
-	}
-	return &sliceStream{results: out}, nil
-}
-
-// sliceStream serves an already-assembled result slice.
-type sliceStream struct {
-	results []ranke.QueryResult
-	i       int
-}
-
-func (s *sliceStream) Next() bool {
-	s.i++
-	return s.i <= len(s.results)
-}
-func (s *sliceStream) Result() ranke.QueryResult  { return s.results[s.i-1] }
-func (s *sliceStream) Report() *ranke.QueryReport { return ranke.ReportOf(s.results) }
-func (s *sliceStream) Err() error                 { return nil }
-func (s *sliceStream) Close() error               { return nil }
-
-// TestQueryCBORIsTheStoredRecord: the canonical read (`R-QCANON`) through a stack whose
-// engine layer keeps no canonical bytes must answer with the RawClaims layer's stored
-// record, byte for byte. The engine does the selection — reconstructed claims, or ids
-// alone — and the stack re-reads those ids from the layer that holds the bytes.
-//
-// Content in full is part of that form: a claim's inline content is inside S(v), so a
-// read that caps it cannot deliver the bytes an id was computed over.
-func TestQueryCBORIsTheStoredRecord(t *testing.T) {
+// `detail: claims` is the other half: an engine that rebuilds serves it, and what it
+// returns is a serialized claim rather than the record an id covers.
+func TestQueryEnvelopeIsTheStoredRecord(t *testing.T) {
 	ctx := context.Background()
 	engines := map[string]func(ranke.Universe) ranke.Universe{
 		"reconstructed claims": func(u ranke.Universe) ranke.Universe { return projectionEngine{structOnlyCache{u}} },
@@ -541,94 +425,62 @@ func TestQueryCBORIsTheStoredRecord(t *testing.T) {
 			if err := ranke.PutClaim(ctx, st, c); err != nil {
 				t.Fatalf("PutClaim: %v", err)
 			}
-			q := ranke.Query{
-				Select: ranke.Select{Branch: ranke.BranchUniverse, Head: c.ID()},
-				Output: ranke.Output{
-					Detail: ranke.DetailClaims, Form: ranke.FormOriginal,
-					Encoding: ranke.ResultCBOR, Content: &ranke.OutputContent{Max: 0},
-				},
-			}
-			rs, err := st.Query(ctx, q, ranke.Scope{Branch: ranke.BranchUniverse})
-			if err != nil {
-				t.Fatalf("Query: %v", err)
-			}
-			var got []ranke.QueryResult
-			for rs.Next() {
-				got = append(got, rs.Result())
-			}
-			if err := rs.Err(); err != nil {
-				t.Fatalf("stream: %v", err)
-			}
-			if err := rs.Close(); err != nil {
-				t.Fatalf("Close: %v", err)
-			}
-			if len(got) != 1 {
-				t.Fatalf("results = %d, want the one claim", len(got))
-			}
-			if got[0].Kind != ranke.KindClaimEncoded {
-				t.Fatalf("Kind = %q, want %q", got[0].Kind, ranke.KindClaimEncoded)
-			}
 			raw, err := store.GetClaimsRaw(ctx, []ranke.Id{c.ID()})
 			if err != nil {
 				t.Fatalf("GetClaimsRaw: %v", err)
 			}
-			if len(got[0].ClaimEncoded) == 0 {
+
+			read := func(detail ranke.Detail) ranke.QueryResult {
+				t.Helper()
+				q := ranke.Query{
+					Select: ranke.Select{Branch: ranke.BranchUniverse, Head: c.ID()},
+					Output: ranke.Output{Detail: detail, Encoding: ranke.ResultCBOR},
+				}
+				rs, err := st.Query(ctx, q, ranke.Scope{Branch: ranke.BranchUniverse})
+				if err != nil {
+					t.Fatalf("Query(%s): %v", detail, err)
+				}
+				var got []ranke.QueryResult
+				for rs.Next() {
+					got = append(got, rs.Result())
+				}
+				if err := rs.Err(); err != nil {
+					t.Fatalf("stream: %v", err)
+				}
+				if err := rs.Close(); err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+				if len(got) != 1 {
+					t.Fatalf("results = %d, want the one claim", len(got))
+				}
+				return got[0]
+			}
+
+			// An envelope is the stored record copied out, which only a RawClaims layer
+			// holds — so the stack routes past an engine that reconstructs (`R-QCANON`).
+			env := read(ranke.DetailEnvelope)
+			if env.Kind != ranke.KindClaimEnvelope {
+				t.Fatalf("Kind = %q, want %q", env.Kind, ranke.KindClaimEnvelope)
+			}
+			if !bytes.Equal(env.ClaimEncoded, raw[0]) {
+				t.Fatalf("envelope = %d bytes, want the %d stored bytes verbatim",
+					len(env.ClaimEncoded), len(raw[0]))
+			}
+
+			// A serialized claim is the payload, and carries no such guarantee: the id
+			// covers the envelope, not what is inside it.
+			claims := read(ranke.DetailClaims)
+			if claims.Kind != ranke.KindClaimEncoded {
+				t.Fatalf("Kind = %q, want %q", claims.Kind, ranke.KindClaimEncoded)
+			}
+			if len(claims.ClaimEncoded) == 0 {
 				t.Fatal("ClaimEncoded is empty — the cbor read served nothing")
 			}
-			if !bytes.Equal(got[0].ClaimEncoded, raw[0]) {
-				t.Fatalf("ClaimEncoded = %d bytes, want the %d stored bytes verbatim",
-					len(got[0].ClaimEncoded), len(raw[0]))
+			if bytes.Equal(claims.ClaimEncoded, raw[0]) {
+				t.Fatal("the serialized claim must not be mistaken for the stored record")
 			}
 		})
 	}
-}
-
-type fielder interface {
-	Fields() []string
-	GetField(string) (string, error)
-}
-
-func fieldsOf(f fielder) map[string]string {
-	names := f.Fields()
-	if len(names) == 0 {
-		return nil
-	}
-	m := make(map[string]string, len(names))
-	for _, k := range names {
-		v, _ := f.GetField(k)
-		m[k] = v
-	}
-	return m
-}
-
-// stripContent rebuilds a claim from its parts WITHOUT the inline content bytes
-// (InlineContent omitted) — exactly how a structure-only cache reconstructs a
-// claim it holds but whose binary content it never inlined.
-func stripContent(c ranke.Claim) (ranke.Claim, error) {
-	n := c.Node()
-	parts := ranke.ClaimParts{
-		ID:          n.ID(),
-		Type:        n.Type(),
-		Encoding:    n.Encoding(),
-		CreatedAt:   n.CreatedAt(),
-		Height:      n.Height(),
-		ContentHash: n.GetContentHash(),
-		ContentSize: n.GetContentSize(),
-		Fields:      fieldsOf(n),
-	}
-	for _, e := range c.Edges() {
-		parts.Edges = append(parts.Edges, ranke.EdgeParts{
-			ID:                e.ID(),
-			Reference:         e.Reference(),
-			Type:              e.Type(),
-			Encoding:          e.Encoding(),
-			RelationDirection: e.RelationDirection(),
-			ContentHash:       e.GetContentHash(),
-			ContentSize:       e.GetContentSize(),
-			Fields:            fieldsOf(e),
-		})
-	}
-	return ranke.AssembleClaim(parts)
 }
 
 // TestStackResolvesContributorContentByClaim stores a contributor (whose content

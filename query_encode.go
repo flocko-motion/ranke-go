@@ -1,7 +1,7 @@
 // package: ranke / query
 // type:    logic
-// job:     fill QueryResult's Encoded fields per Output.Encoding — the stored CBOR verbatim, or the
-// same fields as JSON
+// job:     fill QueryResult's Encoded fields per Output.Detail and Encoding — the serialized claim
+// as CBOR or JSON, or the stored envelope copied out under its own tag
 // limits:  serialisation only; which claims a read returns is the executor's (-> query_default,
 // adapter/storage/neo4j)
 package ranke
@@ -23,10 +23,17 @@ func routeIds(route []Claim) []Id {
 // Go objects, which the executor already set and which keep their content whole — an
 // in-process caller holds the claim itself, so a cap would only cost it the bytes.
 func EncodeResults(results []QueryResult, out Output) error {
+	if out.Encoding == "" || out.Encoding == ResultNative {
+		return nil
+	}
+	// The stored bytes are copied, never rebuilt, and travel under their own tags
+	// (`R-QCANON`, `R-QSTREAM`). Form and Content were refused at decode, so nothing
+	// here could have shaped them.
+	if out.Detail == DetailEnvelope {
+		return encodeEach(results, Claim.Envelope, KindClaimEnvelope, KindPathEnvelope)
+	}
 	var enc func(*claim, Form, *contentBudget) ([]byte, error)
 	switch out.Encoding {
-	case "", ResultNative:
-		return nil
 	case ResultCBOR:
 		enc = (*claim).encodeCBOR
 	case ResultJSON:
@@ -40,11 +47,12 @@ func EncodeResults(results []QueryResult, out Output) error {
 			return nil, nil
 		}
 		return enc(cc, out.Form, newContentBudget(out.Content))
-	})
+	}, KindClaimEncoded, KindPathEncoded)
 }
 
-// encodeEach fills every result's ClaimEncoded and PathEncoded through enc.
-func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error)) error {
+// encodeEach fills every result's ClaimEncoded and PathEncoded through enc, tagging
+// each under the kinds given.
+func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error), claimKind, pathKind ResultKind) error {
 	one := func(c Claim) ([]byte, error) {
 		if c == nil {
 			return nil, nil
@@ -63,7 +71,7 @@ func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error)) error {
 			continue // nothing to encode, so the result keeps the kind it has
 		}
 		results[i].ClaimEncoded = b
-		results[i].Kind = KindClaimEncoded
+		results[i].Kind = claimKind
 		if len(results[i].PathNative) == 0 {
 			continue
 		}
@@ -76,7 +84,7 @@ func encodeEach(results []QueryResult, enc func(Claim) ([]byte, error)) error {
 			route = append(route, pb)
 		}
 		results[i].PathEncoded = route
-		results[i].Kind = KindPathEncoded
+		results[i].Kind = pathKind
 	}
 	return nil
 }

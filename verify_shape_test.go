@@ -1,7 +1,6 @@
 package ranke
 
 import (
-	"crypto"
 	"errors"
 	"testing"
 
@@ -43,24 +42,25 @@ func assembled(t *testing.T, parts ClaimParts) Claim {
 // one is valid in every respect but the shape it is built to break.
 func signedShape(t *testing.T, ctr Contributor, parts ClaimParts) Claim {
 	t.Helper()
+	if len(parts.Edges) == 0 {
+		// Every claim is signed and every non-initial claim names its contributor
+		// (`V-ROOT`, `V-SIG`), so the signature has something to resolve against.
+		parts.Edges = []EdgeParts{contributorEdge(t, ctr)}
+		parts.Height = ctr.Node().Height() + 1
+	}
 	parts.ID = ctr.ID() // a placeholder: the id is not part of the record it names
 	staged := assembled(t, parts)
 	sc := staged.(*claim)
-	encoded, err := encodeNode(sc.node, sc.edges)
+	encoded, err := encodeNode(sc.node, sc.edges, nil)
 	require.NoError(t, err)
-	hash, err := hashContent(encoded)
+	env, err := signEnvelope(ctr.SigningKey(), encoded)
 	require.NoError(t, err)
-
-	var key crypto.Signer // an edge-less claim is initial and identity-signed (§5.7)
-	if len(parts.Edges) > 0 {
-		key = ctr.SigningKey()
-	}
-	payload, err := signHash(key, idBytes(hash))
-	require.NoError(t, err)
-	id, err := idFromBytes(payload)
+	id, err := hashContent(env)
 	require.NoError(t, err)
 	parts.ID = id
-	return assembled(t, parts)
+	out := assembled(t, parts).(*claim)
+	out.raw = env // the stored record, so a rule reading stored bytes finds them
+	return out
 }
 
 // contributorEdge is the edge a non-initial fixture needs for its signature to
@@ -201,16 +201,20 @@ func bothSlotsRecord(t *testing.T, edgeToo bool) []byte {
 		en.ContentHash = idBytes(hash)
 		en.ContentSize = uint64(len("inline bytes"))
 	}
-	raw, err := encodingMode.Marshal(encClaimFile{Node: en})
+	payload, err := encodingMode.Marshal(en)
+	require.NoError(t, err)
+	priv, _ := ed25519Keys(t)
+	raw, err := signEnvelope(priv, payload)
 	require.NoError(t, err)
 
 	// The fixture has to really carry both, or the test proves nothing.
-	var back encClaimFile
-	require.NoError(t, cbor.Unmarshal(raw, &back))
-	rec := back.Node
+	back, err := envelopePayload(raw)
+	require.NoError(t, err)
+	var rec encNode
+	require.NoError(t, cbor.Unmarshal(back, &rec))
 	if edgeToo {
 		var ee encEdge
-		require.NoError(t, cbor.Unmarshal(back.Node.Edges[0], &ee))
+		require.NoError(t, cbor.Unmarshal(rec.Edges[0], &ee))
 		require.NotEmpty(t, ee.Content)
 		require.NotEmpty(t, ee.ContentHash)
 	} else {

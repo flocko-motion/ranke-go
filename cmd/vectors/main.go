@@ -107,7 +107,7 @@ func (g *gen) writeManifest() error {
 
 // addClaim writes a claim that must verify, remembering it for the broken cases.
 func (g *gen) addClaim(name string, c ranke.Claim, why string) error {
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}

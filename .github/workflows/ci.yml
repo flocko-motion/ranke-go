@@ -59,35 +59,17 @@ jobs:
       - name: Fetch the spec
         run: make docs
 
-      # brokkr is the lint gate `make lint` runs. It ships in the sindri release
-      # rather than as a Go dependency, so it is fetched like the spec and the
-      # services: infrastructure, resolved at run time. One binary is enough —
-      # brokkr runs standalone, none of its siblings needed — and /usr/local/bin is
-      # already on the runner's PATH, so nothing goes into $GITHUB_PATH.
+      # brokkr, the linter `make lint` runs, comes from `make tools` — the same
+      # install a developer gets, so the two cannot drift. It resolves the latest
+      # release itself and detects OS and arch, which is what a mac or arm runner
+      # would otherwise need spelled out here.
       #
-      # Release assets are version-stamped (sindri_0.24.0_linux_amd64.tar.gz), so
-      # there is no version-independent download path and the tag is resolved first.
-      # That means CI's linter version moves without a ranke-go commit, exactly as
-      # the spec bundle does: a brokkr release can turn this job red on an untouched
-      # branch, and that is the intent — the gate tracks the tool.
-      #
-      # linux_amd64 tracks `runs-on: ubuntu-latest`; a mac or arm runner needs uname
-      # detection here.
+      # `make lint` depends on it, so this step exists only to name the download as
+      # its own failure. CI's linter version moves without a ranke-go commit, exactly
+      # as the spec bundle does: a brokkr release can turn this job red on an
+      # untouched branch, and that is the intent — the gate tracks the tool.
       - name: Install brokkr
-        run: |
-          url=$(curl -fsSL https://api.github.com/repos/flocko-motion/sindri/releases/latest \
-            | grep -o 'https://[^"]*_linux_amd64\.tar\.gz' | head -1)
-          # Empty means the naming convention moved, or api.github.com refused the
-          # unauthenticated call (60/hour per IP). Say so: curl would fail obscurely.
-          test -n "$url" || {
-            echo "no linux_amd64 asset resolved — renamed release assets, or an api.github.com rate limit" >&2
-            exit 1
-          }
-          echo "installing $url"
-          curl -fsSL "$url" -o /tmp/sindri.tar.gz
-          tar -C /tmp -xzf /tmp/sindri.tar.gz
-          sudo install -m 0755 /tmp/sindri_*_linux_amd64/brokkr /usr/local/bin/brokkr
-          brokkr --version
+        run: make tools
 
       # The static gates, each a named step so a red run says which gate broke rather
       # than only that `make check/full` did. `make verify` is available to the runner

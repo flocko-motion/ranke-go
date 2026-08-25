@@ -132,9 +132,11 @@ func TestNodeContentXOR(t *testing.T) {
 }
 
 // TestNodeNoContent: a node may carry no content at all — no hash, zero
-// size, empty reader.
+// size, empty reader. A contributor always carries its pubkey (`V-SIG`), so the
+// case is shown on an ordinary claim.
 func TestNodeNoContent(t *testing.T) {
-	c, err := NewClaim(NodeContributor, nil).Sign() // root contributor, no content
+	ctr := contributor(t)
+	c, err := NewClaim(TypeSource("note"), ctr).WithHeight(HeightOf(ctr)).Sign()
 	require.NoError(t, err)
 	n := c.Node()
 	require.Nil(t, n.GetContentHash(), "no-content node has no hash")

@@ -43,11 +43,17 @@ func TestInlinePreimageConsistency(t *testing.T) {
 		Sign()
 	require.NoError(t, err)
 
+	env, err := c.Envelope()
+	require.NoError(t, err)
+	pre, err := envelopePayload(env)
+	require.NoError(t, err)
+	enc, err := encodeNode(c.unwrap().node, c.unwrap().edges, nil)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(pre, enc), "the envelope's payload must equal encodeNode (the signed bytes)")
+
+	// The serialized-claim path unwraps rather than rebuilds, so it lands on the
+	// same bytes (`R-QDETAIL`).
 	raw, err := c.EncodeCBOR(FormOriginal)
 	require.NoError(t, err)
-	pre, err := nodePreimage(raw)
-	require.NoError(t, err)
-	enc, err := encodeNode(c.unwrap().node, c.unwrap().edges)
-	require.NoError(t, err)
-	require.True(t, bytes.Equal(pre, enc), "nodePreimage(Encode) must equal encodeNode (the signed preimage)")
+	require.True(t, bytes.Equal(raw, enc), "EncodeCBOR(original) must be the payload the envelope carries")
 }

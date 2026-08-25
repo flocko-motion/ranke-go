@@ -37,27 +37,27 @@ import (
 
 // --- round-trip harness -------------------------------------------------
 
-// roundTrip pushes c through the canonical codec and back, asserting the
-// decoded claim re-encodes to byte-identical bytes and is structurally
+// roundTrip pushes c through the storage codec and back, asserting the
+// decoded claim yields byte-identical bytes and is structurally
 // equal to c. Returns the decoded claim so callers can chain further
 // assertions on the far side of the codec.
 func roundTrip(t *testing.T, c Claim) Claim {
 	t.Helper()
 
-	// claim → cbor
-	encoded, err := c.EncodeCBOR(FormOriginal)
-	require.NoError(t, err, "Encode")
+	// claim → envelope, the stored record DecodeClaim reads
+	encoded, err := c.Envelope()
+	require.NoError(t, err, "Envelope")
 
-	// cbor → claim
+	// envelope → claim
 	decoded, err := DecodeClaim(c.ID(), encoded)
 	require.NoError(t, err, "DecodeClaim")
 
-	// claim → cbor again — canonical CBOR is deterministic, so a faithful
-	// decode must reproduce the exact input bytes.
-	reencoded, err := decoded.EncodeCBOR(FormOriginal)
-	require.NoError(t, err, "re-Encode")
+	// claim → envelope again: the decode keeps the bytes, so the pair is
+	// inverse and the id still derives from what comes back.
+	reencoded, err := decoded.Envelope()
+	require.NoError(t, err, "re-Envelope")
 	require.Equal(t, encoded, reencoded,
-		"canonical re-encode must be byte-identical to the original bytes")
+		"the stored record must survive the round trip byte for byte")
 
 	// TODO(json): once a JSON codec exists, extend the round-trip to
 	// claim → json → claim → cbor and assert byte-identity across that
@@ -166,31 +166,22 @@ func newSignedContributor(t *testing.T) (Contributor, ed25519.PrivateKey) {
 
 // --- tests: the simplest claims ----------------------------------------
 
-// TestClaimRoundTrip_IdentityContributor is the atom at its smallest: an
-// identity-Sign root contributor — empty content (no pubkey), no key, so
-// id reduces to the plain hash H(S(v)) (§5.7). The only claim that stands
-// alone (no contributor edge, §4.3).
-func TestClaimRoundTrip_IdentityContributor(t *testing.T) {
-	claim, err := NewClaim(NodeContributor, nil).Sign() // no content, no key
-	require.NoError(t, err)
-	c, err := claim.AsContributor(context.Background(), nil)
-	require.NoError(t, err)
-
-	require.True(t, c.IsContributor(), "must be a contributor claim")
-	require.Empty(t, c.Edges(), "root contributor has no edges (§4.3)")
-	require.Empty(t, mustInline(t, c.Node()), "identity-Sign contributor has empty content (no pubkey)")
-	require.Equal(t, "sha2-256", c.ID().Algorithm(), "identity-Sign id is a plain hash")
-	roundTrip(t, c)
+// TestClaimRoundTripKeylessContributorRefused: every contributor carries a pubkey and
+// every claim is signed (`V-SIG`), so the smallest claim is still a sealed one.
+func TestClaimRoundTripKeylessContributorRefused(t *testing.T) {
+	_, err := NewClaim(NodeContributor, nil).Sign() // no content, no key
+	require.ErrorIs(t, err, errEnvelopeNoKey)
 }
 
-// TestClaimRoundTrip_SelfSignedContributor covers the signed root: the
-// pubkey IS the content (§5.7) and the id is an Ed25519 signature. Both
+// TestClaimRoundTrip_SelfSignedContributor covers the signed root: the pubkey IS the
+// content (§5.7), and the id hashes the envelope holding the signature over it. Both
 // must survive the codec since they define the claim.
 func TestClaimRoundTrip_SelfSignedContributor(t *testing.T) {
 	c, _ := newSignedContributor(t)
 	require.True(t, c.IsContributor())
+	require.Empty(t, c.Edges(), "root contributor has no edges (§4.3)")
 	require.NotEmpty(t, mustInline(t, c.Node()), "a signed contributor's content is its pubkey")
-	require.Equal(t, "eddsa", c.ID().Algorithm(), "signed id names the sign scheme")
+	require.Equal(t, "sha2-256", c.ID().Algorithm(), "an id hashes the envelope")
 	roundTrip(t, c)
 }
 

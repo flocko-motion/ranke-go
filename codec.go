@@ -1,9 +1,9 @@
 // package: ranke / codec
 // type:    io
-// job:     canonical CBOR (de)serialization at two levels — the node record encoding that ids are
-// computed over (edges inlined), and the whole-claim storage codec (Claim.Encode /
-// DecodeClaim)
-// limits:  persists nothing (-> universe, adapter); content integrity lives in content.go
+// job:     canonical CBOR (de)serialization of the claim record — S(v) with its edges inlined,
+// which is what an envelope carries as payload, and what DecodeClaim reads back out of one
+// limits:  persists nothing (-> universe, adapter); the envelope around the record, and the
+// signature over it, are codec_envelope.go's; content integrity lives in content.go
 package ranke
 
 import (
@@ -16,8 +16,8 @@ import (
 
 // ─── Records: the canonical encoding an id is computed over ───────────
 
-// CBOR Deterministic Encoding (RFC 8949 §4.2), field order fixed by numeric
-// keys. id(v) = Sign(H(S(v))), id(e) = H(S(e)) (§Primitives).
+// CBOR Deterministic (RFC 8949 §4.2), order fixed by numeric keys. id(v) hashes the
+// envelope, id(e) the edge record.
 
 // encodingMode is the shared CBOR Deterministic encoder, safe for concurrent use.
 var encodingMode cbor.EncMode
@@ -51,7 +51,7 @@ type encNode struct {
 	// Fields is a map under tag 8, key-sorted by CBOR Deterministic.
 	Fields    map[string]string `cbor:"8,keyasint,omitempty"`
 	CreatedAt string            `cbor:"9,keyasint"` // RFC3339 nano UTC
-	// Edge records inlined in canonical order, each element one edge's S(e).
+	// Edge records inlined, each element one edge's S(e), ascending by id(e) (`V-EORDER`).
 	Edges []cbor.RawMessage `cbor:"10,keyasint,omitempty"`
 	// Height is the longest possible path, defined in paper 1 (§4.1)
 	Height uint64 `cbor:"11,keyasint,omitempty"`
@@ -84,10 +84,10 @@ func MarshalCBOR(v any) ([]byte, error) {
 	return b, nil
 }
 
-// encodeNode returns the canonical S(v) bytes a node id is computed over, which
-// inline content is always part of — hence the full budget.
-func encodeNode(n *node, edges []*edge) ([]byte, error) {
-	en, err := buildEncNode(n, edges, nil)
+// encodeNode returns the canonical S(v) bytes, carrying the inline content b affords.
+// A claim seals under a nil budget, its content in full (`V-ENV`).
+func encodeNode(n *node, edges []*edge, b *contentBudget) ([]byte, error) {
+	en, err := buildEncNode(n, edges, b)
 	if err != nil {
 		return nil, err
 	}
@@ -229,34 +229,32 @@ func idBytes(v Id) []byte {
 
 // ─── Claim: the storage codec, built on the record shapes above ───────
 
-// Claim.Encode and DecodeClaim are inverses, so persistence adapters move
-// opaque bytes and stay ignorant of a claim's internal representation.
+// Claim.Envelope and DecodeClaim are inverses, so persistence adapters move opaque
+// bytes and stay ignorant of a claim's internal representation.
 
-// encClaimFile is the canonical serialized shape of a claim: the node record.
-type encClaimFile struct {
-	Node encNode `cbor:"1,keyasint"`
-}
-
-// EncodeCBOR serializes the claim to canonical CBOR in the form asked for: the
-// record as written, which persistence stores, or that record with its diff overlay
-// resolved.
+// EncodeCBOR serializes the claim as written, or with its diff overlay resolved.
 func (c *claim) EncodeCBOR(form Form) ([]byte, error) { return c.encodeCBOR(form, nil) }
 
-// encodeCBOR is EncodeCBOR carrying the inline content b affords (`R-QCONTENT`). Content
-// in full keeps the stored bytes, which is what lets that form be S(v) (`R-QCANON`).
+// Envelope returns the stored record, the bytes the id hashes (`V-ENV`, `V-ID`),
+// copied as held: the signature covers the payload as it was sealed.
+func (c *claim) Envelope() ([]byte, error) {
+	if c.raw == nil {
+		return nil, WithDetail(errNoEnvelope, c.node.id.String())
+	}
+	return c.raw, nil
+}
+
+// encodeCBOR is EncodeCBOR carrying the content b affords (`R-QCONTENT`): the
+// serialized claim, which no id checks (`R-QCANON`). Held bytes unwrap, never rebuild.
 func (c *claim) encodeCBOR(form Form, b *contentBudget) ([]byte, error) {
 	node, edges := c.node, c.edges
 	if form == FormMaterialized && c.diffClaim != nil {
 		node, edges = c.node.flattened(), c.effectiveEdges()
 	} else if c.raw != nil && b.inFull() {
-		return c.raw, nil // the record the decode kept, so the id still derives from it
-	}
-	en, err := buildEncNode(node, edges, b)
-	if err != nil {
-		return nil, err
+		return envelopePayload(c.raw)
 	}
 	// Inline content lives inside the records (§Content).
-	data, err := encodingMode.Marshal(encClaimFile{Node: en})
+	data, err := encodeNode(node, edges, b)
 	if err != nil {
 		return nil, WrapDetail(errEncodeClaim, c.node.id.String(), err)
 	}
@@ -352,20 +350,38 @@ func (c *claim) encodeJSON(form Form, b *contentBudget) ([]byte, error) {
 // DecodeClaim decodes a claim's canonical CBOR into a Claim with its id set.
 // An error tells callers the bytes are content rather than a claim.
 func DecodeClaim(id Id, b []byte) (Claim, error) {
-	var ec encClaimFile
-	if err := cbor.Unmarshal(b, &ec); err != nil {
+	payload, err := envelopePayload(b)
+	if err != nil {
+		return nil, err
+	}
+	c, err := decodeSerializedClaim(id, payload)
+	if err != nil {
+		return nil, err
+	}
+	// Keep the envelope: it is what the id was taken over, so a read asking for the
+	// stored record is served from what the decode already held.
+	c.raw = b
+	return c, nil
+}
+
+// decodeSerializedClaim decodes S(v) — the envelope's payload, and what a
+// `detail: claims` read returns. The claim it yields carries no stored record, since
+// a payload alone is not one.
+func decodeSerializedClaim(id Id, payload []byte) (*claim, error) {
+	var en encNode
+	if err := cbor.Unmarshal(payload, &en); err != nil {
 		return nil, Wrap(errDecodeClaim, err)
 	}
-	n, err := decodeNode(ec.Node)
+	n, err := decodeNode(en)
 	if err != nil {
 		return nil, WrapDetail(errDecodeClaim, "node", err)
 	}
 	n.id = id
 	// Each edge id is H(S(e)) over the stored raw bytes, never re-encoded, so it
 	// stays stable as the alias taxonomy grows.
-	edges := make([]*edge, len(ec.Node.Edges))
-	n.edges = make([]Id, len(ec.Node.Edges))
-	for i, raw := range ec.Node.Edges {
+	edges := make([]*edge, len(en.Edges))
+	n.edges = make([]Id, len(en.Edges))
+	for i, raw := range en.Edges {
 		eid, err := hashContent(raw)
 		if err != nil {
 			return nil, WrapDetail(errDecodeClaim, "edge "+strconv.Itoa(i)+" id", err)
@@ -382,24 +398,7 @@ func DecodeClaim(id Id, b []byte) (Claim, error) {
 		edges[i] = e
 		n.edges[i] = eid
 	}
-	// Keep the stored record: it is the canonical CBOR, so a read asking for that
-	// encoding is served from what the decode already held.
-	return &claim{node: n, edges: edges, raw: b}, nil
-}
-
-// nodePreimage extracts S(node) — field 1 — from a claim's stored CBOR as raw
-// bytes, so verification hashes the exact bytes the id was signed over.
-func nodePreimage(raw []byte) ([]byte, error) {
-	var rf struct {
-		Node cbor.RawMessage `cbor:"1,keyasint"`
-	}
-	if err := cbor.Unmarshal(raw, &rf); err != nil {
-		return nil, Wrap(errDecodeClaim, err)
-	}
-	if len(rf.Node) == 0 {
-		return nil, Wrap(errDecodeClaim, errNodePreimage)
-	}
-	return rf.Node, nil
+	return &claim{node: n, edges: edges}, nil
 }
 
 func decodeNode(en encNode) (*node, error) {
@@ -433,7 +432,7 @@ func decodeNode(en encNode) (*node, error) {
 		n.content = en.Content
 		n.contentSize = en.ContentSize
 	case len(en.ContentHash) > 0: // external
-		ch, err := hashFromMultihashBytes(en.ContentHash)
+		ch, err := idFromBytes(en.ContentHash)
 		if err != nil {
 			return nil, err
 		}
@@ -471,7 +470,7 @@ func decodeEdge(ee encEdge) (*edge, error) {
 		e.content = ee.Content
 		e.contentSize = ee.ContentSize
 	case len(ee.ContentHash) > 0: // external
-		ch, err := hashFromMultihashBytes(ee.ContentHash)
+		ch, err := idFromBytes(ee.ContentHash)
 		if err != nil {
 			return nil, err
 		}

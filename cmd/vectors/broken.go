@@ -1,8 +1,8 @@
 // package: main / vectors_broken
 // type:    cmd
 // job:     the records every implementation must reject, each isolating one failure — a wrong id, a
-// bare hash where a signature belongs, an unresolvable contributor, a declared height that is not
-// the derived one, content that misses its hash
+// record stored bare where an envelope belongs, an unresolvable contributor, a declared height that
+// is not the derived one, content that misses its hash
 // limits:  derives from the toy graph (-> graph.go); each case breaks one thing, so a rejection
 // names a cause
 package main
@@ -13,7 +13,7 @@ import (
 
 	"github.com/flocko-motion/ranke-go"
 	"github.com/flocko-motion/ranke-go/internal/vectors"
-	"github.com/fxamacker/cbor/v2"
+	"github.com/veraison/go-cose"
 )
 
 // broken writes the rejected cases, each pairing bytes with an id that does not
@@ -33,7 +33,7 @@ func (g *gen) broken(ctx context.Context) error {
 		"V-ID"); err != nil {
 		return err
 	}
-	if err := g.identitySign(note, noteID); err != nil {
+	if err := g.unenveloped(note); err != nil {
 		return err
 	}
 	if err := g.malformedID(note, noteID); err != nil {
@@ -45,36 +45,68 @@ func (g *gen) broken(ctx context.Context) error {
 	if err := g.wrongHeight(); err != nil {
 		return err
 	}
+	if err := g.misorderedEdges(noteID); err != nil {
+		return err
+	}
 	if err := g.unresolvableContributor(ctx); err != nil {
 		return err
 	}
 	return g.tamperedBlob()
 }
 
-// identitySign offers a record under H(S(node)) — the identity-Sign form (§4.1) —
-// though its contributor publishes a pubkey, so a signature is required.
-func (g *gen) identitySign(raw []byte, id ranke.Id) error {
-	var rf struct {
-		Node cbor.RawMessage `cbor:"1,keyasint"`
-	}
-	if err := cbor.Unmarshal(raw, &rf); err != nil {
+// unenveloped offers the serialized claim on its own, under the hash of those very
+// bytes. The id holds for what is stored, so `V-ID` passes and the envelope is the
+// whole defect: no signature travels with the record, and nothing attests it.
+func (g *gen) unenveloped(raw []byte) error {
+	var msg cose.Sign1Message
+	if err := msg.UnmarshalCBOR(raw); err != nil {
 		return err
 	}
-	hash, err := ranke.HashContent(rf.Node)
+	hash, err := ranke.HashContent(msg.Payload)
 	if err != nil {
 		return err
 	}
-	return g.addBroken("rejected-identity-sign", raw, hash.String(), vectors.ReasonIdentitySign,
-		"the bare H(S(node)) as id, valid only where the contributor publishes no key",
-		"V-SIG")
+	return g.addBroken("rejected-not-enveloped", msg.Payload, hash.String(), vectors.ReasonNotEnveloped,
+		"the serialized claim stored bare, with no envelope to carry a signature over it",
+		"V-ENV")
+}
+
+// misorderedEdges reverses a two-edge claim's edges array and seals the result, so
+// the id holds and the signature verifies. Edge order is then the whole defect, and
+// it is the one that decides whether two implementations agree on any id at all.
+func (g *gen) misorderedEdges(noteID ranke.Id) error {
+	e, err := ranke.NewEdge(ranke.EdgeConfig{
+		Reference: noteID,
+		Type:      ranke.TypeDerivation("note"),
+	})
+	if err != nil {
+		return err
+	}
+	c, err := ranke.NewClaim(ranke.TypeDerivation("note"), g.who).
+		WithInlineContent([]byte("a derivation whose edges are stored out of order")).
+		WithEncoding(ranke.EncodingPlain).
+		WithEdges(e).
+		WithHeight(2).
+		WithCreatedAt(epoch.Add(12 * time.Second)).
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, id, err := patchedClaim(c, reverseEdges)
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-edge-order", raw, id.String(), vectors.ReasonEdgeOrder,
+		"a claim's edges stored descending by id(e), where the rule fixes ascending",
+		"V-EORDER")
 }
 
 // malformedID truncates the id's multibase payload, so it fails before any hashing.
 func (g *gen) malformedID(raw []byte, id ranke.Id) error {
 	s := id.String()
 	return g.addBroken("rejected-malformed-id", raw, s[:len(s)-6], vectors.ReasonMalformedID,
-		"the id's payload is truncated, so its multikey framing no longer parses",
-		"V-SIGN")
+		"the id's payload is truncated, so its multihash framing no longer parses",
+		"V-HASH")
 }
 
 // tamperedContent restates the note with different content under the original id,
@@ -89,7 +121,7 @@ func (g *gen) tamperedContent(id ranke.Id) error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}
@@ -110,7 +142,7 @@ func (g *gen) wrongHeight() error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}
@@ -135,7 +167,7 @@ func (g *gen) unresolvableContributor(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}

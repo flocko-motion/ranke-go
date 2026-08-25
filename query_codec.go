@@ -176,13 +176,16 @@ func validateOutput(o Output) error {
 	if err := oneOf("output.shape", string(o.Shape), "", string(ShapeSingle), string(ShapePath)); err != nil {
 		return err
 	}
-	if err := oneOf("output.detail", string(o.Detail), "", string(DetailID), string(DetailClaims)); err != nil {
+	if err := oneOf("output.detail", string(o.Detail), "", string(DetailID), string(DetailClaims), string(DetailEnvelope)); err != nil {
 		return err
 	}
 	if err := oneOf("output.form", string(o.Form), "", string(FormOriginal), string(FormMaterialized)); err != nil {
 		return err
 	}
 	if err := oneOf("output.encoding", string(o.Encoding), "", string(ResultNative), string(ResultJSON), string(ResultCBOR)); err != nil {
+		return err
+	}
+	if err := validateEnvelopeOutput(o); err != nil {
 		return err
 	}
 	if o.Content == nil {
@@ -195,6 +198,23 @@ func validateOutput(o Output) error {
 	// An absent overflow is omit (`R-QCONTENT`), so the pair needs only its cap.
 	return oneOf("output.content.overflow", string(o.Content.Overflow),
 		"", string(OverflowCutoff), string(OverflowOmit))
+}
+
+// validateEnvelopeOutput refuses the axes an envelope cannot answer for
+// (`R-QDETAIL`). The bytes are the stored ones, so a resolved overlay is not among
+// them and JSON is not what they are; both requests ask for something else under the
+// name of the original.
+func validateEnvelopeOutput(o Output) error {
+	if o.Detail != DetailEnvelope {
+		return nil
+	}
+	if o.Form == FormMaterialized {
+		return WithDetail(ErrQueryEnvelopeAxis, "output.form materialized")
+	}
+	if o.Encoding == ResultJSON {
+		return WithDetail(ErrQueryEnvelopeAxis, "output.encoding json")
+	}
+	return nil
 }
 
 // oneOf reports whether got is among allowed, naming the field when it is not.

@@ -42,12 +42,20 @@ type Claim interface {
 	// EncodeJSON renders every record slot as text, content base64. It reports a
 	// claim; the id is verified against the CBOR form's bytes.
 	EncodeJSON(form Form) ([]byte, error)
-	// EncodeCBOR returns the claim as canonical CBOR: FormOriginal the record as
-	// written, which persistence stores; FormMaterialized its overlay resolved.
+	// EncodeCBOR returns the serialized claim as canonical CBOR: FormOriginal as
+	// written, FormMaterialized with its overlay resolved (`R-QDETAIL`).
 	EncodeCBOR(form Form) ([]byte, error)
-	// verifyID checks the claim's id is a valid signature by pubkey over
-	// H(S(node)), preimaged from the caller's stored CBOR, never a re-encoding.
-	verifyID(pubkey, raw []byte) error
+	// Envelope returns the stored record — the serialized claim paired with the
+	// signature over it, the bytes id(v) hashes (`V-ENV`). This is what
+	// persistence writes and the wire carries. A claim rebuilt from parts holds
+	// no signature, so it has no envelope to give.
+	Envelope() ([]byte, error)
+	// verifyID checks the id is H over the caller's stored bytes, never a
+	// re-encoding of them (`V-ID`).
+	verifyID(raw []byte) error
+	// verifySignature checks the stored envelope's signature against pubkey
+	// (`V-SIG`).
+	verifySignature(pubkey, raw []byte) error
 	// unwrap returns the underlying concrete *claim, peeling any wrapper, so
 	// in-package machinery reaches it without a cast.
 	unwrap() *claim

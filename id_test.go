@@ -127,48 +127,23 @@ func TestIdEqualCrossConstruction(t *testing.T) {
 	require.False(t, other.Equal(reparsed), "different content must not")
 }
 
-// --- Algorithm on non-hash payloads ------------------------------------
+// --- payloads that are not multihashes ---------------------------------
 
-// TestAlgorithmNonMultihashPayload: Algorithm reads the leading
-// multicodec varint when the payload is not a multihash (e.g. a signature
-// id), and never panics on arbitrary bytes.
-func TestAlgorithmNonMultihashPayload(t *testing.T) {
-	// A payload whose leading varint is the ed25519-pub multicodec (0xed),
-	// but which is not a valid multihash — exercises the varint branch.
-	id, err := idFromBytes([]byte{0xed, 0x01, 0x02, 0x03})
-	require.NoError(t, err)
-	require.NotEqual(t, "unknown", id.Algorithm(),
-		"a known multicodec varint should be named, got %q", id.Algorithm())
-}
-
-// TestSignatureIdNamesItsScheme: a signature id names its scheme whatever byte it opens
-// with. Signatures frame under eddsa (0xd0ed, varint ed a1 03).
-func TestSignatureIdNamesItsScheme(t *testing.T) {
-	for _, first := range []byte{0, 1, 62, 63, 64, 255} {
-		raw := make([]byte, 3+ed25519.SignatureSize)
-		raw[0], raw[1], raw[2] = 0xed, 0xa1, 0x03
-		raw[3] = first
-		signature, err := idFromBytes(raw)
-		require.NoError(t, err)
-		require.Equal(t, "eddsa", signature.Algorithm(),
-			"a signature names its scheme whatever byte it opens with (got first=%d)", first)
-	}
-}
-
-// TestTwoBytePrefixIsNotAnUnnamedMultihash: Algorithm accepts only a NAMED multihash.
-// multihash.Decode reads a code then a length, which a two-byte prefix supplies by
-// accident — 0xed 0x01, then the payload's first byte as the length — so one payload in
-// 256 decoded as a nameless multihash and Algorithm returned "". Any two-byte code can
-// recreate it, so the guard outlives the signature framing that first hit it.
-func TestTwoBytePrefixIsNotAnUnnamedMultihash(t *testing.T) {
-	for _, first := range []byte{0, 1, 62, 63, 64, 255} {
-		raw := make([]byte, 2+ed25519.SignatureSize)
-		raw[0], raw[1] = 0xed, 0x01
-		raw[2] = first
-		payload, err := idFromBytes(raw)
-		require.NoError(t, err)
-		require.Equal(t, "ed25519-pub", payload.Algorithm(),
-			"a two-byte code names itself rather than decoding as a nameless multihash (first=%d)", first)
+// TestIdRejectsNonMultihash: with the signature moved into the envelope, every id is a
+// multihash (`V-ID`, `V-HASH`), so bytes of another shape are refused at construction
+// rather than carried as an Id that names nothing.
+func TestIdRejectsNonMultihash(t *testing.T) {
+	for name, raw := range map[string][]byte{
+		"arbitrary bytes":    {0xed, 0x01, 0x02, 0x03},
+		"a bare multicodec":  {0xed, 0x01},
+		"an ed25519 pubkey":  append([]byte{0xed, 0x01}, make([]byte, ed25519.PublicKeySize)...),
+		"a truncated digest": {0x12, 0x20, 0x01, 0x02},
+		"empty":              {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := idFromBytes(raw)
+			require.ErrorIs(t, err, errID, "only a multihash is an id")
+		})
 	}
 }
 

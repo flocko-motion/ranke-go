@@ -8,8 +8,6 @@
 package main
 
 import (
-	"crypto/ed25519"
-	"encoding/binary"
 	"errors"
 	"time"
 
@@ -17,19 +15,23 @@ import (
 	"github.com/flocko-motion/ranke-go/internal/vectors"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	"github.com/veraison/go-cose"
 )
 
-// errIDFraming fires when the id this file derives disagrees with the library's over
-// the same bytes, which would make every patched record's id wrong in the same way.
+// errIDFraming fires when this file's derived id disagrees with the library's over
+// the same bytes, which would make every patched id wrong alike.
 var errIDFraming = errors.New("cmd/vectors: re-derived id does not match the library's")
+
+// errTooFewEdges fires when the edge-order case has too few edges to reorder, which
+// would ship a vector carrying no defect.
+var errTooFewEdges = errors.New("cmd/vectors: the edge-order case needs a claim with at least two edges")
 
 // Record keys `V-SER` fixes, the ones these cases reach for.
 const (
-	keyNode        = 1
 	keyContentHash = 5
 	keyCreatedAt   = 9
+	keyEdges       = 10
 )
 
 // noNanoCreatedAt is epoch in plain RFC 3339 — the near-miss `V-TIME` exists to
@@ -60,8 +62,7 @@ func (g *gen) malformed() error {
 }
 
 // badFieldTime signs a record whose field carries an unparsable timestamp. The
-// builder does not parse field values, so the signature holds over these very bytes
-// and the timestamp is the whole defect.
+// builder judges no field value, so the timestamp is the whole defect.
 func (g *gen) badFieldTime(name, field, why string) error {
 	c, err := ranke.NewClaim(ranke.TypeSource("note"), g.who).
 		WithInlineContent([]byte("a note carrying "+field+"="+unparsableTime)).
@@ -73,7 +74,7 @@ func (g *gen) badFieldTime(name, field, why string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	raw, err := c.Envelope()
 	if err != nil {
 		return err
 	}
@@ -128,9 +129,9 @@ func (g *gen) bothContentSlots() error {
 		"one record carrying content and content_hash, which the rule makes exclusive", "V-CONTENT")
 }
 
-// patchedRecord builds a claim the root identity signs, patches its node record, and
-// re-signs the result. Re-signing is what leaves ONE defect: an id that no longer
-// held for the bytes would be a second, and the case could then be rejected for it.
+// patchedRecord patches the serialized claim inside a fresh claim's envelope and
+// seals it again. Re-sealing leaves ONE defect: the old id and signature would both
+// fail first, hiding the one named.
 func (g *gen) patchedRecord(content []byte, patch func(map[uint64]cbor.RawMessage) error) ([]byte, ranke.Id, error) {
 	c, err := ranke.NewClaim(ranke.TypeSource("note"), g.who).
 		WithInlineContent(content).
@@ -141,77 +142,98 @@ func (g *gen) patchedRecord(content []byte, patch func(map[uint64]cbor.RawMessag
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := c.EncodeCBOR(ranke.FormOriginal)
+	return patchedClaim(c, patch)
+}
+
+// patchedClaim is patchedRecord over a claim already built, for a defect needing a
+// shape the one above lacks. It signs under the root identity, as sealPayload does.
+func patchedClaim(c ranke.Claim, patch func(map[uint64]cbor.RawMessage) error) ([]byte, ranke.Id, error) {
+	raw, err := c.Envelope()
 	if err != nil {
 		return nil, nil, err
 	}
 	// The framing below is re-derived here, so it is proven against the record whose
-	// id the library just produced: same bytes, same id, or the framing is wrong.
-	unpatched, err := patchNode(raw, func(map[uint64]cbor.RawMessage) error { return nil })
+	// id the library just produced: same payload, same id, or the framing is wrong.
+	unpatched, err := patchPayload(raw, func(map[uint64]cbor.RawMessage) error { return nil })
 	if err != nil {
 		return nil, nil, err
 	}
-	check, err := signNode(unpatched.node)
+	_, check, err := sealPayload(unpatched)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !check.Equal(c.ID()) {
 		return nil, nil, errIDFraming
 	}
-	patched, err := patchNode(raw, patch)
+	patched, err := patchPayload(raw, patch)
 	if err != nil {
 		return nil, nil, err
 	}
-	id, err := signNode(patched.node)
+	return sealPayload(patched)
+}
+
+// sealPayload derives the envelope and id(v) for a payload this program assembled: a
+// COSE_Sign1 under the `EdDSA` header (`V-ENV`, `V-SIGN`), hashed as `V-HASH` fixes.
+func sealPayload(payload []byte) ([]byte, ranke.Id, error) {
+	sgn, err := cose.NewSigner(cose.AlgorithmEd25519, signer(rootSeed))
 	if err != nil {
 		return nil, nil, err
 	}
-	return patched.file, id, nil
+	msg := cose.NewSign1Message()
+	msg.Payload = payload
+	msg.Headers.Protected[cose.HeaderLabelAlgorithm] = cose.AlgorithmEd25519
+	if err := msg.Sign(nil, nil, sgn); err != nil {
+		return nil, nil, err
+	}
+	env, err := msg.MarshalCBOR()
+	if err != nil {
+		return nil, nil, err
+	}
+	mh, err := multihash.Sum(env, multihash.SHA2_256, -1)
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := multibase.Encode(multibase.Base32, mh)
+	if err != nil {
+		return nil, nil, err
+	}
+	id, err := ranke.ParseId(s)
+	return env, id, err
 }
 
-// signNode derives id(v) = Sign(H(S(v))) for a node record this program assembled:
-// the sha2-256 multihash `V-HASH` fixes, signed with Ed25519 and framed under the
-// `eddsa` multicodec `V-SIGN` names. The library's own signer takes a claim, not bytes.
-func signNode(node []byte) (ranke.Id, error) {
-	hash, err := multihash.Sum(node, multihash.SHA2_256, -1)
-	if err != nil {
-		return nil, err
+// reverseEdges flips the edges array, which `V-EORDER` fixes ascending by id(e).
+func reverseEdges(node map[uint64]cbor.RawMessage) error {
+	var edges []cbor.RawMessage
+	if err := cbor.Unmarshal(node[keyEdges], &edges); err != nil {
+		return err
 	}
-	sig := ed25519.Sign(signer(rootSeed), hash)
-	payload := append(binary.AppendUvarint(nil, uint64(multicodec.Eddsa)), sig...)
-	s, err := multibase.Encode(multibase.Base32, payload)
-	if err != nil {
-		return nil, err
+	if len(edges) < 2 {
+		return errTooFewEdges
 	}
-	return ranke.ParseId(s)
+	for i, j := 0, len(edges)-1; i < j; i, j = i+1, j-1 {
+		edges[i], edges[j] = edges[j], edges[i]
+	}
+	enc, err := ranke.MarshalCBOR(edges)
+	if err != nil {
+		return err
+	}
+	node[keyEdges] = enc
+	return nil
 }
 
-// record is a claim file beside the node record inside it, which is what an id is
-// computed over.
-type record struct{ file, node []byte }
-
-// patchNode rewrites a claim record's node map and re-encodes it. Every key it does
-// not touch is carried through as raw bytes, so the patch is the only difference.
-func patchNode(raw []byte, patch func(map[uint64]cbor.RawMessage) error) (record, error) {
-	var file map[uint64]cbor.RawMessage
-	if err := cbor.Unmarshal(raw, &file); err != nil {
-		return record{}, err
+// patchPayload rewrites the serialized claim an envelope carries. Untouched keys pass
+// through raw, so the patch is the only difference.
+func patchPayload(env []byte, patch func(map[uint64]cbor.RawMessage) error) ([]byte, error) {
+	var msg cose.Sign1Message
+	if err := msg.UnmarshalCBOR(env); err != nil {
+		return nil, err
 	}
 	var node map[uint64]cbor.RawMessage
-	if err := cbor.Unmarshal(file[keyNode], &node); err != nil {
-		return record{}, err
+	if err := cbor.Unmarshal(msg.Payload, &node); err != nil {
+		return nil, err
 	}
 	if err := patch(node); err != nil {
-		return record{}, err
+		return nil, err
 	}
-	encoded, err := ranke.MarshalCBOR(node)
-	if err != nil {
-		return record{}, err
-	}
-	file[keyNode] = encoded
-	out, err := ranke.MarshalCBOR(file)
-	if err != nil {
-		return record{}, err
-	}
-	return record{file: out, node: encoded}, nil
+	return ranke.MarshalCBOR(node)
 }

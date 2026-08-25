@@ -71,8 +71,7 @@ func (u *memoryUniverse) PutClaims(_ context.Context, cs []Claim) error {
 		if c == nil || c.ID() == nil {
 			return errNilClaim
 		}
-		// As written: the stored record is what the id derives from.
-		b, err := c.EncodeCBOR(FormOriginal)
+		b, err := c.Envelope()
 		if err != nil {
 			return err
 		}

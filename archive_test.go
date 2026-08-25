@@ -287,7 +287,7 @@ func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	t.Run("absent inlines nothing", func(t *testing.T) {
 		got := read(t, nil)
 		require.NotEqual(t, stored, got)
-		c, err := DecodeClaim(nil, got)
+		c, err := decodeSerializedClaim(nil, got)
 		require.NoError(t, err)
 		inline, err := c.Node().GetInlineContent()
 		require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	})
 
 	t.Run("cutoff inlines up to the cap", func(t *testing.T) {
-		c, err := DecodeClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowCutoff}))
+		c, err := decodeSerializedClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowCutoff}))
 		require.NoError(t, err)
 		inline, err := c.Node().GetInlineContent()
 		require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	})
 
 	t.Run("omit inlines none of it", func(t *testing.T) {
-		c, err := DecodeClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowOmit}))
+		c, err := decodeSerializedClaim(nil, read(t, &OutputContent{Max: 4, Overflow: OverflowOmit}))
 		require.NoError(t, err)
 		inline, err := c.Node().GetInlineContent()
 		require.NoError(t, err)
@@ -316,7 +316,7 @@ func TestArchiveQueryServesTheContentCap(t *testing.T) {
 	// Content within the cap never overflows, so overflow has nothing to apply to.
 	t.Run("content within the cap arrives whole", func(t *testing.T) {
 		for _, ov := range []Overflow{OverflowCutoff, OverflowOmit} {
-			c, err := DecodeClaim(nil, read(t, &OutputContent{Max: len(body), Overflow: ov}))
+			c, err := decodeSerializedClaim(nil, read(t, &OutputContent{Max: len(body), Overflow: ov}))
 			require.NoError(t, err)
 			inline, err := c.Node().GetInlineContent()
 			require.NoError(t, err)

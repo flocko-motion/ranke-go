@@ -1,0 +1,7 @@
+# The gate every submit runs, in a fresh checkout of the commit.
+#
+# `make check` is the static gates, vet, and the fast suite — the same target a
+# developer runs locally, so the two cannot drift apart. It fetches what it needs:
+# the spec and papers up to the ranke-graph ref, and brokkr into bin/tools. What it
+# needs from the container is a network and a Go toolchain.
+verify: make check

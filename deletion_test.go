@@ -153,13 +153,14 @@ func TestSweepNeverTouchesTheStructuralSet(t *testing.T) {
 	for _, sub := range []string{"contributor", "branches", "delete", "expiry"} {
 		t.Run(sub, func(t *testing.T) {
 			u := NewMemoryUniverse()
-			// The builder refuses such a claim, so it is assembled — the same door a
-			// graph-native backend rebuilds through.
-			bad, err := AssembleClaim(ClaimParts{
-				ID: mustSignedID(t, who), Type: "contribution/" + sub,
-				CreatedAt: who.Node().CreatedAt(),
-				Fields:    map[string]string{FieldDeleteBy: past},
-			})
+			// The rules refuse such a claim, so it is built through AllowInvalid —
+			// sealed like any other, and breaking `R-DSTRUCT` alone.
+			bad, err := NewClaim("contribution/"+sub, who).
+				WithCreatedAt(who.Node().CreatedAt()).
+				WithField(FieldDeleteBy, past).
+				WithHeight(HeightOf(who)).
+				AllowInvalid().
+				Sign()
 			require.NoError(t, err)
 			require.NoError(t, u.PutClaims(ctx, []Claim{who, bad}))
 
@@ -170,15 +171,6 @@ func TestSweepNeverTouchesTheStructuralSet(t *testing.T) {
 			require.True(t, has[0], "contribution/%s survives a due delete_by", sub)
 		})
 	}
-}
-
-// mustSignedID borrows a real signed id, so a fixture is well-formed but for the one
-// thing it is built to test.
-func mustSignedID(t *testing.T, who Contributor) Id {
-	t.Helper()
-	c, err := NewClaim(TypeSource("note"), who).WithHeight(HeightOf(who)).Sign()
-	require.NoError(t, err)
-	return c.ID()
 }
 
 // TestSweepRefusedWithoutTheCapability: a Universe that cannot delete refuses rather

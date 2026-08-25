@@ -21,12 +21,13 @@ const (
 	ReasonIDMismatch      = "id_mismatch"
 	ReasonWrongMessage    = "wrong_message"
 	ReasonMalformedID     = "malformed_id"
-	ReasonIdentitySign    = "identity_sign_mismatch"
+	ReasonNotEnveloped    = "not_enveloped"
 	ReasonNoContributor   = "unresolvable_contributor"
 	ReasonHeightWrong     = "height_wrong"
 	ReasonContentMismatch = "content_hash_mismatch"
 	ReasonTimestampForm   = "timestamp_form"
 	ReasonBothContent     = "content_both_slots"
+	ReasonEdgeOrder       = "edge_order"
 )
 
 // AllReasons is every code above. The list lives beside the declarations so a new
@@ -34,8 +35,8 @@ const (
 // `V-TIME` arrive with no case at all.
 var AllReasons = []string{
 	ReasonOK, ReasonIDMismatch, ReasonWrongMessage, ReasonMalformedID,
-	ReasonIdentitySign, ReasonNoContributor, ReasonHeightWrong,
-	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent,
+	ReasonNotEnveloped, ReasonNoContributor, ReasonHeightWrong,
+	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent, ReasonEdgeOrder,
 }
 
 // Manifest names every artifact and the outcome an implementation must reach for it.

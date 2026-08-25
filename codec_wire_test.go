@@ -78,9 +78,9 @@ func TestWireRoundTrip(t *testing.T) {
 
 	// The record is the bytes the id derives from, so re-encoding what was decoded
 	// reproduces them.
-	want, err := a.EncodeCBOR(FormOriginal)
+	want, err := a.Envelope()
 	require.NoError(t, err)
-	got, err := claims[1].Claim.EncodeCBOR(FormOriginal)
+	got, err := claims[1].Claim.Envelope()
 	require.NoError(t, err)
 	require.Equal(t, want, got, "the canonical record crosses the wire unchanged")
 }
@@ -202,7 +202,7 @@ func TestWireCarriesCreatable(t *testing.T) {
 // first, so a relay adds its own limits by merging into one effective constraint.
 func TestWireRepeatedConstraintsNarrow(t *testing.T) {
 	root := contributor(t)
-	raw, err := srcClaim(t, root, "a note").EncodeCBOR(FormOriginal)
+	raw, err := srcClaim(t, root, "a note").Envelope()
 	require.NoError(t, err)
 	claim := srcClaim(t, root, "a note")
 
@@ -242,7 +242,7 @@ func TestWireNarrowRespectsScopeContainment(t *testing.T) {
 func TestWireLateConstraintRefused(t *testing.T) {
 	root := contributor(t)
 	claim := srcClaim(t, root, "a note")
-	raw, err := claim.EncodeCBOR(FormOriginal)
+	raw, err := claim.Envelope()
 	require.NoError(t, err)
 
 	r := NewWireReader(bytes.NewReader(records(t,
@@ -272,7 +272,7 @@ func TestWireUnknownConstraintRefused(t *testing.T) {
 // from have no defaults, so a stream states both.
 func TestWireNeedsBothRequiredRecords(t *testing.T) {
 	root := contributor(t)
-	raw, err := root.EncodeCBOR(FormOriginal)
+	raw, err := root.Envelope()
 	require.NoError(t, err)
 	payload := []any{uint64(WireClaim), idBytes(root.ID()), raw, "main"}
 
@@ -322,7 +322,7 @@ func TestWireDeclarationBindsTheStream(t *testing.T) {
 	w := NewWireWriter(&buf, WireConstraints{Branches: []string{"alpha"}})
 	require.ErrorIs(t, w.WriteClaim("beta", c), ErrWireUndeclared)
 
-	raw, err := c.EncodeCBOR(FormOriginal)
+	raw, err := c.Envelope()
 	require.NoError(t, err)
 	r := NewWireReader(bytes.NewReader(records(t,
 		append(declares([]string{"alpha"}, nil),

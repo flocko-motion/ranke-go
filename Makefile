@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean release major minor patch breaking feature fix
+.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean release major minor patch breaking feature fix
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -51,6 +51,14 @@ FULL_PERF_SIZE ?= 800
 RANKE_GRAPH_REPO ?= https://github.com/flocko-motion/ranke-graph
 RANKE_GRAPH_REF  ?= main
 PAPERS_DIR       := docs/papers
+
+# brokkr, the linter `make lint` runs. The installer is run on every lint rather than
+# cached, so the gate tracks the tool: a brokkr release can turn a run red on an
+# untouched branch, which is the intent, as it is for the spec bundle. It compares
+# versions and downloads only when they differ, so the common path is one check.
+# bin/ is gitignored, so the binary is fetched infrastructure and never committed.
+BROKKR           := bin/tools/brokkr
+BROKKR_INSTALLER := https://raw.githubusercontent.com/flocko-motion/sindri/master/scripts/install-brokkr.sh
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 
@@ -364,8 +372,14 @@ docs-clean:
 
 # brokkr static-analysis gate: canonical headers, exported-doc coverage,
 # deadcode (with --test), and the line-count limit.
-lint:
-	brokkr lint
+lint: tools
+	$(BROKKR) lint
+
+# Install or update brokkr at $(BROKKR). pipefail is what makes a failed download
+# fail here: without it bash reads an empty script, exits 0, and the missing binary
+# surfaces one target later as a puzzle.
+tools:
+	@bash -o pipefail -c 'curl -fsSL $(BROKKR_INSTALLER) | bash -s -- $(BROKKR)'
 
 # Rule-citation gate: every backticked `V-…`/`R-…` id a comment cites is one the
 # spec declares, and every declared rule is either cited or listed in
