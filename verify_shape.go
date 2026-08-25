@@ -1,13 +1,29 @@
 // package: ranke / verify
 // type:    logic
 // job:     the per-claim rules read off a claim's own shape — `V-TYPE` type classes, `V-REL`
-// relation_direction, `R-DREQUEST` a delete mark's target — the first two enforced at
-// construction too, the third only from here
+// relation_direction, `V-EORDER` the inlined edge order, `R-DREQUEST` a delete mark's target
 // limits:  needs no Universe read and no reference resolution, so it judges a record that
 // arrived as bytes or through AssembleClaim as readily as one this library built
 package ranke
 
-import "context"
+import (
+	"bytes"
+	"context"
+)
+
+// ruleEdgeOrder: `V-EORDER` — edges inlined ascending by id(e). The order is part of
+// S(v) and so of the id, so another order is a second stored form of one claim. Reads
+// the claim's own edges: what is judged is the record as stored.
+func ruleEdgeOrder(_ context.Context, t *claimUnderVerification) error {
+	edges := t.claim.unwrap().edges
+	for i := 1; i < len(edges); i++ {
+		if bytes.Compare(idBytes(edges[i-1].id), idBytes(edges[i].id)) > 0 {
+			return WithDetail(ErrEdgeOrder, "edge "+edges[i].id.String()+" sorts before "+
+				edges[i-1].id.String()+", which precedes it")
+		}
+	}
+	return nil
+}
 
 // ruleTypeClasses: `V-TYPE` — the node's class and every edge's class is one of the
 // fixed set. The subtype is open vocabulary, so nothing here judges it.

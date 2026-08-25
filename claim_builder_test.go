@@ -135,9 +135,8 @@ func TestContributorExternalPubkey(t *testing.T) {
 	hash, err := HashContent(pubkey)
 	require.NoError(t, err)
 
-	// Declaring an (external) pubkey with NO signing key is rejected — the
-	// builder recognises the pubkey (content_hash) and demands its key, it is
-	// not silently identity-Signed.
+	// Declaring an (external) pubkey with NO signing key is rejected: the builder
+	// recognises the pubkey (content_hash) and demands the key that matches it.
 	_, err = NewClaim(NodeContributor, nil).
 		WithExternalContent(hash, uint64(len(pubkey))).
 		Sign()

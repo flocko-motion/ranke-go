@@ -32,7 +32,7 @@ var (
 	errEmptyType = errors.New("ranke: empty type")
 
 	// --- Claim / Contributor ---
-	errSigningKeyNoPubkey       = errors.New("ranke.Claim.AsContributor: signing key supplied but contributor has no pubkey (identity-Sign contributor)")
+	errSigningKeyNoPubkey       = errors.New("ranke.Claim.AsContributor: signing key supplied but the contributor declares no pubkey to match it against")
 	errSigningKeyMismatch       = errors.New("ranke.Claim.AsContributor: signing key does not match contributor pubkey")
 	errResolveContributorPubkey = errors.New("ranke.Claim.AsContributor: cannot resolve contributor pubkey from content")
 	errNilContributor           = errors.New("ranke: nil contributor")
@@ -69,10 +69,6 @@ var (
 	errNilClaim          = errors.New("ranke: nil claim")
 	errEmptyGraph        = errors.New("ranke.Graph.Consolidate: empty graph")
 	errNoContributorEdge = errors.New("ranke: non-initial claim missing contribution/contributor edge")
-
-	// --- Sign ---
-	errIdentitySignMismatch = errors.New("ranke.verifySignature: identity Sign mismatch (hash ≠ id)")
-	errEd25519Verify        = errors.New("ranke.verifySignature: ed25519 verification failed")
 
 	// --- Verify content ---
 	errNilHash = errors.New("ranke: nil content hash")
@@ -175,6 +171,8 @@ var (
 	// alone: a record decoded or assembled meets these too.
 	ErrContentBothSlots  = errors.New("ranke: a record carries both content and content_hash, which are mutually exclusive")
 	ErrIDMismatch        = errors.New("ranke.verify: the claim's id is not the hash of the envelope it is stored as")
+	ErrEnvelopeHeaders   = errors.New("ranke: an envelope carries the alg parameter alone, protected, and an empty unprotected header (`V-ENV`)")
+	ErrEdgeOrder         = errors.New("ranke.verify: a claim's edges are inlined ascending by id(e) (`V-EORDER`)")
 	ErrUnknownTypeClass  = errors.New("ranke.verify: type class is not one of the fixed set")
 	ErrRelationDirection = errors.New("ranke.verify: a relation/* edge carries relation_direction 1 or -1, an edge of any other class 0")
 	// ErrDeleteMarkNoTarget: a mark that names nothing explains no gap (`R-DGAP`).
