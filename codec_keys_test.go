@@ -41,7 +41,7 @@ func TestRecordKeysMatchTheTable(t *testing.T) {
 		"ContentSize":   7,
 		"Fields":        8,
 	}
-	node := map[string]int{"CreatedAt": 9, "Edges": 10, "Height": 11}
+	node := map[string]int{"CreatedAt": 9, "Edges": 10, "Height": 11, "Dated": 14}
 	edge := map[string]int{"Reference": 12, "RelationDirection": 13}
 
 	want := func(own map[string]int) map[string]int {

@@ -79,7 +79,7 @@ func ValidateQuery(q Query) error {
 		if key.Field == "" {
 			return WithDetail(ErrQueryOrderField, "order["+strconv.Itoa(i)+"]")
 		}
-		if err := oneOf("order.compare", string(key.Compare), "", string(CompareNumeric), string(CompareLexical)); err != nil {
+		if err := oneOf("order.compare", string(key.Compare), "", string(CompareNumeric), string(CompareLexical), string(CompareTemporal)); err != nil {
 			return err
 		}
 		if err := oneOf("order.dir", string(key.Dir), "", string(SortAsc), string(SortDesc)); err != nil {

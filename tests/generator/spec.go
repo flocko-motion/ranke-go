@@ -57,6 +57,9 @@ type Spec struct {
 	// OversizedFieldBytes is the length of a large field value placed on one
 	// claim (0 disables the corner), within the ADT's 64 KiB field-value cap.
 	OversizedFieldBytes int
+	// DatedSources is how many of the leading source/note claims carry `dated`
+	// (`V-DATED`), an EDTF Level 1 value; 0 leaves every claim without one.
+	DatedSources int
 	// MaxEdgeDegree is the fan-out of the highest-degree derivation.
 	MaxEdgeDegree int
 

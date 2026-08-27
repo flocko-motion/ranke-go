@@ -141,6 +141,15 @@ func nameFor(master int64, index int) string {
 	return gofakeit.New(contentSeed(master, "person", index)).Name()
 }
 
+// datedForms cycles through the EDTF Level 1 corners `V-DATED` admits: a plain date,
+// an interval, an unspecified-digit year, and a qualified value.
+var datedForms = []string{"2014-06-11", "2014/2016", "201X", "2014?"}
+
+// datedFor returns a deterministic `dated` value for a claim, one of datedForms.
+func datedFor(index int) string {
+	return datedForms[index%len(datedForms)]
+}
+
 // --- deterministic branches --------------------------------------------
 
 // branchCount is how many branches a graph of claimCount claims carries: at

@@ -63,16 +63,18 @@ func (u *neo4jUniverse) claimParam(c ranke.Claim) map[string]any {
 	}
 
 	np := map[string]any{
-		"id":           c.ID().String(),
-		"type":         labelFor(n.Type()),
-		"encoding":     strProp(n.Encoding()),
-		"created_at":   n.CreatedAt().UTC().Format(iso8601Nano),
-		"height":       int64(n.Height()),
-		"content_hash": idStr(n.GetContentHash()),
-		"content_size": contentSizeProp(n.GetContentHash(), n.GetContentSize()),
-		"content":      u.inlineText(ranke.IsTextEncoding(n.Encoding()), n.GetContentSize(), n.ContentKind() == ranke.ContentExternal, n.GetInlineContent),
-		"fields":       fieldsMapOf(n.Fields(), n.GetField),
-		"edges":        edges,
+		"id":             c.ID().String(),
+		"type":           labelFor(n.Type()),
+		"encoding":       strProp(n.Encoding()),
+		"created_at":     n.CreatedAt().UTC().Format(iso8601Nano),
+		"height":         int64(n.Height()),
+		"dated":          strProp(n.Dated()),
+		datedMidProperty: datedMidProp(n.Dated()),
+		"content_hash":   idStr(n.GetContentHash()),
+		"content_size":   contentSizeProp(n.GetContentHash(), n.GetContentSize()),
+		"content":        u.inlineText(ranke.IsTextEncoding(n.Encoding()), n.GetContentSize(), n.ContentKind() == ranke.ContentExternal, n.GetInlineContent),
+		"fields":         fieldsMapOf(n.Fields(), n.GetField),
+		"edges":          edges,
 	}
 	return np
 }
@@ -129,6 +131,7 @@ func partsFromNode(id ranke.Id, props map[string]any, labels []any, edgeRecs []a
 		Encoding:  asString(props["encoding"]),
 		CreatedAt: createdAt,
 		Height:    uint64(asInt(props["height"])),
+		Dated:     asString(props["dated"]),
 	}
 	ch, err := parseOptID(props["content_hash"])
 	if err != nil {
@@ -209,6 +212,7 @@ const iso8601Nano = "2006-01-02T15:04:05.000000000Z"
 // key, so the browser shows and can query them.
 var nodeStructural = map[string]bool{
 	"id": true, "encoding": true, "created_at": true, "height": true,
+	"dated": true, "dated_mid": true,
 	"content": true, "content_hash": true, "content_size": true,
 }
 
@@ -309,6 +313,22 @@ func contentSizeProp(hash ranke.Id, size uint64) any {
 		return nil
 	}
 	return int64(size)
+}
+
+// datedMidProperty is dated's projected span midpoint, reserved (ranke.ReservedPrefix)
+// so it can never collide with a user's own extension field of the same name — the same
+// namespace Tags already use.
+const datedMidProperty = ranke.ReservedPrefix + "dated_mid"
+
+// datedMidProp is dated's span midpoint in milliseconds, projected at write time so a
+// native `compare: temporal` ORDER BY sorts on it rather than parsing EDTF in Cypher
+// (R-QTEMPORAL); nil when dated is absent or fails to parse.
+func datedMidProp(dated string) any {
+	mid, ok := ranke.TemporalMidpointMs(dated)
+	if !ok {
+		return nil
+	}
+	return mid
 }
 
 // parseOptID parses an optional id property (nil/absent → nil id).

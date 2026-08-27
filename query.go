@@ -172,8 +172,9 @@ type OrderKey struct {
 type Collation string
 
 const (
-	CompareLexical Collation = "lexical" // string comparison (default)
-	CompareNumeric Collation = "numeric" // numeric comparison
+	CompareLexical  Collation = "lexical"  // string comparison (default)
+	CompareNumeric  Collation = "numeric"  // numeric comparison
+	CompareTemporal Collation = "temporal" // by span midpoint, ms — a timestamp and an EDTF `dated` on one axis (`R-QTEMPORAL`)
 )
 
 // SortDir is a sort direction.

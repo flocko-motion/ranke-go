@@ -598,6 +598,12 @@ func orderTerm(k ranke.OrderKey, node string) string {
 		lbl := "head(labels(" + node + "))"
 		return lbl + " IS NULL, " + lbl + dir
 	}
+	if k.Compare == ranke.CompareTemporal && k.Field == "dated" {
+		// datedMidProperty is projected at write time (claimParam) — the storage
+		// layer's own tactic, since Cypher cannot parse EDTF (R-QTEMPORAL).
+		mid := node + "." + datedMidProperty
+		return mid + " IS NULL, " + mid + dir
+	}
 	acc := node + "." + k.Field
 	key := acc
 	if k.Compare == ranke.CompareNumeric || intField[k.Field] {

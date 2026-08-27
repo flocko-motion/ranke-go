@@ -28,6 +28,7 @@ const (
 	ReasonTimestampForm   = "timestamp_form"
 	ReasonBothContent     = "content_both_slots"
 	ReasonEdgeOrder       = "edge_order"
+	ReasonDatedForm       = "dated_form"
 )
 
 // AllReasons is every code above. The list lives beside the declarations so a new
@@ -37,6 +38,7 @@ var AllReasons = []string{
 	ReasonOK, ReasonIDMismatch, ReasonWrongMessage, ReasonMalformedID,
 	ReasonNotEnveloped, ReasonNoContributor, ReasonHeightWrong,
 	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent, ReasonEdgeOrder,
+	ReasonDatedForm,
 }
 
 // Manifest names every artifact and the outcome an implementation must reach for it.

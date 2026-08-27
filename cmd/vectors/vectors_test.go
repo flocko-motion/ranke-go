@@ -155,6 +155,7 @@ func TestEveryReasonIsExercised(t *testing.T) {
 var decodeSentinel = map[string]error{
 	vectors.ReasonTimestampForm: ranke.ErrTimestampForm,
 	vectors.ReasonBothContent:   ranke.ErrContentBothSlots,
+	vectors.ReasonDatedForm:     ranke.ErrDatedForm,
 }
 
 // TestRejectedCasesFailForTheirStatedReason: rejection alone is cheap — a case with
@@ -177,5 +178,5 @@ func TestRejectedCasesFailForTheirStatedReason(t *testing.T) {
 		checked++
 	}
 	require.Equal(t, len(decodeSentinel)+2, checked,
-		"every V-TIME and V-CONTENT case is covered here: three timestamps and both slots")
+		"every V-TIME, V-CONTENT and V-DATED case is covered here: three timestamps, both slots, one dated")
 }

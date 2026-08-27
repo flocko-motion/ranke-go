@@ -71,4 +71,24 @@ func TestToys(t *testing.T) {
 		require.Equal(t, "main", m.Branches[0])
 		require.GreaterOrEqual(t, m.Revisions, 2, "each branch takes a contribution")
 	})
+
+	t.Run("ToyDated", func(t *testing.T) {
+		u := ranke.NewMemoryUniverse()
+		m, err := Generate(ctx, u, ToyDated(1))
+		require.NoError(t, err)
+		require.Len(t, m.Sources, 2, "must produce exactly two sources")
+
+		dated, absent := 0, 0
+		for _, id := range m.Sources {
+			c, err := ranke.GetClaim(ctx, u, id)
+			require.NoError(t, err)
+			if c.Node().Dated() != "" {
+				dated++
+			} else {
+				absent++
+			}
+		}
+		require.Equal(t, 1, dated, "exactly one source carries dated")
+		require.Equal(t, 1, absent, "and one is left without it — a compare: temporal read has something to sort last")
+	})
 }

@@ -3,6 +3,7 @@ package ranke
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -118,6 +119,23 @@ func TestQueryCompareOrdered(t *testing.T) {
 	require.Equal(t, idsOf(a["root"], a["s1"], a["s2"]), queryIDs(t, u, fromHub(a, &Where{Field: "height", Test: &Comparison{Le: 1}})), "le 1")
 	require.Equal(t, idsOf(a["hub"]), queryIDs(t, u, fromHub(a, &Where{Field: "height", Test: &Comparison{Gt: 2}})), "gt 2")
 	require.Equal(t, idsOf(a["eAlice"], a["eApples"], a["hub"]), queryIDs(t, u, fromHub(a, &Where{Field: "height", Test: &Comparison{Ge: 2}})), "ge 2")
+}
+
+// TestQueryCompareValuesTemporal exercises compare: temporal directly (R-QTEMPORAL): a
+// span's midpoint, a timestamp sharing the same millisecond axis as an EDTF value, equal
+// midpoints tying (R-QSORT breaks the tie, not this function), and a value that fails to
+// parse sorting after one that does.
+func TestQueryCompareValuesTemporal(t *testing.T) {
+	require.Equal(t, -1, compareValues("2010", "201X", CompareTemporal), "2010 precedes 201X, whose decade centres five years later")
+	require.Equal(t, -1, compareValues("2014", "2014/2016", CompareTemporal), "2014 precedes 2014/2016")
+	require.Equal(t, 0, compareValues("2014", "2014?", CompareTemporal), "a qualifier doesn't move the midpoint — equal midpoints tie")
+
+	ts := time.Date(2014, 6, 15, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, 0, compareValues(ts, "2014-06-15T12:00:00.000000000Z", CompareTemporal), "a timestamp and its own EDTF-form string share the axis")
+
+	require.Equal(t, -1, compareValues("2014", "whenever", CompareTemporal), "a value that parses sorts before one that does not")
+	require.Equal(t, 1, compareValues("whenever", "2014", CompareTemporal))
+	require.Equal(t, 0, compareValues("whenever", "also whenever", CompareTemporal), "neither parses — ties fall to the outer natural order")
 }
 
 // TestQueryCompareIn: in matches membership in the given set.

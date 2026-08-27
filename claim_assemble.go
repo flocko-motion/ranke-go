@@ -23,6 +23,7 @@ type ClaimParts struct {
 	Encoding      string            // "class/sub", or "" when there is no content
 	CreatedAt     time.Time         // must retain nanosecond precision to re-encode identically
 	Height        uint64            // §4.1 generation number (0 for an initial claim); part of the id-preimage
+	Dated         string            // EDTF Level 1 (`V-DATED`); "" when absent
 	ContentHash   Id                // nil when the claim carries no content
 	ContentSize   uint64            //
 	InlineContent []byte            // present for inline content; omitted for external
@@ -67,6 +68,12 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	if err := checkTimestampFields(parts.Fields); err != nil {
 		return nil, WrapDetail(errAssemble, "fields", err)
 	}
+	// `V-DATED`: absence is no violation — dated is optional.
+	if parts.Dated != "" {
+		if err := validateDated(parts.Dated); err != nil {
+			return nil, WrapDetail(errAssemble, "dated", err)
+		}
+	}
 	n := &node{
 		typeClass:   NodeClass(nClass),
 		typeSub:     nSub,
@@ -75,6 +82,7 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 		contentSize: parts.ContentSize,
 		content:     parts.InlineContent,
 		createdAt:   parts.CreatedAt.UTC(),
+		dated:       parts.Dated,
 		fields:      cloneFields(parts.Fields),
 		id:          parts.ID,
 	}

@@ -246,6 +246,9 @@ func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
 		cb = cb.WithField("note", big)
 		b.oversizedDone = true
 	}
+	if i < b.spec.DatedSources {
+		cb = cb.WithDated(datedFor(i))
+	}
 	c := b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
 	if tiny && c != nil {
 		b.manifest.TinyBlob = c.ID()

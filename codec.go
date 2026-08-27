@@ -55,6 +55,9 @@ type encNode struct {
 	Edges []cbor.RawMessage `cbor:"10,keyasint,omitempty"`
 	// Height is the longest possible path, defined in paper 1 (§4.1)
 	Height uint64 `cbor:"11,keyasint,omitempty"`
+	// Dated is the time the claim's subject stems from, EDTF Level 1 (`V-DATED`); absent
+	// when the node carries no assumed date.
+	Dated string `cbor:"14,keyasint,omitempty"`
 }
 
 // encEdge is the canonical record of an edge (§4.2): keys 1 to 8 as a node has them,
@@ -158,6 +161,7 @@ func buildEncNode(n *node, edges []*edge, b *contentBudget) (encNode, error) {
 		EncodingSub:   aliasToWire(EncodingSubtype(n.encodingSub), encodingSubToAlias),
 		CreatedAt:     n.createdAt.UTC().Format("2006-01-02T15:04:05.000000000Z"),
 		Height:        n.height,
+		Dated:         n.dated,
 		Fields:        aliasFieldKeys(n.fields),
 	}
 	// The edges first, the node's own content last: that is the order a budget spends
@@ -416,11 +420,19 @@ func decodeNode(en encNode) (*node, error) {
 		encodingSub:   string(aliasFromWire(en.EncodingSub, encodingSubFromAlias)),
 		createdAt:     createdAt,
 		height:        en.Height,
+		dated:         en.Dated,
 		fields:        unaliasFieldKeys(en.Fields),
 	}
 	// `V-TIME` covers delete_by and the two pubkey bounds as well as created_at above.
 	if err := checkTimestampFields(n.fields); err != nil {
 		return nil, err
+	}
+	// `V-DATED`: absence is no violation — dated is optional — so only a present value
+	// that won't parse is refused.
+	if en.Dated != "" {
+		if err := validateDated(en.Dated); err != nil {
+			return nil, err
+		}
 	}
 	// `V-CONTENT` forbids both slots. Refused rather than resolved: taking one would
 	// hand back a claim whose view denies what the record says.
