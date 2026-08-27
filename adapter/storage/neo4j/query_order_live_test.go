@@ -38,7 +38,7 @@ func datedFixture(t *testing.T) (mem ranke.Universe, hub ranke.Id, cEarly, cMid,
 			WithInlineContent([]byte(body)).WithEncoding(ranke.EncodingPlain).
 			WithHeight(ranke.HeightOf(ctr))
 		if dated != "" {
-			b = b.WithDated(dated)
+			b = b.WithDatedEDTF(dated)
 		}
 		c, err := b.Sign()
 		require.NoError(t, err)

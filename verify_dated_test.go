@@ -2,6 +2,7 @@ package ranke
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -52,19 +53,36 @@ func TestDecodeAcceptsAbsentAndValidDated(t *testing.T) {
 	})
 }
 
-// TestBuilderWithDated: WithDated round-trips through the codec, unlike CreatedAt
-// distinct from it — a claim carries both independently.
-func TestBuilderWithDated(t *testing.T) {
+// TestBuilderWithDatedEDTF: WithDatedEDTF round-trips through the codec, unlike
+// CreatedAt distinct from it — a claim carries both independently.
+func TestBuilderWithDatedEDTF(t *testing.T) {
 	alice := contributor(t)
 	c, err := NewClaim(TypeSource("note"), alice).
 		WithInlineContent([]byte("body")).
 		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(alice)).
-		WithDated("201X").
+		WithDatedEDTF("201X").
 		Sign()
 	require.NoError(t, err)
 	require.Equal(t, "201X", c.Node().Dated())
 	require.Equal(t, "201X", roundTrip(t, c).Node().Dated(), "dated survives the codec")
+}
+
+// TestBuilderWithDated: the time.Time constructor needs no EDTF knowledge — it
+// formats t's calendar day in UTC, dropping the time of day. A zone that shifts
+// the day (here, +5h past midnight local) proves the conversion runs, not just a
+// same-day reformat.
+func TestBuilderWithDated(t *testing.T) {
+	alice := contributor(t)
+	at := time.Date(2014, 6, 11, 1, 0, 0, 0, time.FixedZone("X", 5*60*60))
+	c, err := NewClaim(TypeSource("note"), alice).
+		WithInlineContent([]byte("body")).
+		WithEncoding(EncodingPlain).
+		WithHeight(HeightOf(alice)).
+		WithDated(at).
+		Sign()
+	require.NoError(t, err)
+	require.Equal(t, "2014-06-10", c.Node().Dated(), "UTC's calendar day, one before local's")
 }
 
 // TestBuilderRefusesMalformedDated: `V-DATED` at the builder door.
@@ -74,7 +92,7 @@ func TestBuilderRefusesMalformedDated(t *testing.T) {
 		WithInlineContent([]byte("body")).
 		WithEncoding(EncodingPlain).
 		WithHeight(HeightOf(alice)).
-		WithDated("{2001,2002}").
+		WithDatedEDTF("{2001,2002}").
 		Sign()
 	require.ErrorIs(t, err, ErrDatedForm)
 }

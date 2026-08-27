@@ -71,7 +71,7 @@ func (g *gen) badDated() error {
 	c, err := ranke.NewClaim(ranke.TypeSource("note"), g.who).
 		WithInlineContent([]byte("a note dated " + unparsableTime)).
 		WithEncoding(ranke.EncodingPlain).
-		WithDated(unparsableTime).
+		WithDatedEDTF(unparsableTime).
 		WithHeight(1).
 		WithCreatedAt(epoch.Add(13 * time.Second)).
 		AllowInvalid().
