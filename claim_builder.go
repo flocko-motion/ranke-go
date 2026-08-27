@@ -93,9 +93,18 @@ func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 // WithCreatedAt sets the creation timestamp, which defaults to now in UTC.
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
 
-// WithDated sets `dated`, an EDTF Level 1 value for the time the claim's subject stems
-// from (`V-DATED`) — distinct from CreatedAt, when the archive witnessed it.
-func (b ClaimBuilder) WithDated(d string) ClaimBuilder { b.Dated = d; return b }
+// WithDated sets `dated` to t's calendar day, UTC (`V-DATED`) — distinct from
+// CreatedAt, when the archive witnessed it. For anything EDTF alone can say — an
+// interval, a decade, a season, an uncertain or approximate value — use
+// WithDatedEDTF directly.
+func (b ClaimBuilder) WithDated(t time.Time) ClaimBuilder {
+	b.Dated = t.UTC().Format("2006-01-02")
+	return b
+}
+
+// WithDatedEDTF sets `dated` to a raw EDTF Level 1 value (`V-DATED`), for a value
+// WithDated's single calendar day can't express.
+func (b ClaimBuilder) WithDatedEDTF(d string) ClaimBuilder { b.Dated = d; return b }
 
 // WithHeight sets the generation number (§4.1) — 1 + max over the referenced
 // heights, or 0 for an initial claim. The verifier re-derives and enforces it.

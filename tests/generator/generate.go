@@ -247,7 +247,7 @@ func (b *builder) inlineSource(who ranke.Contributor, i int) ranke.Claim {
 		b.oversizedDone = true
 	}
 	if i < b.spec.DatedSources {
-		cb = cb.WithDated(datedFor(i))
+		cb = cb.WithDatedEDTF(datedFor(i))
 	}
 	c := b.add(cb.WithHeight(ranke.HeightOf(who)).Sign())
 	if tiny && c != nil {

@@ -1,8 +1,8 @@
 // package: ranke / taxonomy
 // type:    logic
-// job:     EDTF Level 1 parsing for `dated` (`V-DATED`), and the millisecond span/midpoint
-// `R-QTEMPORAL`'s `compare: temporal` reads off it — an RFC 3339 timestamp shares the same
-// axis as a zero-width span
+// job:     EDTF Level 1 parsing for `dated` (`V-DATED`), including its own date-and-time
+// form, and the millisecond span/midpoint `R-QTEMPORAL`'s `compare: temporal` reads off it —
+// an instant shares the same axis as a zero-width span
 // limits:  Level 1 only: no sets, no individual-component qualification, no exponential years
 package ranke
 
@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// validateDated reports whether s is acceptable as a node's `dated`: an RFC 3339 timestamp
-// (`V-TIME`), or an EDTF Level 1 value (`V-DATED`).
+// validateDated reports whether s is acceptable as a node's `dated`: an RFC 3339 instant,
+// or an EDTF Level 1 value (`V-DATED`).
 func validateDated(s string) error {
 	if _, _, ok := edtfSpan(s); !ok {
 		return WithDetail(ErrDatedForm, s)
@@ -22,9 +22,11 @@ func validateDated(s string) error {
 }
 
 // edtfSpan returns the half-open millisecond span [start, end) s denotes (`R-QTEMPORAL`);
-// ok is false when s is neither a timestamp nor a valid EDTF Level 1 value.
+// ok is false when s is neither an instant nor a valid EDTF Level 1 value.
 func edtfSpan(s string) (start, end int64, ok bool) {
-	if t, err := parseRFC3339Nano(s); err == nil {
+	// EDTF's own date-and-time form, wider than V-TIME's fixed-width created_at,
+	// which `dated` is explicitly outside of (V-DATED).
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		ms := floorDivInt64(t.UnixNano(), int64(time.Millisecond))
 		return ms, ms, true
 	}
