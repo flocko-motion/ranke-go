@@ -20,7 +20,8 @@ var externalBlob = []byte("externalized content, addressed by hash")
 const rootSeed = "ranke-vectors/root"
 
 // toyGraph builds the claims that must verify: a contributor, a source note, a
-// derived claim citing it, external content, node fields, and a second contributor.
+// derived claim citing it, external content, node fields, a dated claim, and a
+// second contributor.
 func (g *gen) toyGraph(ctx context.Context) error {
 	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
@@ -53,6 +54,9 @@ func (g *gen) toyGraph(ctx context.Context) error {
 		return err
 	}
 	if err := g.withFields(who); err != nil {
+		return err
+	}
+	if err := g.dated(who); err != nil {
 		return err
 	}
 	return g.secondContributor(ctx)
@@ -121,6 +125,24 @@ func (g *gen) withFields(who ranke.Contributor) error {
 	}
 	return g.addClaim("with-fields", c,
 		"node fields under tag 8, key-sorted by the encoder; known keys carry a '.' alias")
+}
+
+// dated adds a claim carrying `dated` (`V-DATED`) as EDTF's own date-and-time
+// form — a numeric offset and no fractional seconds, the shape a bare RFC 3339
+// timestamp cannot take — so a decoder is exercised on more than a bare day.
+func (g *gen) dated(who ranke.Contributor) error {
+	c, err := ranke.NewClaim(ranke.TypeSource("note"), who).
+		WithInlineContent([]byte("a note dated by EDTF date-time")).
+		WithEncoding(ranke.EncodingPlain).
+		WithDatedEDTF("2014-06-15T09:30:00+02:00").
+		WithHeight(1).
+		WithCreatedAt(epoch.Add(7 * time.Second)).
+		Sign()
+	if err != nil {
+		return err
+	}
+	return g.addClaim("dated", c,
+		"dated as EDTF's date-and-time form (V-DATED) — a numeric offset, no fractional seconds")
 }
 
 // secondContributor adds a second identity and a claim of its own, so a case can
