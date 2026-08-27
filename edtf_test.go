@@ -48,6 +48,26 @@ func TestEDTFSpanValid(t *testing.T) {
 	}
 }
 
+// TestEDTFSpanDateTime covers EDTF's own Level 0 date-and-time form: `dated` is
+// outside `V-TIME` (V-DATED), so a form V-TIME itself would refuse — no fraction, or
+// a numeric offset rather than Z — is still a valid instant here.
+func TestEDTFSpanDateTime(t *testing.T) {
+	t.Run("no fractional seconds", func(t *testing.T) {
+		start, end, ok := edtfSpan("1985-04-12T23:20:30Z")
+		want := time.Date(1985, 4, 12, 23, 20, 30, 0, time.UTC).UnixMilli()
+		require.True(t, ok)
+		require.Equal(t, want, start)
+		require.Equal(t, want, end, "an instant is a zero-width span")
+	})
+	t.Run("numeric offset normalises to UTC", func(t *testing.T) {
+		start, end, ok := edtfSpan("2014-06-15T12:00:00+02:00")
+		want := time.Date(2014, 6, 15, 10, 0, 0, 0, time.UTC).UnixMilli()
+		require.True(t, ok)
+		require.Equal(t, want, start)
+		require.Equal(t, want, end)
+	})
+}
+
 // TestEDTFSpanLetterPrefixedYear covers a year beyond 4 digits (`V-DATED`'s Level 1
 // letter-prefixed calendar year), where the plain YYYY grammar cannot reach.
 func TestEDTFSpanLetterPrefixedYear(t *testing.T) {
@@ -68,11 +88,12 @@ func TestEDTFSpanInvalid(t *testing.T) {
 	for _, v := range []string{
 		"", "whenever", "2014-13", "2014-00", "2014-06-32", "2014-06-00",
 		"{2001,2002,2003}", "[2001,2002,2003]", // Level 2 sets
-		"201X-01",   // unspecified digits only apply to the year alone
-		"XXXX",      // no fixed digit at all is not meaningful
-		"../..",     // both bounds open faces nothing
-		"2014/2010", // a backwards interval
-		"2014--06",  // malformed separator
+		"201X-01",             // unspecified digits only apply to the year alone
+		"XXXX",                // no fixed digit at all is not meaningful
+		"../..",               // both bounds open faces nothing
+		"2014/2010",           // a backwards interval
+		"2014--06",            // malformed separator
+		"2014-06-15T12:00:00", // a date-time needs a zone (Z or offset) to be an instant
 	} {
 		t.Run(v, func(t *testing.T) {
 			_, _, ok := edtfSpan(v)
