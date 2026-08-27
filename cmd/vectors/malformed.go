@@ -58,7 +58,33 @@ func (g *gen) malformed() error {
 	if err := g.badCreatedAt(); err != nil {
 		return err
 	}
+	if err := g.badDated(); err != nil {
+		return err
+	}
 	return g.bothContentSlots()
+}
+
+// badDated signs a claim whose `dated` carries an unparsable value — neither a
+// timestamp nor EDTF Level 1. Unlike a generic field, the builder does judge
+// `dated` (`V-DATED`), so this goes through AllowInvalid to still seal a record.
+func (g *gen) badDated() error {
+	c, err := ranke.NewClaim(ranke.TypeSource("note"), g.who).
+		WithInlineContent([]byte("a note dated " + unparsableTime)).
+		WithEncoding(ranke.EncodingPlain).
+		WithDated(unparsableTime).
+		WithHeight(1).
+		WithCreatedAt(epoch.Add(13 * time.Second)).
+		AllowInvalid().
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, err := c.Envelope()
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-dated-form", raw, c.ID().String(), vectors.ReasonDatedForm,
+		"dated is neither an RFC 3339 timestamp nor a valid EDTF Level 1 value", "V-DATED")
 }
 
 // badFieldTime signs a record whose field carries an unparsable timestamp. The

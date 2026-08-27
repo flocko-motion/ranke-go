@@ -43,6 +43,10 @@ type Node interface {
 	EncodingClass() EncodingClass
 	EncodingSub() string
 	CreatedAt() time.Time
+	// Dated is the time the claim's subject is assumed to stem from, an EDTF Level 1
+	// value (`V-DATED`); "" when absent. Unlike CreatedAt it denotes an interval, not
+	// an instant, and is neither `V-TIME`- nor `V-MONO`-constrained.
+	Dated() string
 	// Height is the claim's generation number: 0 for an initial claim, else 1 + max
 	// over referenced heights (§4.1). In the node hash, so the id commits to it.
 	Height() uint64
@@ -64,6 +68,7 @@ type node struct {
 	content       []byte // inline content bytes, kept with the node; nil when external or none
 	contentSize   uint64 // paired with content/contentHash to defend against truncation/extension
 	createdAt     time.Time
+	dated         string // EDTF Level 1 (`V-DATED`); "" when absent
 	height        uint64 // generation number: 0 for an initial claim, else 1 + max(reference heights)
 	edges         []Id   // edge ids, sorted canonically
 	fields        map[string]string
@@ -144,6 +149,7 @@ func (n *node) EncodingSub() string          { return n.contentSource().encoding
 func (n *node) GetContentHash() Id     { return n.contentSource().contentHash }
 func (n *node) GetContentSize() uint64 { return n.contentSource().contentSize }
 func (n *node) CreatedAt() time.Time   { return n.createdAt }
+func (n *node) Dated() string          { return n.dated }
 
 // ContentKind derives from the effective source: content_hash ⇒ External (§Content:
 // exclusive with inline), bytes or a non-zero content_size ⇒ Inline, else None.

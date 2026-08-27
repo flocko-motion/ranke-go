@@ -25,7 +25,10 @@ type ClaimBuilder struct {
 	ContentHash   Id
 	ContentSize   uint64
 	CreatedAt     time.Time
-	Contributor   Contributor
+	// Dated is the time the claim's subject is assumed to stem from, an EDTF Level 1
+	// value (`V-DATED`); "" leaves it absent.
+	Dated       string
+	Contributor Contributor
 	// DiffOf makes this claim a diff over the referenced predecessor; the loader
 	// materialises the chain.
 	DiffOf Id
@@ -89,6 +92,10 @@ func (b ClaimBuilder) WithExternalContent(hash Id, size uint64) ClaimBuilder {
 
 // WithCreatedAt sets the creation timestamp, which defaults to now in UTC.
 func (b ClaimBuilder) WithCreatedAt(t time.Time) ClaimBuilder { b.CreatedAt = t; return b }
+
+// WithDated sets `dated`, an EDTF Level 1 value for the time the claim's subject stems
+// from (`V-DATED`) — distinct from CreatedAt, when the archive witnessed it.
+func (b ClaimBuilder) WithDated(d string) ClaimBuilder { b.Dated = d; return b }
 
 // WithHeight sets the generation number (§4.1) — 1 + max over the referenced
 // heights, or 0 for an initial claim. The verifier re-derives and enforces it.
@@ -171,6 +178,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 		encodingClass: cfg.EncodingClass,
 		encodingSub:   cfg.EncodingSub,
 		createdAt:     normalizeCreatedAt(cfg.CreatedAt),
+		dated:         cfg.Dated,
 		fields:        cloneFields(cfg.Fields),
 	}
 	if err := applyContent(n, cfg, hasInline, hasExternal); err != nil {
@@ -214,6 +222,11 @@ func checkClaim(cfg ClaimBuilder) error {
 	}
 	if err := checkFields(cfg.Fields); err != nil {
 		return err
+	}
+	if cfg.Dated != "" {
+		if err := validateDated(cfg.Dated); err != nil {
+			return err
+		}
 	}
 	return CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields)
 }

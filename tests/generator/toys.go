@@ -83,3 +83,13 @@ func ToyBranches(seed int64) Spec {
 	s.Branches = 2
 	return s
 }
+
+// ToyDated is the smallest archive with a `dated` (`V-DATED`) node: one source
+// carrying it, one without — so a `compare: temporal` read has a field-absent
+// claim to sort last against.
+func ToyDated(seed int64) Spec {
+	s := toyBase(seed)
+	s.Sources = 2
+	s.DatedSources = 1
+	return s
+}

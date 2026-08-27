@@ -279,6 +279,8 @@ func queryFieldValue(c Claim, field string) (any, bool) {
 		return n.Encoding(), n.ContentKind() != ContentNone
 	case "created_at":
 		return n.CreatedAt(), true
+	case "dated":
+		return n.Dated(), n.Dated() != ""
 	case "content_size":
 		// content_size and encoding are emitted only with content (§Content).
 		return n.GetContentSize(), n.ContentKind() != ContentNone
@@ -483,11 +485,47 @@ func compareValues(a, b any, col Collation) int {
 		return strings.Compare(toStringValue(a), toStringValue(b))
 	case CompareLexical:
 		return strings.Compare(toStringValue(a), toStringValue(b))
+	case CompareTemporal:
+		am, aok := temporalMidpointMs(a)
+		bm, bok := temporalMidpointMs(b)
+		switch {
+		case aok && bok:
+			switch {
+			case am < bm:
+				return -1
+			case am > bm:
+				return 1
+			default:
+				return 0
+			}
+		case aok != bok:
+			// Neither timestamp nor valid EDTF sorts with the field-absent claims
+			// (R-QTEMPORAL) — push it after the one that parses.
+			if aok {
+				return -1
+			}
+			return 1
+		default:
+			return 0
+		}
 	default:
 		if c, ok := compareOrdered(a, b); ok {
 			return c
 		}
 		return strings.Compare(toStringValue(a), toStringValue(b))
+	}
+}
+
+// temporalMidpointMs is v's span midpoint in ms (`R-QTEMPORAL`): a time.Time is its
+// own zero-width instant, a string parses as EDTF Level 1.
+func temporalMidpointMs(v any) (int64, bool) {
+	switch x := v.(type) {
+	case time.Time:
+		return floorDivInt64(x.UnixNano(), int64(time.Millisecond)), true
+	case string:
+		return edtfMidpointMs(x)
+	default:
+		return 0, false
 	}
 }
 

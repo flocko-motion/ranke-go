@@ -178,6 +178,7 @@ var (
 	// ErrDeleteMarkNoTarget: a mark that names nothing explains no gap (`R-DGAP`).
 	ErrDeleteMarkNoTarget = errors.New("ranke.verify: a contribution/delete claim must carry a contribution/delete edge naming its target")
 	ErrTimestampForm      = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
+	ErrDatedForm          = errors.New("ranke: dated must be an RFC 3339 timestamp or a valid EDTF Level 1 value (`V-DATED`)")
 	// ErrUnexplainedGap: a claim's bytes are missing and nothing explains the gap —
 	// no copied delete_by on the edge reaching it, no contribution/delete mark against
 	// it. Indistinguishable from data loss, which is why it fails.

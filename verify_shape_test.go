@@ -63,6 +63,29 @@ func signedShape(t *testing.T, ctr Contributor, parts ClaimParts) Claim {
 	return out
 }
 
+// realEdgeID is id(e) for an edge NewEdge will not mint. AssembleClaim orders edges
+// by the ids it is GIVEN while the decoder recomputes H(S(e)), so an invented id
+// leaves the stored order disagreeing with the read one about half the time — and
+// `V-EORDER` then fires ahead of the rule under test.
+func realEdgeID(t *testing.T, e *edge) Id {
+	t.Helper()
+	ee, err := buildEncEdge(e, nil)
+	require.NoError(t, err)
+	raw, err := encodingMode.Marshal(ee)
+	require.NoError(t, err)
+	id, err := hashContent(raw)
+	require.NoError(t, err)
+	return id
+}
+
+// directionlessRelationEdge is a relation/* edge carrying direction 0 — what NewEdge
+// refuses — under the id its own bytes hash to.
+func directionlessRelationEdge(t *testing.T, ref Id) EdgeParts {
+	t.Helper()
+	e := &edge{reference: ref, typeClass: EdgeClassRelation, typeSub: "knows"}
+	return EdgeParts{ID: realEdgeID(t, e), Reference: ref, Type: TypeRelation("knows")}
+}
+
 // contributorEdge is the edge a non-initial fixture needs for its signature to
 // resolve, so the signer is ctr rather than the claim itself.
 func contributorEdge(t *testing.T, ctr Contributor) EdgeParts {
@@ -88,7 +111,10 @@ func TestVerifyUnknownNodeClass(t *testing.T) {
 // three, and `source` is a node class only.
 func TestVerifyUnknownEdgeClass(t *testing.T) {
 	ctr := contributor(t)
-	badEdge := EdgeParts{ID: ctr.ID(), Reference: ctr.ID(), Type: "source/note"}
+	badEdge := EdgeParts{
+		ID:        realEdgeID(t, &edge{reference: ctr.ID(), typeClass: "source", typeSub: "note"}),
+		Reference: ctr.ID(), Type: "source/note",
+	}
 	bad := signedShape(t, ctr, ClaimParts{
 		Type: "source/note", CreatedAt: ctr.Node().CreatedAt(), Height: 1,
 		Edges: []EdgeParts{contributorEdge(t, ctr), badEdge},
@@ -116,7 +142,7 @@ func TestVerifyRelationDirectionMissing(t *testing.T) {
 		Edges: []EdgeParts{
 			contributorEdge(t, ctr),
 			{ID: derivation.ID(), Reference: ctr.ID(), Type: TypeDerivation("source")},
-			{ID: ctr.ID(), Reference: ctr.ID(), Type: "relation/knows"}, // direction 0
+			directionlessRelationEdge(t, ctr.ID()),
 		},
 	})
 	require.True(t, fired(verifyOne(t, bad, ctr, bad), ErrRelationDirection),
