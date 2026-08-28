@@ -120,7 +120,7 @@ make release pre minor          # tags vX.Y.Z-rc.N on the branch, merges nothing
 Then in ranke-graph, regenerate the set at that tag and publish it:
 
 ```sh
-go run github.com/flocko-motion/ranke-go/cmd/vectors@vX.Y.Z-rc.N -out <testdata-dir>
+go run github.com/rankegraph/ranke-go/cmd/vectors@vX.Y.Z-rc.N -out <testdata-dir>
 ```
 
 Point `expectedGenerator` in `tests/vectors_test.go` at the version that generated

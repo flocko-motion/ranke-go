@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
-	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	"github.com/flocko-motion/ranke-go/adapter/storage/minimal"
-	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/adaptertest"
+	"github.com/rankegraph/ranke-go/adapter/storage/mem"
+	"github.com/rankegraph/ranke-go/adapter/storage/minimal"
+	"github.com/rankegraph/ranke-go/adapter/storage/stack"
 )
 
 // getContent fetches one blob by hash via the content-plane primitive (the

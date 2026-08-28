@@ -26,12 +26,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
-	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
-	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
-	"github.com/flocko-motion/ranke-go/conformance/helpers"
-	testhelpers "github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go"
+	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
+	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
+	"github.com/rankegraph/ranke-go/adapter/storage/fs"
+	"github.com/rankegraph/ranke-go/conformance/helpers"
+	testhelpers "github.com/rankegraph/ranke-go/tests/helpers"
 )
 
 // must aliases helpers.Must so error-checked calls read with a

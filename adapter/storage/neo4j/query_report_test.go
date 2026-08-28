@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // These tests exercise neo4j's native RQL→Cypher lowering one query at a time,

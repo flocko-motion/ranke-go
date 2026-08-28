@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/generator"
-	"github.com/flocko-motion/ranke-go/tests/matrix"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/tests/matrix"
 )
 
 // TestMain releases the shared archives once every test has had them. They are opened

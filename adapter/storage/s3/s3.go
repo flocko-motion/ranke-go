@@ -21,8 +21,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage"
 )
 
 // New assumes the bucket already exists and probes its capabilities (see

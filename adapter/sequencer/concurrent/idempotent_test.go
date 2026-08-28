@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 

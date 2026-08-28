@@ -11,7 +11,7 @@
 // entry point so existing `adapter/storage/mem` imports keep working.
 package mem
 
-import "github.com/flocko-motion/ranke-go"
+import "github.com/rankegraph/ranke-go"
 
 // New returns an ephemeral, in-memory Universe (ranke.NewMemoryUniverse).
 func New() ranke.Universe { return ranke.NewMemoryUniverse() }

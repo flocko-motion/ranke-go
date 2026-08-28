@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Answer is one backend's response to one query: a fingerprint per result, in the

@@ -11,11 +11,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/internal/vectors"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/internal/vectors"
 	"github.com/veraison/go-cose"
 )
 

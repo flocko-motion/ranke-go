@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // schemaEnv points the gate at a schema of your own, for working offline or against

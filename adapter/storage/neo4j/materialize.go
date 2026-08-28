@@ -9,7 +9,7 @@ package neo4j
 import (
 	"context"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // materializeForWrite links the contribution/diff overlay of every claim in cs.

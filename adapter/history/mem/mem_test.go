@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/history/mem"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/history/mem"
 )
 
 func TestRoundTrip(t *testing.T) {

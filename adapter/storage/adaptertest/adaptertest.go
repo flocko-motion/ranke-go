@@ -17,7 +17,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Factory returns a fresh, empty Universe. Run calls it several times, so each

@@ -15,7 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/flocko-motion/ranke-go/tests/performance"
+	"github.com/rankegraph/ranke-go/tests/performance"
 )
 
 var errBadSize = errors.New("--size: not a claim count")

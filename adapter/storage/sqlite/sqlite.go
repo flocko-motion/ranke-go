@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage"
 
 	_ "modernc.org/sqlite"
 )

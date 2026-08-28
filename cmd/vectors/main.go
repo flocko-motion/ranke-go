@@ -18,15 +18,15 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/internal/vectors"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/internal/vectors"
 )
 
 // epoch fixes every timestamp, so a regenerated set is byte-identical.
 var epoch = time.Unix(1700000000, 0).UTC()
 
 // generatorPath names this tool in the manifest.
-const generatorPath = "github.com/flocko-motion/ranke-go/cmd/vectors"
+const generatorPath = "github.com/rankegraph/ranke-go/cmd/vectors"
 
 func main() {
 	out := flag.String("out", "", "directory to write the artifacts into (required)")

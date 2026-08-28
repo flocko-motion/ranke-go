@@ -5,8 +5,8 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/redis"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/redis"
 )
 
 // TestTier checks the write tier: lazy by default, overridable via WithTier.

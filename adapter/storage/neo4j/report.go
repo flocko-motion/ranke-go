@@ -9,7 +9,7 @@ package neo4j
 import (
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // reportBuilder collects execution events above the requested level; a zero level

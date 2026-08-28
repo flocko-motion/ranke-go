@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	"github.com/flocko-motion/ranke-go/tests/backends"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/mem"
+	"github.com/rankegraph/ranke-go/tests/backends"
+	"github.com/rankegraph/ranke-go/tests/generator"
 )
 
 // Config parameterises a matrix run — the knobs cmd/test exposes as flags.

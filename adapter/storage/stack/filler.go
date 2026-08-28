@@ -10,7 +10,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 const (

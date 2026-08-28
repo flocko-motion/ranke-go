@@ -9,7 +9,7 @@ package client
 import (
 	"context"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Lookup names the claims a find reads: the branch to read, the types to admit, and

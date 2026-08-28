@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go/tests/backends"
+	"github.com/rankegraph/ranke-go/tests/backends"
 )
 
 // sizeEnv is the benchmark's size knob and its gate in one: timing an archive into

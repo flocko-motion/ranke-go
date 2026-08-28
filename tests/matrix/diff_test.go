@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/backends"
-	"github.com/flocko-motion/ranke-go/tests/generator"
-	"github.com/flocko-motion/ranke-go/tests/matrix"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/backends"
+	"github.com/rankegraph/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/tests/matrix"
 )
 
 // generator.ToyDiff is the smallest archive with a content-inheriting overlay: a

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/generator"
-	"github.com/flocko-motion/ranke-go/tests/rql"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/tests/rql"
 )
 
 // printQueryList prints the timed query set once, before the matrix — name and

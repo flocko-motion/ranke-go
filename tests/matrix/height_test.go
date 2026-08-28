@@ -8,13 +8,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go"
-	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
-	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
-	"github.com/flocko-motion/ranke-go/tests/generator"
-	"github.com/flocko-motion/ranke-go/tests/helpers"
-	"github.com/flocko-motion/ranke-go/tests/matrix"
-	"github.com/flocko-motion/ranke-go/tests/rql"
+	"github.com/rankegraph/ranke-go"
+	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
+	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
+	"github.com/rankegraph/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go/tests/matrix"
+	"github.com/rankegraph/ranke-go/tests/rql"
 )
 
 // TestHeightIsAField: height filters through Where like any other field, across an
