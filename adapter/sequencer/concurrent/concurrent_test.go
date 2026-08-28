@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	historymem "github.com/flocko-motion/ranke-go/adapter/history/mem"
-	concseq "github.com/flocko-motion/ranke-go/adapter/sequencer/concurrent"
-	"github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go"
+	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
+	concseq "github.com/rankegraph/ranke-go/adapter/sequencer/concurrent"
+	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 

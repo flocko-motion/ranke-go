@@ -10,7 +10,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // --- structure-only cache: models a neo4j-style cache in a stack ---

@@ -11,7 +11,7 @@
 # Universe — root behaviour can only be exercised through some adapter,
 # and mem is the one that ships everywhere. Other adapters are verified
 # against the Universe contract via adapter/storage/adaptertest, not counted.
-MODULE  := github.com/flocko-motion/ranke-go
+MODULE  := github.com/rankegraph/ranke-go
 COVERPKG := $(MODULE),$(MODULE)/adapter/storage/mem
 # Test packages that drive the number — explicitly enumerated, NOT a
 # ./adapter/... glob, so a new adapter is opted into the core test

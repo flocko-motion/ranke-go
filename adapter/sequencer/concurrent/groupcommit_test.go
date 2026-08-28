@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	historymem "github.com/flocko-motion/ranke-go/adapter/history/mem"
+	"github.com/rankegraph/ranke-go"
+	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	"github.com/stretchr/testify/require"
 )
 

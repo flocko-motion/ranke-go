@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // tagPayload reports whether the payload r's tag names is present. A reader must

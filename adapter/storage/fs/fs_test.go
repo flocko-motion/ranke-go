@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/adaptertest"
 )
 
 // TestConformance runs the shared black-box Universe suite against the fs

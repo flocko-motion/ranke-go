@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/internal/vectors"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/internal/vectors"
 	"github.com/stretchr/testify/require"
 )
 

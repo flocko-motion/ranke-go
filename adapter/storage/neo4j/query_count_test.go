@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/internal/exclusive"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/internal/exclusive"
+	"github.com/rankegraph/ranke-go/tests/generator"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 )

@@ -16,10 +16,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
-	histfile "github.com/flocko-motion/ranke-go/adapter/history/file"
-	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
-	"github.com/flocko-motion/ranke-go/internal/vectors"
+	"github.com/rankegraph/ranke-go"
+	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
+	"github.com/rankegraph/ranke-go/adapter/storage/fs"
+	"github.com/rankegraph/ranke-go/internal/vectors"
 	"github.com/spf13/cobra"
 )
 

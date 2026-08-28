@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Scope names which of the three by-id routes a read takes. A branch confines to its

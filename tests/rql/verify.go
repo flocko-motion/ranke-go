@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Violation is one answer-rule failure: the rule, the element index (-1 where the

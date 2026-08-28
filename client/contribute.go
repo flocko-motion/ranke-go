@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // ContributionResult is what the merge produced: the new branch-table head and the

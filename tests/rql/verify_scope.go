@@ -11,7 +11,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // ruleScopeMembership: `R-QSCOPE` — only the scope's graph is read, so every claim

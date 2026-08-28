@@ -9,7 +9,7 @@ package stack
 import (
 	"context"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 var errNoRawClaims = ranke.WithDetail(ranke.ErrUnsupported,

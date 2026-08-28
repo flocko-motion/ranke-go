@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // ruleResultBound: `R-QLIMIT` — results within the cap, and truncation claimed only

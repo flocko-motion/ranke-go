@@ -3,8 +3,8 @@ package minimal
 import (
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/adaptertest"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/adaptertest"
 )
 
 // TestConformance proves the minimum-viable adapter still satisfies the

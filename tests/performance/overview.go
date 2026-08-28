@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/generator"
 )
 
 // graphOverview summarises the shape of a generated archive.

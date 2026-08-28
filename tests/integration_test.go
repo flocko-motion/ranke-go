@@ -9,11 +9,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
-	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
-	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
-	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go"
+	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
+	"github.com/rankegraph/ranke-go/adapter/storage/fs"
+	"github.com/rankegraph/ranke-go/adapter/storage/mem"
+	"github.com/rankegraph/ranke-go/tests/generator"
 	"github.com/stretchr/testify/require"
 )
 

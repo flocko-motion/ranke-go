@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 var (

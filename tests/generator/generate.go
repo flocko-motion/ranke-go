@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	devhist "github.com/flocko-motion/ranke-go/adapter/history/dev"
-	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
-	"github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go"
+	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
+	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
+	"github.com/rankegraph/ranke-go/tests/helpers"
 )
 
 var errGenerate = errors.New("generator")

@@ -19,7 +19,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 var (

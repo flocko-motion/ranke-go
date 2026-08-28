@@ -7,7 +7,7 @@ package helpers
 import (
 	"context"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 )
 
 // Contribute drives one contribution through the Sequencer contract's six steps —

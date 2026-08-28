@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	historymem "github.com/flocko-motion/ranke-go/adapter/history/mem"
-	devseq "github.com/flocko-motion/ranke-go/adapter/sequencer/dev"
-	"github.com/flocko-motion/ranke-go/tests/helpers"
+	"github.com/rankegraph/ranke-go"
+	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
+	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
+	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 

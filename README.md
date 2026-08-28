@@ -9,12 +9,12 @@ This repository is the Go module: the canonical library importable from
 downstream projects, and the reference other implementations are checked
 against.
 
-Full API docs: [pkg.go.dev/github.com/flocko-motion/ranke-go](https://pkg.go.dev/github.com/flocko-motion/ranke-go).
+Full API docs: [pkg.go.dev/github.com/rankegraph/ranke-go](https://pkg.go.dev/github.com/rankegraph/ranke-go).
 
 ## Install
 
 ```sh
-go get github.com/flocko-motion/ranke-go
+go get github.com/rankegraph/ranke-go
 ```
 
 ## Quickstart
@@ -29,8 +29,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/mem"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/mem"
 )
 
 func main() {

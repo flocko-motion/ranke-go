@@ -6,10 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/generator"
-	"github.com/flocko-motion/ranke-go/tests/matrix"
-	"github.com/flocko-motion/ranke-go/tests/rql"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/tests/matrix"
+	"github.com/rankegraph/ranke-go/tests/rql"
 )
 
 // PathStep.Min is the hop floor. The toy wires two of its three entities with one

@@ -19,15 +19,15 @@ import (
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	goredis "github.com/redis/go-redis/v9"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage/fs"
-	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	neo4jstore "github.com/flocko-motion/ranke-go/adapter/storage/neo4j"
-	redisstore "github.com/flocko-motion/ranke-go/adapter/storage/redis"
-	"github.com/flocko-motion/ranke-go/adapter/storage/s3"
-	"github.com/flocko-motion/ranke-go/adapter/storage/sqlite"
-	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
-	"github.com/flocko-motion/ranke-go/internal/exclusive"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage/fs"
+	"github.com/rankegraph/ranke-go/adapter/storage/mem"
+	neo4jstore "github.com/rankegraph/ranke-go/adapter/storage/neo4j"
+	redisstore "github.com/rankegraph/ranke-go/adapter/storage/redis"
+	"github.com/rankegraph/ranke-go/adapter/storage/s3"
+	"github.com/rankegraph/ranke-go/adapter/storage/sqlite"
+	"github.com/rankegraph/ranke-go/adapter/storage/stack"
+	"github.com/rankegraph/ranke-go/internal/exclusive"
 )
 
 // ErrUnavailable reports that a backend cannot run in this environment (e.g. s3

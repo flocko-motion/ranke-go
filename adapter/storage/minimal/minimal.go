@@ -10,8 +10,8 @@ package minimal
 
 import (
 	"context"
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/adapter/storage"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/adapter/storage"
 	"sync"
 )
 

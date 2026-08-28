@@ -8,7 +8,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/flocko-motion/ranke-go"
+	"github.com/rankegraph/ranke-go"
 	"github.com/stretchr/testify/require"
 )
 

@@ -7,9 +7,9 @@ import (
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 
-	"github.com/flocko-motion/ranke-go/adapter/storage/mem"
-	"github.com/flocko-motion/ranke-go/adapter/storage/stack"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go/adapter/storage/mem"
+	"github.com/rankegraph/ranke-go/adapter/storage/stack"
+	"github.com/rankegraph/ranke-go/tests/generator"
 )
 
 // cypherToyDelta reads the content overlay straight out of the projection, as this

@@ -10,8 +10,8 @@ package rql
 import (
 	"time"
 
-	"github.com/flocko-motion/ranke-go"
-	"github.com/flocko-motion/ranke-go/tests/generator"
+	"github.com/rankegraph/ranke-go"
+	"github.com/rankegraph/ranke-go/tests/generator"
 )
 
 // Branch is the branch the branch-scoped queries confine to.
