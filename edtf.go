@@ -12,8 +12,7 @@ import (
 	"time"
 )
 
-// validateDated reports whether s is acceptable as a node's `dated`: an RFC 3339 instant,
-// or an EDTF Level 1 value (`V-DATED`).
+// validateDated reports whether s is acceptable as a node's `dated` (`V-DATED`).
 func validateDated(s string) error {
 	if _, _, ok := edtfSpan(s); !ok {
 		return WithDetail(ErrDatedForm, s)
@@ -21,15 +20,8 @@ func validateDated(s string) error {
 	return nil
 }
 
-// edtfSpan returns the half-open millisecond span [start, end) s denotes (`R-QTEMPORAL`);
-// ok is false when s is neither an instant nor a valid EDTF Level 1 value.
+// edtfSpan is the half-open millisecond span [start, end) s denotes (`R-QTEMPORAL`).
 func edtfSpan(s string) (start, end int64, ok bool) {
-	// EDTF's own date-and-time form, wider than V-TIME's fixed-width created_at,
-	// which `dated` is explicitly outside of (V-DATED).
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		ms := floorDivInt64(t.UnixNano(), int64(time.Millisecond))
-		return ms, ms, true
-	}
 	return parseEDTFLevel1(s)
 }
 
@@ -42,15 +34,13 @@ func edtfMidpointMs(s string) (int64, bool) {
 	return floorDivInt64(start+end, 2), true
 }
 
-// TemporalMidpointMs is edtfMidpointMs, exported for a storage layer to project at write
-// time — a native `compare: temporal` ORDER BY sorts on the projection rather than parsing
-// EDTF itself (`R-QTEMPORAL`).
+// TemporalMidpointMs is edtfMidpointMs, exported so a storage layer can project `dated` at
+// write time and sort on the projection natively (`R-QTEMPORAL`).
 func TemporalMidpointMs(s string) (int64, bool) {
 	return edtfMidpointMs(s)
 }
 
-// floorDivInt64 divides rounding toward negative infinity, unlike Go's truncating /: the
-// span math needs this for dates before 1970, whose ms values are negative.
+// floorDivInt64 rounds toward negative infinity, as the span math must for dates before 1970.
 func floorDivInt64(a, b int64) int64 {
 	q := a / b
 	if a%b != 0 && (a < 0) != (b < 0) {
@@ -59,23 +49,21 @@ func floorDivInt64(a, b int64) int64 {
 	return q
 }
 
-// edtfPoint is one parsed EDTF Level 1 endpoint, exactly one shape populated: a
-// season, an unspecified-digit year (spanYears > 0), or a year with an optional
-// month and day.
+// edtfPoint is one parsed EDTF Level 1 endpoint, with exactly one shape populated.
 type edtfPoint struct {
 	year      int
 	hasMonth  bool
 	month     int
 	hasDay    bool
 	day       int
-	season    int // 21-24; 0 when this point is not a season
-	spanYears int // > 0 for an unspecified-digit year (10^(number of trailing X's))
+	season    int   // 21-24 for a season
+	spanYears int   // an unspecified-digit year's width, 10^(number of trailing X's)
+	instantMs int64 // the moment a date-and-time point names, on the UTC axis
+	isInstant bool
 }
 
-// parseEDTFLevel1 parses a full `dated` value: a single point, an A/B interval whose either
-// side may be empty (unknown) or `..` (open), or R-QTEMPORAL's own shorthand for an open
-// bound written directly against the concrete side with no `/` at all (`..2005`, `2020..`).
-// Either open form extends one calendar year past the edge of the concrete bound it faces.
+// parseEDTFLevel1 parses a full `dated` value: one point, or an interval whose either side
+// may be open — the `/` form or R-QTEMPORAL's bare `..2005`, each open bound a year wide.
 func parseEDTFLevel1(s string) (start, end int64, ok bool) {
 	if s == "" {
 		return 0, 0, false
@@ -107,8 +95,7 @@ func parseEDTFLevel1(s string) (start, end int64, ok bool) {
 	return start, end, true
 }
 
-// parseEDTFSlashInterval parses the ISO 8601-2 A/B form, either side empty (unknown) or
-// `..` (open).
+// parseEDTFSlashInterval parses the ISO 8601-2 A/B form, either side empty (unknown) or `..`.
 func parseEDTFSlashInterval(s string) (start, end int64, ok bool) {
 	left, right, _ := strings.Cut(s, "/")
 	openLeft := left == "" || left == ".."
@@ -145,10 +132,9 @@ func parseEDTFSlashInterval(s string) (start, end int64, ok bool) {
 	return start, end, true
 }
 
-// parseEDTFPoint parses one endpoint: a trailing `?`/`~`/`%` qualifier is accepted and
-// dropped (span/midpoint math ignores it — R-QTEMPORAL's tie-break on it is out of scope),
-// then a letter-prefixed year (`Y170000002`), an unspecified-digit year (`201X`, `20XX`,
-// `2XXX`), or `year[-month[-day]]`, month 21-24 read as a season.
+// parseEDTFPoint parses one endpoint, dropping a trailing `?`/`~`/`%` qualifier: a
+// letter-prefixed year, a date and time of day, an unspecified-digit year, or
+// `year[-month[-day]]` with month 21-24 read as a season.
 func parseEDTFPoint(s string) (edtfPoint, bool) {
 	if s == "" {
 		return edtfPoint{}, false
@@ -166,6 +152,9 @@ func parseEDTFPoint(s string) (edtfPoint, bool) {
 			return edtfPoint{}, false
 		}
 		return edtfPoint{year: year}, true
+	}
+	if strings.ContainsRune(s, 'T') {
+		return parseEDTFInstant(s)
 	}
 	if len(s) == 4 {
 		if p, ok := parseUnspecifiedYear(s); ok {
@@ -214,9 +203,19 @@ func parseEDTFPoint(s string) (edtfPoint, bool) {
 	}
 }
 
-// parseUnspecifiedYear reads a 4-character year with 1 to 3 trailing 'X's (`201X` the
-// decade, `20XX` the century, `2XXX` the millennium); ok is false for a plain year (0 X's)
-// or one masked past its first digit.
+// parseEDTFInstant reads EDTF's date-and-time form, wider than V-TIME's fixed-width
+// created_at: any second precision, and a zone, which is what fixes the moment.
+func parseEDTFInstant(s string) (edtfPoint, bool) {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return edtfPoint{}, false
+	}
+	ms := floorDivInt64(t.UnixNano(), int64(time.Millisecond))
+	return edtfPoint{instantMs: ms, isInstant: true}, true
+}
+
+// parseUnspecifiedYear reads a 4-character year with 1 to 3 trailing 'X's: `201X` the decade,
+// `20XX` the century, `2XXX` the millennium.
 func parseUnspecifiedYear(s string) (edtfPoint, bool) {
 	x := 0
 	for x < len(s) && s[len(s)-1-x] == 'X' {
@@ -234,10 +233,12 @@ func parseUnspecifiedYear(s string) (edtfPoint, bool) {
 	return edtfPoint{year: base * mult, spanYears: mult}, true
 }
 
-// pointSpanMs is p's own half-open millisecond span, the precision it carries: a year
-// covers its year, a season its three months, a day just that day.
+// pointSpanMs is p's own half-open millisecond span, the precision it carries: a year covers
+// its year, a season three months, a day that day, an instant no width at all.
 func pointSpanMs(p edtfPoint) (int64, int64) {
 	switch {
+	case p.isInstant:
+		return p.instantMs, p.instantMs
 	case p.spanYears > 0:
 		return dateMs(p.year, 1, 1), dateMs(p.year+p.spanYears, 1, 1)
 	case p.season != 0:
@@ -269,8 +270,7 @@ func timeShiftDaysMs(ms int64, days int) int64 {
 	return time.UnixMilli(ms).UTC().AddDate(0, 0, days).UnixMilli()
 }
 
-// timeShiftYearsMs shifts a millisecond edge by whole calendar years — the "one year"
-// R-QTEMPORAL extends an open or unknown interval bound by, leap years included.
+// timeShiftYearsMs shifts by whole calendar years, the width R-QTEMPORAL gives an open bound.
 func timeShiftYearsMs(ms int64, years int) int64 {
 	return time.UnixMilli(ms).UTC().AddDate(years, 0, 0).UnixMilli()
 }

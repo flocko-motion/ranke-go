@@ -6,7 +6,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/flocko-motion/ranke-go"
 )
+
+// TestDatedFormsAreSortable: every corner in datedForms must project to a temporal
+// midpoint (`R-QTEMPORAL`). One that failed to parse would sort with the claims carrying
+// no `dated` at all, quietly emptying the fixtures built on it.
+func TestDatedFormsAreSortable(t *testing.T) {
+	for _, form := range datedForms {
+		_, ok := ranke.TemporalMidpointMs(form)
+		require.True(t, ok, "%q must parse as a dated value", form)
+	}
+}
 
 // The determinism foundation: a (seed, index) fixes an Ed25519 key via a
 // spec'd byte recipe, so a contributor built from it has a reproducible id —
