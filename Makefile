@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all help build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt fmt-check tidy upgrade lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean check-clean-tree release major minor patch breaking feature fix
+.PHONY: all help build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt fmt-check tidy upgrade lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean check-clean-tree check-release-bump release major minor patch breaking feature fix
 
 # ask = prompt before raising the go directive (`make upgrade`); keep = leave it; or a version.
 GO_VERSION ?= ask
@@ -273,7 +273,14 @@ upgrade: ## Upgrade all deps and brokkr to latest, tidy, then check; asks before
 check-clean-tree:
 	@[ -z "$$(git status --porcelain)" ] || { echo "working tree is dirty — commit or stash before releasing" >&2; exit 1; }
 
-release: check-clean-tree verify ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
+# Same reasoning as check-clean-tree: a missing or misspelled bump word is a free,
+# instant check, and verify is not — scripts/release.sh's own case statement still
+# validates it too, but only after verify already ran.
+check-release-bump:
+	@[ -n "$(filter major minor patch breaking feature fix,$(MAKECMDGOALS))" ] || \
+		{ echo "usage: make release [pre] <major|breaking | minor|feature | patch|fix>" >&2; exit 1; }
+
+release: check-clean-tree check-release-bump verify ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
 	@./scripts/release.sh $(filter pre major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
