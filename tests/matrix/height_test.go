@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/tests/generator"
 	"github.com/rankegraph/ranke-go/tests/helpers"
@@ -83,7 +82,7 @@ func buildRevisions(ctx context.Context, u ranke.Universe) (revisions, error) {
 		return revisions{}, err
 	}
 
-	seq, err := devseq.NewSequencer(ctx, u, devhist.New(clock), op, clock)
+	seq, err := devseq.NewSequencer(ctx, u, op, clock)
 	if err != nil {
 		return revisions{}, err
 	}

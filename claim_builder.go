@@ -47,6 +47,10 @@ type ClaimBuilder struct {
 	// allowInvalid backs AllowInvalid: the rules go unapplied, the sealing still
 	// happens. Unexported, so the mode is reachable only through the setter.
 	allowInvalid bool
+	// historyID overrides the ordinary content-addressed identity (`V-ID`) with
+	// id_seq(i,s) (`V-IDSEQ`). Only History.Append sets it — it alone holds i and
+	// s together, s living in no claim past the first (§Head Index).
+	historyID Id
 }
 
 // NewClaim seeds a ClaimBuilder with the required type and attributing
@@ -177,7 +181,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkClaim(cfg); err != nil {
+	if err := checkClaim(cfg, edges); err != nil {
 		return nil, err
 	}
 
@@ -222,7 +226,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 
 // checkClaim applies the rules a claim must satisfy, which AllowInvalid skips. The
 // steps around it resolve and seal, so what it governs is validity alone.
-func checkClaim(cfg ClaimBuilder) error {
+func checkClaim(cfg ClaimBuilder, edges []*edge) error {
 	if cfg.allowInvalid {
 		return nil
 	}
@@ -236,6 +240,9 @@ func checkClaim(cfg ClaimBuilder) error {
 		if err := validateDated(cfg.Dated); err != nil {
 			return err
 		}
+	}
+	if err := checkHistoryClaim(cfg.TypeClass, cfg.TypeSub, cfg.Fields, edges); err != nil {
+		return err
 	}
 	return CheckDeletable(cfg.TypeClass, cfg.TypeSub, cfg.Fields)
 }
@@ -511,9 +518,11 @@ func signNode(n *node, edges []*edge, cfg *ClaimBuilder, isRootContributor bool)
 	if err != nil {
 		return nil, WrapDetail(errNewClaim, "sign envelope", err)
 	}
-	nodeID, err := hashContent(env)
-	if err != nil {
-		return nil, WrapDetail(errNewClaim, "hash envelope", err)
+	nodeID := cfg.historyID
+	if nodeID == nil {
+		if nodeID, err = hashContent(env); err != nil {
+			return nil, WrapDetail(errNewClaim, "hash envelope", err)
+		}
 	}
 	n.id = nodeID
 	return env, nil

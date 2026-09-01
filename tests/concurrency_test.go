@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	concseq "github.com/rankegraph/ranke-go/adapter/sequencer/concurrent"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/tests/backends"
@@ -73,7 +72,7 @@ func (c *tickClock) Tick() time.Time {
 type sequencerRow struct {
 	Name string
 	Cap  int
-	New  func(ctx context.Context, u ranke.Universe, hist ranke.History,
+	New  func(ctx context.Context, u ranke.Universe,
 		op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error)
 }
 
@@ -81,14 +80,14 @@ type sequencerRow struct {
 // the row that runs them in parallel; dev queues them, so it is capped (serialWriters).
 func sequencerRows() []sequencerRow {
 	return []sequencerRow{
-		{Name: "concurrent", New: func(ctx context.Context, u ranke.Universe, hist ranke.History,
+		{Name: "concurrent", New: func(ctx context.Context, u ranke.Universe,
 			op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
-			return concseq.NewSequencer(ctx, u, hist, op, clk)
+			return concseq.NewSequencer(ctx, u, op, clk)
 		}},
 		{Name: "dev", Cap: serialWriters,
-			New: func(ctx context.Context, u ranke.Universe, hist ranke.History,
+			New: func(ctx context.Context, u ranke.Universe,
 				op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
-				return devseq.NewSequencer(ctx, u, hist, op, clk)
+				return devseq.NewSequencer(ctx, u, op, clk)
 			}},
 	}
 }
@@ -131,7 +130,7 @@ func runConcurrentWriters(t *testing.T, u ranke.Universe, sr sequencerRow, n int
 	ctx := context.Background()
 	clk := &tickClock{t: time.Unix(1_000_000, 0).UTC()}
 	op := operatorFor(t, ctx, clk.Tick())
-	seq, err := sr.New(ctx, u, historymem.New(), op, clk)
+	seq, err := sr.New(ctx, u, op, clk)
 	require.NoError(t, err)
 
 	ids := make([]ranke.Id, n)

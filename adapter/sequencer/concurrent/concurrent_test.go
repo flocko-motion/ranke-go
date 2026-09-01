@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	concseq "github.com/rankegraph/ranke-go/adapter/sequencer/concurrent"
 	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
@@ -52,7 +51,7 @@ func operator(t *testing.T, ctx context.Context, at time.Time) ranke.Contributor
 
 type fixture struct {
 	u    ranke.Universe
-	hist ranke.History
+	hist *ranke.History
 	seq  *concseq.Sequencer
 	op   ranke.Contributor
 	clk  *clock
@@ -61,11 +60,13 @@ type fixture struct {
 func newFixture(t *testing.T, ctx context.Context) *fixture {
 	t.Helper()
 	u := ranke.NewMemoryUniverse()
-	hist := historymem.New()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := concseq.NewSequencer(ctx, u, hist, op, clk)
+	seq, err := concseq.NewSequencer(ctx, u, op, clk)
 	require.NoError(t, err)
+	// A second, independent view over the same Head History, reached the way any
+	// external reader would: given its seed, never discovered (paper §Backup).
+	hist := ranke.OpenHistory(u, seq.HistorySeed())
 	return &fixture{u: u, hist: hist, seq: seq, op: op, clk: clk}
 }
 

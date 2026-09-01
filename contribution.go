@@ -147,11 +147,13 @@ func (c Constraints) unconfined() bool {
 }
 
 // reservedTypes are the Sequencer's alone (paper 2 §Sequencer step 2): the branch
-// table it mints, and the limiting claims that restrict another claim.
+// table it mints, the limiting claims that restrict another claim, and the Head
+// History entry it mints at merge (`R-C2HISTORY`).
 var reservedTypes = map[string]bool{
-	NodeBranches: true,
-	NodeDelete:   true,
-	NodeExpiry:   true,
+	NodeBranches:    true,
+	NodeDelete:      true,
+	NodeExpiry:      true,
+	NodeTypeHistory: true,
 }
 
 // StrandedByDeletion reports which of own a walk from heads reaches only through a

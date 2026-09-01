@@ -341,6 +341,7 @@ var verifyRules = []verifyRule{
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
+	{name: "history reference", rule: "an edge's reference must not resolve to a contribution/history claim (`V-HISTREF`)", edge: ruleHistoryReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches) (`V-ARCHIVE`)", archive: ruleArchiveHead},
 	{name: "key validity", rule: "a claim is dated within its contributor key's validity window, as an expiry edge against that contributor shortens it (`R-DEXPIRY`)", claim: ruleKeyWindow},
 	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
@@ -456,6 +457,23 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 	}
 	if ref.Node().Type() == NodeBranches {
 		return WithDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
+	}
+	return nil
+}
+
+// ruleHistoryReference (per edge) is `V-HISTREF`: a contribution/history claim is
+// reached only through id_seq(i,s) (foundation paper §Head Index); an ordinary
+// edge may never resolve to one.
+func ruleHistoryReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
+	ref, err := GetClaim(ctx, t.u, e.Reference())
+	if errors.Is(err, ErrNotFound) {
+		return nil // dangling refs are caught elsewhere; judge only resolvable ones
+	}
+	if err != nil {
+		return err
+	}
+	if ref.Node().Type() == NodeTypeHistory {
+		return WithDetail(ErrHistoryReference, t.claim.Node().Type()+" → "+e.Reference().String())
 	}
 	return nil
 }

@@ -21,6 +21,10 @@ type Sequencer interface {
 	// GetContributor returns the contributor the Sequencer attests branch
 	// advances with.
 	GetContributor() Contributor
+	// HistorySeed returns the Head History's seed, minted once at bootstrap
+	// (foundation paper §Head Index) — the one value worth persisting externally
+	// to reopen this archive later via OpenHistory (§Backup).
+	HistorySeed() string
 	// NewContribution opens a contribution against the current archive, under the
 	// constraints opts declare (step 1).
 	NewContribution(ctx context.Context, opts ...ContributionOption) (Contribution, error)

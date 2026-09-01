@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/mem"
 	"github.com/rankegraph/ranke-go/tests/generator"
@@ -26,8 +25,7 @@ func TestTagArchive(t *testing.T) {
 
 	u := mem.New()
 	require.True(t, u.Capabilities().Tags, "mem is Tags-capable")
-	hist := devhist.New(clock)
-	seq, err := devseq.NewSequencer(ctx, u, hist, self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	em, err := ranke.NewClaim(ranke.TypeSource("email"), self).

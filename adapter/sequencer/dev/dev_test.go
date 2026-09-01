@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
@@ -47,7 +46,7 @@ func newSequencer(t *testing.T, ctx context.Context) (*devseq.Sequencer, ranke.C
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := devseq.NewSequencer(ctx, u, historymem.New(), op, clk)
+	seq, err := devseq.NewSequencer(ctx, u, op, clk)
 	require.NoError(t, err)
 	return seq, op, clk
 }

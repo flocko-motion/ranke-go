@@ -142,5 +142,8 @@ func AssembleClaim(parts ClaimParts) (Claim, error) {
 	for i, e := range edges {
 		n.edges[i] = e.id
 	}
+	if err := checkHistoryClaim(n.typeClass, n.typeSub, n.fields, edges); err != nil {
+		return nil, WrapDetail(errAssemble, "history claim", err)
+	}
 	return &claim{node: n, edges: edges, tags: cloneFields(parts.Tags)}, nil
 }

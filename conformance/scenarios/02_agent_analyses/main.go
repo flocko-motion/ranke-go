@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/conformance/helpers"
@@ -227,8 +226,8 @@ func main() {
 	// verifies, auto-consolidates the open heads, seeds, and mints the branch
 	// table, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(histfile.New(helpers.BranchTableHeadPath))
-	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	seq := must(devseq.NewSequencer(ctx, u, operator, s))
+	helpers.WriteHistorySeed(seq)
 	must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		agentClaim, emailApples, emailFamily, summary,
 		alice, apples, bobSr, bobJr,

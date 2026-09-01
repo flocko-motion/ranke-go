@@ -402,6 +402,9 @@ func decodeSerializedClaim(id Id, payload []byte) (*claim, error) {
 		edges[i] = e
 		n.edges[i] = eid
 	}
+	if err := checkHistoryClaim(n.typeClass, n.typeSub, n.fields, edges); err != nil {
+		return nil, err
+	}
 	return &claim{node: n, edges: edges}, nil
 }
 

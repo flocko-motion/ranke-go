@@ -39,7 +39,7 @@ type Clock interface {
 // consolidates the first's head alongside its own.
 type Sequencer struct {
 	u     ranke.Universe
-	hist  ranke.History
+	hist  *ranke.History
 	self  ranke.Contributor
 	clock Clock
 
@@ -81,17 +81,19 @@ type receipt struct{ head ranke.Id }
 func (r receipt) Head() ranke.Id { return r.head }
 
 // NewSequencer bootstraps a fresh archive over u: it stores self and mints the
-// empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive).
-// self must carry a signing key, which every branch table it mints is signed with.
-func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, self ranke.Contributor, clock Clock) (*Sequencer, error) {
-	if u == nil || hist == nil || self == nil || clock == nil {
+// empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive),
+// recorded in a fresh Head History (§Head Index) — u is where that history lives
+// too, no separate port. self must carry a signing key, which every branch table
+// it mints is signed with.
+func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+	if u == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
 	if self.SigningKey() == nil {
 		return nil, errNoSigningKey
 	}
 	s := &Sequencer{
-		u: u, hist: hist, self: self, clock: clock,
+		u: u, hist: ranke.OpenHistory(u, ""), self: self, clock: clock,
 		heads:     map[string]ranke.Id{},
 		committed: map[string]struct{}{},
 	}
@@ -105,7 +107,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, bt0.ID(), int(bt0.Node().Height()), 0); err != nil {
+	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), 0, bt0.Node().CreatedAt()); err != nil {
 		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
@@ -120,6 +122,9 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 
 // GetContributor returns the contributor branch advances are signed with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
+
+// HistorySeed returns the Head History's seed, minted at bootstrap.
+func (s *Sequencer) HistorySeed() string { return s.hist.Seed() }
 
 // currentHead reads the archive head k under the sequencing thread.
 func (s *Sequencer) currentHead() ranke.Id {
@@ -243,11 +248,13 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	if err != nil {
 		return err
 	}
+	// Step 6 is the advance k→k'; the next Head History entry records it here,
+	// in the same step (`R-C6HISTORY`, `V-HISTADVANCE`).
 	revision, err := s.hist.Len(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: history length: %w", errSequencer, err)
 	}
-	if _, err := s.hist.Append(ctx, bt.ID(), int(bt.Node().Height()), revision); err != nil {
+	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), revision, bt.Node().CreatedAt()); err != nil {
 		return fmt.Errorf("%w: append history: %w", errSequencer, err)
 	}
 

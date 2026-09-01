@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 )
 
@@ -63,14 +62,25 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 // so scenario claims and minted branch tables share one monotone timeline.
 func (s *Scenario) Tick() time.Time { return s.NextTimestamp(time.Second) }
 
+// WriteHistorySeed persists seq's Head History seed to BranchTableHeadPath — the
+// one value (foundation paper §Backup) a bundle must carry to be reopened, since
+// there is no way to discover it. A scenario calls this once its Sequencer has
+// bootstrapped, before ReloadAndVerify (or any other process) needs it.
+func WriteHistorySeed(seq ranke.Sequencer) {
+	if err := os.MkdirAll(filepath.Dir(BranchTableHeadPath), 0o755); err != nil {
+		log.Fatalf("scenario.WriteHistorySeed: mkdir: %v", err)
+	}
+	Must(0, os.WriteFile(BranchTableHeadPath, []byte(seq.HistorySeed()+"\n"), 0o644))
+}
+
 // ReloadAndVerify reopens the persisted bundle at its latest head, validates every
 // branch closure, requires expectBranch among them, and writes ids.txt. What the head
 // ids are is the reference bundle's business, so nothing here pins one: a value in
 // code could only be corrected by hand on every intentional change.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch string) {
 	u := Must(fs.New(UniverseDir))
-	hist := Must(histfile.New(BranchTableHeadPath))
-	head := Must(hist.Latest(ctx)).GetId() // the archive head k the timeline advanced to
+	seed := strings.TrimSpace(string(Must(os.ReadFile(BranchTableHeadPath))))
+	head := Must(ranke.OpenHistory(u, seed).Latest(ctx)).GetId() // the archive head k the timeline advanced to
 	arc := Must(ranke.NewArchive(ctx, u, head))
 
 	allIds := make(map[string]struct{})

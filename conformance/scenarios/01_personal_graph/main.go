@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/conformance/helpers"
@@ -215,16 +214,16 @@ func main() {
 		},
 	}.Sign())
 
-	// --- 7. Compose the bundle (filesystem Universe under data/universe/,
-	// head-id timeline under data/branches/B_h) and merge one contribution
-	// carrying every claim. The dev Sequencer runs the paper's six steps —
-	// verify, auto-consolidate the open heads, seed, and mint the branch
-	// table — advancing branch "main". Real deployments would stack a mem
-	// cache on top, or swap S3 in below; this keeps it flat so the bundle
-	// is just a directory. ---
+	// --- 7. Compose the bundle (filesystem Universe under data/universe/, its
+	// Head History riding the same Universe, its seed under data/branches/B_h)
+	// and merge one contribution carrying every claim. The dev Sequencer runs
+	// the paper's six steps — verify, auto-consolidate the open heads, seed,
+	// and mint the branch table — advancing branch "main". Real deployments
+	// would stack a mem cache on top, or swap S3 in below; this keeps it flat
+	// so the bundle is just a directory. ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(histfile.New(helpers.BranchTableHeadPath))
-	seq := must(devseq.NewSequencer(ctx, u, hist, alice, s))
+	seq := must(devseq.NewSequencer(ctx, u, alice, s))
+	helpers.WriteHistorySeed(seq)
 	head := must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		emailApples, emailFamily, summary,
 		aliceEntity, applesEntity, likes,

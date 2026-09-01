@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/internal/vectors"
 	"github.com/spf13/cobra"
@@ -27,10 +26,13 @@ var (
 	errOpen     = errors.New("open archive")
 	errShow     = errors.New("show")
 	errValidate = errors.New("validate")
+	// errNoSeed: id_seq(0,s) is a fixed external anchor (foundation paper §Backup) —
+	// given, never discovered. Without it this archive cannot be opened at all.
+	errNoSeed = errors.New("no Head History seed at dir/branches/B_h — an archive cannot be opened without one")
 )
 
 // dirHelp describes the one argument every command shares.
-const dirHelp = "dir is a data bundle: dir/universe/ (claims + content) plus dir/branches/B_h."
+const dirHelp = "dir is a data bundle: dir/universe/ (claims + content) plus dir/branches/B_h (the Head History seed)."
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -53,18 +55,19 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
-// openArchive opens the bundle at dir — fs Universe plus the B_h timeline — at its
-// latest head. The Universe comes back too, for closure walks over it directly.
+// openArchive opens the bundle at dir — fs Universe plus the Head History seed at
+// dir/branches/B_h — at its latest head. The Universe comes back too, for closure
+// walks over it directly.
 func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive, error) {
 	u, err := fs.New(filepath.Join(dir, "universe"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: universe in %s: %w", errOpen, dir, err)
 	}
-	hist, err := histfile.New(filepath.Join(dir, "branches", "B_h"))
+	seed, err := readSeed(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: head timeline in %s: %w", errOpen, dir, err)
+		return nil, nil, fmt.Errorf("%w: %w", errOpen, err)
 	}
-	head, err := hist.Latest(ctx)
+	head, err := ranke.OpenHistory(u, seed).Latest(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: latest head in %s: %w", errOpen, dir, err)
 	}
@@ -73,6 +76,22 @@ func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive
 		return nil, nil, err
 	}
 	return u, arc, nil
+}
+
+// readSeed reads the Head History seed a bundle carries at path — id_seq(0,s) is a
+// fixed external anchor (foundation paper §Backup), given rather than discovered,
+// so a missing or empty file is refused outright rather than treated as an empty
+// archive.
+func readSeed(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s: %w", errNoSeed, path, err)
+	}
+	seed := strings.TrimSpace(string(b))
+	if seed == "" {
+		return "", fmt.Errorf("%w: %s is empty", errNoSeed, path)
+	}
+	return seed, nil
 }
 
 // infoCmd summarises an archive: its branch count and each head.

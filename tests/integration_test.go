@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/adapter/storage/mem"
 	"github.com/rankegraph/ranke-go/tests/generator"
@@ -46,20 +45,19 @@ func TestMain(m *testing.M) {
 
 func TestIntegrationMem(t *testing.T) {
 	ctx := context.Background()
-	IntegrationTest(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
-		return mem.New(), devhist.New(clk), nil
+	IntegrationTest(t, ctx, func(_ *testing.T, _ *generator.Clock) (ranke.Universe, error) {
+		return mem.New(), nil
 	})
 }
 
 func TestIntegrationFs(t *testing.T) {
 	ctx := context.Background()
-	IntegrationTest(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
+	IntegrationTest(t, ctx, func(_ *testing.T, _ *generator.Clock) (ranke.Universe, error) {
 		dir, err := os.MkdirTemp(fsTestDir, "scenario-")
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		u, err := fs.New(dir)
-		return u, devhist.New(clk), err
+		return fs.New(dir)
 	})
 }
 
@@ -71,9 +69,8 @@ func TestFsDurability(t *testing.T) {
 	dir, err := os.MkdirTemp(fsTestDir, "durability-")
 	require.NoError(t, err, "temp dir")
 
-	f := newFixture(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
-		u, err := fs.New(dir)
-		return u, devhist.New(clk), err
+	f := newFixture(t, ctx, func(_ *testing.T, _ *generator.Clock) (ranke.Universe, error) {
+		return fs.New(dir)
 	})
 	em := f.email(t, f.self, "alice@example.com", "bob@example.com", "durable\r\n")
 	head := f.write(t, em)

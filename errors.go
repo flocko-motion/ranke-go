@@ -179,6 +179,22 @@ var (
 	ErrDeleteMarkNoTarget = errors.New("ranke.verify: a contribution/delete claim must carry a contribution/delete edge naming its target")
 	ErrTimestampForm      = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
 	ErrDatedForm          = errors.New("ranke: dated must be an RFC 3339 timestamp or a valid EDTF Level 1 value (`V-DATED`)")
+	// ErrHistoryClaimForm: `V-HISTCLAIM` — a contribution/history claim needs
+	// history_index and a contribution/head edge naming the head it records.
+	ErrHistoryClaimForm = errors.New("ranke: a contribution/history claim must carry history_index and a contribution/head edge (`V-HISTCLAIM`)")
+	// ErrHistoryClaim0Form: `V-HISTCLAIM0` — the claim at i=0 also carries the seed.
+	ErrHistoryClaim0Form = errors.New("ranke: the contribution/history claim at history_index=0 must also carry history_seed (`V-HISTCLAIM0`)")
+	// ErrHistoryReference: `V-HISTREF` — a history claim is reached only through
+	// id_seq(i,s), never an ordinary edge.
+	ErrHistoryReference = errors.New("ranke.verify: an edge's reference must not resolve to a contribution/history claim (`V-HISTREF`)")
+	// --- History (adapter/sequencer's persistence, foundation paper §Head Index) ---
+	errHistoryNilID         = errors.New("ranke.History.Append: nil id")
+	errHistoryNoSigner      = errors.New("ranke.History.Append: no contributor to sign under")
+	errHistoryNoSeed        = errors.New("ranke.History.Append: no seed — revision 0 was never appended or given")
+	errHistoryRevisionRange = errors.New("ranke.History: revision out of range")
+	errHistoryRangeInvalid  = errors.New("ranke.History.GetBulk: invalid range")
+	errHistoryNoHeadEdge    = errors.New("ranke.History: a contribution/history claim carries no contribution/head edge")
+	errHistorySeedGen       = errors.New("ranke.History: generate seed")
 	// ErrUnexplainedGap: a claim's bytes are missing and nothing explains the gap —
 	// no copied delete_by on the edge reaching it, no contribution/delete mark against
 	// it. Indistinguishable from data loss, which is why it fails.
