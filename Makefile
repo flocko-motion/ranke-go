@@ -4,7 +4,7 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all help build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt fmt-check tidy upgrade lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean release major minor patch breaking feature fix
+.PHONY: all help build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt fmt-check tidy upgrade lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean check-clean-tree release major minor patch breaking feature fix
 
 # ask = prompt before raising the go directive (`make upgrade`); keep = leave it; or a version.
 GO_VERSION ?= ask
@@ -268,7 +268,12 @@ upgrade: ## Upgrade all deps and brokkr to latest, tidy, then check; asks before
 # `make release pre <bump>` tags a candidate on the branch instead, merging nothing —
 # a version the proxy resolves, so ranke-graph can regenerate the vectors before the
 # real release is cut. See scripts/release.sh for why that order matters.
-release: verify ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
+# check-clean-tree first, ahead of verify: a dirty tree is a free, instant check,
+# and verify is not — failing on it should not cost a build first.
+check-clean-tree:
+	@[ -z "$$(git status --porcelain)" ] || { echo "working tree is dirty — commit or stash before releasing" >&2; exit 1; }
+
+release: check-clean-tree verify ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
 	@./scripts/release.sh $(filter pre major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated

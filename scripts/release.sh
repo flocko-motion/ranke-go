@@ -47,12 +47,6 @@ if [ "$#" -gt 0 ]; then
 	exit 1
 fi
 
-# 1. Clean tree — a release must capture a committed state.
-if [ -n "$(git status --porcelain)" ]; then
-	echo "working tree is dirty — commit or stash before releasing" >&2
-	exit 1
-fi
-
 git fetch --tags --force origin >/dev/null 2>&1 || true
 default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
 default="${default:-main}"
@@ -62,7 +56,7 @@ start="$(git rev-parse --abbrev-ref HEAD)"
 trap 'git checkout --quiet "$start" 2>/dev/null || true' EXIT
 
 if [ -n "$prerelease" ]; then
-	# 2p. Prerelease: the point is a resolvable version WITHOUT touching the default
+	# 1p. Prerelease: the point is a resolvable version WITHOUT touching the default
 	#     branch, so the branch is pushed and nothing is merged. From the default
 	#     branch there is nothing to be a candidate for — release instead.
 	if [ "$start" = "$default" ]; then
@@ -73,7 +67,7 @@ if [ -n "$prerelease" ]; then
 	git push --force-with-lease -u origin "$start"
 	target="HEAD"
 elif [ "$start" != "$default" ]; then
-	# 2. Feature branch: push it, open a PR if there isn't one, and merge it into
+	# 1. Feature branch: push it, open a PR if there isn't one, and merge it into
 	#    the default branch — without switching this checkout — so the tag comes
 	#    off the merged tip.
 	if ! command -v gh >/dev/null; then
@@ -117,7 +111,7 @@ else
 	target="HEAD"
 fi
 
-# 3. Bump from the latest RELEASE tag (ignore non-semver / prerelease tags), tag
+# 2. Bump from the latest RELEASE tag (ignore non-semver / prerelease tags), tag
 #    the merged tip, push the tag.
 # `|| true`: on the first release there are no tags, so grep matches nothing and
 # exits 1; under `set -o pipefail` that aborts the assignment before the
@@ -147,7 +141,7 @@ fi
 git tag -a "$next" "$target" -m "release $next"
 git push origin "$next"
 
-# 4. Wait for the tag-triggered release workflow, so a failed build or publish
+# 3. Wait for the tag-triggered release workflow, so a failed build or publish
 #    surfaces here instead of silently. Match the run by the tagged commit's SHA
 #    (reliable for tag pushes, where headBranch is unset).
 if command -v gh >/dev/null; then
