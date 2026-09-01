@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-# Cut a release from the default branch as a self-contained cycle: ensure the
-# tree is clean; (if on a feature branch) push it, open + merge a PR into the
-# default branch so the tag points at MERGED code; tag the merged tip; push the
-# tag (which triggers the release workflow); then return to the branch you
-# started on. It never leaves you on — or commits directly to — the default
-# branch: you can't push to main, you only release from it.
-#
-# Usage: make release <major|minor|patch>   (aliases: breaking|feature|fix)
-#   Needs `gh` when run from a feature branch.
+# Dispatches `make release` (real release) to ranke-graph's shared
+# scripts/release-cycle.sh — fetched to $(RELEASE_CYCLER), see the Makefile —
+# and keeps the one thing genuinely specific to this repo: `make release pre
+# <bump>`, a PRERELEASE that tags the branch without merging.
 #
 # `make release pre <bump>` cuts a PRERELEASE instead: it pushes the branch and tags
 # it vX.Y.Z-rc.N, merging nothing. That gives a version the module proxy resolves —
@@ -20,13 +15,18 @@
 # An rc tag can dangle. It points at a branch commit, and a later squash or rebase
 # leaves it outside the default branch's history. That is fine for scaffolding and
 # wrong for anything archival: regenerate from the real tag once it exists.
+#
+# WHY NOT A release-cycle.sh HOOK: prerelease is a different shape of command
+# entirely (no merge, no PR, a `pre` sub-word before the bump), not a variation
+# release-cycle.sh's fixed sequence can express through release-next-version.sh
+# or release-pretag.sh. Forcing it into that shape would cost more than the
+# duplication of the tag/push/wait tail this file still carries below.
 set -euo pipefail
 
-prerelease=""
-if [ "${1:-}" = "pre" ]; then
-	prerelease=1
-	shift
+if [ "${1:-}" != "pre" ]; then
+	exec "${RELEASE_CYCLER:-bin/release-cycle.sh}" "$@"
 fi
+shift
 
 bump="${1:-}"
 case "$bump" in
@@ -34,16 +34,16 @@ case "$bump" in
 	minor | feature)  bump=minor ;; # backwards-compatible feature
 	patch | fix)      bump=patch ;; # backwards-compatible fix
 	*)
-		echo "usage: make release [pre] <major|breaking | minor|feature | patch|fix>" >&2
+		echo "usage: make release pre <major|breaking | minor|feature | patch|fix>" >&2
 		exit 1
 		;;
 esac
 shift || true
 
-# A word left over means `pre` came second, and taking the first as the bump would
-# cut the real release this invocation asked not to.
+# A word left over means an extra argument followed the bump, which taking only
+# the first would silently drop.
 if [ "$#" -gt 0 ]; then
-	echo "unexpected argument '$1' — 'pre' comes first: make release pre <bump>" >&2
+	echo "unexpected argument '$1' — usage: make release pre <bump>" >&2
 	exit 1
 fi
 
@@ -52,67 +52,24 @@ default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null
 default="${default:-main}"
 start="$(git rev-parse --abbrev-ref HEAD)"
 
+# The point of a prerelease is a resolvable version WITHOUT touching the default
+# branch, so the branch is pushed and nothing is merged. From the default branch
+# there is nothing to be a candidate for — release instead.
+if [ "$start" = "$default" ]; then
+	echo "on '$default' — a prerelease is cut from a branch; release from here instead" >&2
+	exit 1
+fi
+
 # Always end back on the branch we started on — never park on the default branch.
 trap 'git checkout --quiet "$start" 2>/dev/null || true' EXIT
 
-if [ -n "$prerelease" ]; then
-	# 1p. Prerelease: the point is a resolvable version WITHOUT touching the default
-	#     branch, so the branch is pushed and nothing is merged. From the default
-	#     branch there is nothing to be a candidate for — release instead.
-	if [ "$start" = "$default" ]; then
-		echo "on '$default' — a prerelease is cut from a branch; release from here instead" >&2
-		exit 1
-	fi
-	echo "pushing '$start'…"
-	git push --force-with-lease -u origin "$start"
-	target="HEAD"
-elif [ "$start" != "$default" ]; then
-	# 1. Feature branch: push it, open a PR if there isn't one, and merge it into
-	#    the default branch — without switching this checkout — so the tag comes
-	#    off the merged tip.
-	if ! command -v gh >/dev/null; then
-		echo "on '$start' — releasing needs it merged to '$default'. Install gh (https://cli.github.com) or merge manually, then re-run." >&2
-		exit 1
-	fi
-	# Rebase onto the latest default first, so the PR is based on current
-	# '$default' and merges cleanly. Abort cleanly on conflict rather than
-	# leaving a half-finished rebase behind.
-	git fetch origin "$default" >/dev/null 2>&1
-	echo "rebasing '$start' onto origin/$default…"
-	if ! git rebase "origin/$default"; then
-		git rebase --abort 2>/dev/null || true
-		echo "rebase onto origin/$default hit conflicts — resolve them, then re-run" >&2
-		exit 1
-	fi
-	echo "pushing '$start' and merging it into '$default'…"
-	git push --force-with-lease -u origin "$start"
-	if [ -z "$(gh pr list --head "$start" --state open --json number --jq '.[0].number' 2>/dev/null)" ]; then
-		echo "opening a pull request…"
-		gh pr create --base "$default" --head "$start" --fill
-	fi
-	echo "merging the pull request…"
-	gh pr merge "$start" --merge
-	git fetch origin "$default" >/dev/null 2>&1
-	target="origin/$default"
+echo "pushing '$start'…"
+git push --force-with-lease -u origin "$start"
+target="HEAD"
 
-	# Bring the branch we started on up onto the merged default, so it's a clean
-	# base for the next round of work (the merge kept our commits, so this
-	# fast-forwards rather than replaying).
-	echo "rebasing '$start' onto origin/$default…"
-	git checkout --quiet "$start"
-	git rebase "origin/$default"
-else
-	# Already on the default branch: require sync with origin so the tag points at
-	# pushed code (never release unpushed local commits).
-	if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$default" 2>/dev/null || git rev-parse HEAD)" ]; then
-		echo "'$default' has commits not on origin — push them first" >&2
-		exit 1
-	fi
-	target="HEAD"
-fi
-
-# 2. Bump from the latest RELEASE tag (ignore non-semver / prerelease tags), tag
-#    the merged tip, push the tag.
+# Bump from the latest RELEASE tag (ignore non-semver / prerelease tags), then
+# number past whatever candidates that version already has, so a second attempt
+# does not collide with the first.
 # `|| true`: on the first release there are no tags, so grep matches nothing and
 # exits 1; under `set -o pipefail` that aborts the assignment before the
 # `:-v0.0.0` fallback can apply. Swallow it so the fallback works.
@@ -125,25 +82,19 @@ case "$bump" in
 	patch) pat=$((pat + 1)) ;;
 esac
 next="v${maj}.${min}.${pat}"
+n=1
+while git rev-parse --quiet --verify "refs/tags/${next}-rc.${n}" >/dev/null; do
+	n=$((n + 1))
+done
+next="${next}-rc.${n}"
 
-if [ -n "$prerelease" ]; then
-	# The candidate names the version it is for, numbered past whatever candidates
-	# that version already has, so a second attempt does not collide with the first.
-	n=1
-	while git rev-parse --quiet --verify "refs/tags/${next}-rc.${n}" >/dev/null; do
-		n=$((n + 1))
-	done
-	next="${next}-rc.${n}"
-	echo "tagging ${next} on '${start}' — no merge, nothing on ${default}"
-else
-	echo "tagging ${latest} -> ${next} on ${default}"
-fi
+echo "tagging ${next} on '${start}' — no merge, nothing on ${default}"
 git tag -a "$next" "$target" -m "release $next"
 git push origin "$next"
 
-# 3. Wait for the tag-triggered release workflow, so a failed build or publish
-#    surfaces here instead of silently. Match the run by the tagged commit's SHA
-#    (reliable for tag pushes, where headBranch is unset).
+# Wait for the tag-triggered release workflow, so a failed build or publish
+# surfaces here instead of silently. Match the run by the tagged commit's SHA
+# (reliable for tag pushes, where headBranch is unset).
 if command -v gh >/dev/null; then
 	sha="$(git rev-parse "$target")"
 	echo "waiting for the release workflow…"

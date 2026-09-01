@@ -55,6 +55,15 @@ RANKE_GRAPH_REPO ?= https://github.com/rankegraph/ranke-graph
 RANKE_GRAPH_REF  ?= main
 PAPERS_DIR       := docs/papers
 
+# release-cycle.sh lives in ranke-graph and serves every consumer repo, so the git
+# mechanics of a release (branch resolution, the merge-then-tag dance, the wait for
+# CI) are written once, there. Cached under bin/ (gitignored), like brokkr below.
+# scripts/release.sh here is this repo's own dispatcher: it delegates a real
+# release to this, and keeps only the prerelease mode ("make release pre <bump>"),
+# which release-cycle.sh's fixed sequence has no shape for.
+RELEASE_CYCLER     := bin/release-cycle.sh
+RELEASE_CYCLER_URL ?= https://raw.githubusercontent.com/rankegraph/ranke-graph/$(RANKE_GRAPH_REF)/scripts/release-cycle.sh
+
 # brokkr, the linter `make lint` runs. The installer is run on every lint rather than
 # cached, so the gate tracks the tool: a brokkr release can turn a run red on an
 # untouched branch, which is the intent, as it is for the spec bundle. It compares
@@ -258,8 +267,14 @@ fmt-check: ## Fail if any Go file needs gofmt — the check half of fmt
 tidy: ## go mod tidy
 	go mod tidy
 
+# $(RELEASE_CYCLER) is a file target with no prerequisite, so once cached under bin/
+# it is never re-fetched on its own — a stale copy (missing a ranke-graph fix) would
+# sit there forever otherwise. upgrade is the one command that already means "bring
+# everything to latest", so refreshing it here is what makes that true.
 upgrade: ## Upgrade all deps and brokkr to latest, tidy, then check; asks before raising the go directive (GO_VERSION=keep|1.26.5)
 	@GO_VERSION=$(GO_VERSION) ./scripts/upgrade.sh
+	@rm -f $(RELEASE_CYCLER)
+	@$(MAKE) $(RELEASE_CYCLER)
 
 # Cut a release: verify → rebase onto the default branch → merge via PR → tag the
 # merged tip → push the tag → watch the release workflow, failing here if it fails.
@@ -274,19 +289,25 @@ check-clean-tree:
 	@[ -z "$$(git status --porcelain)" ] || { echo "working tree is dirty — commit or stash before releasing" >&2; exit 1; }
 
 # Same reasoning as check-clean-tree: a missing or misspelled bump word is a free,
-# instant check, and verify is not — scripts/release.sh's own case statement still
-# validates it too, but only after verify already ran.
+# instant check, and verify is not — release-cycle.sh (or scripts/release.sh, for a
+# prerelease) has its own case statement that validates it too, but only after
+# verify already ran.
 check-release-bump:
 	@[ -n "$(filter major minor patch breaking feature fix,$(MAKECMDGOALS))" ] || \
 		{ echo "usage: make release [pre] <major|breaking | minor|feature | patch|fix>" >&2; exit 1; }
 
-release: check-clean-tree check-release-bump verify ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
+release: check-clean-tree check-release-bump verify $(RELEASE_CYCLER) ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
 	@./scripts/release.sh $(filter pre major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
 # as a missing target.
 pre major minor patch breaking feature fix:
 	@:
+
+$(RELEASE_CYCLER): ## Cache release-cycle.sh from ranke-graph (bin/ is gitignored — infra, never vendored)
+	@mkdir -p $(dir $(RELEASE_CYCLER))
+	@curl -fsSL $(RELEASE_CYCLER_URL) -o $(RELEASE_CYCLER)
+	@chmod +x $(RELEASE_CYCLER)
 
 # Run every conformance scenario from a clean state.
 scenarios: ## Run every conformance scenario from a clean state
