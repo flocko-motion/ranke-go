@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rankegraph/ranke-go"
 	"github.com/stretchr/testify/require"
-
-	"github.com/flocko-motion/ranke-go"
 )
 
 // TestDatedFormsAreSortable: every corner in datedForms must project to a temporal
