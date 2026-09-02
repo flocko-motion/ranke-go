@@ -222,8 +222,9 @@ func main() {
 	// deployments would stack a mem cache on top, or swap S3 in below; this keeps
 	// it flat so the bundle is just a directory. ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(fs.NewBookmarks(helpers.UniverseDir))
-	seq := must(devseq.NewSequencer(ctx, u, hist, alice, s))
+	// The list seed is alice's own id: deterministic, so a rerun lands on the same
+	// id_seq slots and the bundle stays byte-identical.
+	seq := must(devseq.NewSequencer(ctx, u, ranke.Seed([]byte(alice.ID().String())), alice, s))
 	helpers.WriteBookmarkId(seq)
 	head := must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		emailApples, emailFamily, summary,

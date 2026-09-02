@@ -1,7 +1,7 @@
 // package: ranke / bookmark_store
 // type:    io
-// job:     the 𝒰_hist interface — bookmark records by id_seq(i, s) — and NewMemoryBookmarks, the
-// in-process reference implementation
+// job:     the 𝒰_hist interface — bookmark records by id_seq(i, s) — with the in-process
+// reference implementation and the refusal a backend holding no 𝒰_hist hands out
 // limits:  opaque bytes by key and nothing else; the record's shape and its rules are
 // bookmark.go's, the list over a store bookmarks.go's (-> bookmark, bookmarks)
 package ranke
@@ -23,12 +23,25 @@ type BookmarkStore interface {
 	Put(ctx context.Context, key Id, record []byte) error
 }
 
-// NewMemoryBookmarks returns an ephemeral in-process BookmarkStore, the reference
-// implementation: the stored bytes verbatim, keyed by id.
-func NewMemoryBookmarks() BookmarkStore {
-	return &memoryBookmarks{records: make(map[string][]byte)}
+// UnsupportedBookmarks is the store a Universe reporting Capabilities.Bookmarks
+// false hands out: every operation is ErrUnsupported, the shape tags already take
+// where a backend holds no side-data. One type serves every such backend, so a
+// refusal is never reimplemented per adapter.
+func UnsupportedBookmarks() BookmarkStore { return unsupportedBookmarks{} }
+
+type unsupportedBookmarks struct{}
+
+func (unsupportedBookmarks) Get(context.Context, Id) ([]byte, error) {
+	return nil, ErrUnsupported
 }
 
+func (unsupportedBookmarks) Put(context.Context, Id, []byte) error {
+	return ErrUnsupported
+}
+
+// memoryBookmarks is the in-process reference implementation, the stored bytes
+// verbatim keyed by id. It has no constructor on purpose: reachable only through
+// the memory Universe that owns one, a detached 𝒰_hist stays unrepresentable.
 type memoryBookmarks struct {
 	mu      sync.RWMutex
 	records map[string][]byte

@@ -3,6 +3,7 @@ package ranke
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -206,4 +207,76 @@ func TestQueryReport(t *testing.T) {
 		}
 	}
 	require.True(t, sawNative, "native engine events are recorded")
+}
+
+// TestQueryTimeOperandForm is `R-QTIMEOP`: a comparison testing a time takes a
+// `V-TIME` timestamp or an EDTF Level 1 value, and every other value is refused. One
+// spelling per instant is what keeps a bound off the neighbouring second — where a
+// normalising engine would answer, quietly, for the wrong one.
+func TestQueryTimeOperandForm(t *testing.T) {
+	timeQuery := func(field string, c Comparison) Query {
+		return Query{
+			Select: Select{Branch: BranchArchive},
+			Where:  &Where{Field: field, Test: &c},
+		}
+	}
+
+	// Accepted: the `V-TIME` form on a timestamp field, EDTF on dated.
+	for _, tc := range []struct {
+		field string
+		value string
+	}{
+		{"created_at", "2026-01-01T00:00:02.000000000Z"},
+		{FieldDeleteBy, "2030-01-01T00:00:00.000000000Z"},
+		{"dated", "2014"},
+		{"dated", "201X"},
+		{"dated", "2014/2016"},
+	} {
+		require.NoError(t, ValidateQuery(timeQuery(tc.field, Comparison{Ge: tc.value})),
+			"%s=%s is one of the two admitted forms", tc.field, tc.value)
+	}
+
+	// Refused: every other spelling of the same instant, and a value that is no time.
+	for _, value := range []string{
+		"2026-01-01T00:00:02Z",      // RFC 3339 without the fractional digits
+		"2026-01-01T00:00:02.000Z",  // milliseconds, not nanoseconds
+		"2026-01-01T01:00:02+01:00", // the same instant, not in UTC
+		"2026-01-01 00:00:02Z",      // a space for the T
+		"1767225602",                // epoch seconds
+		"yesterday",
+	} {
+		require.ErrorIs(t, ValidateQuery(timeQuery("created_at", Comparison{Ge: value})),
+			ErrQueryTimeOperand, "created_at=%s must be refused", value)
+	}
+
+	// A non-string operand carries no form at all.
+	require.ErrorIs(t, ValidateQuery(timeQuery("created_at", Comparison{Ge: 1767225602})),
+		ErrQueryTimeOperand)
+
+	// Every operator, and every member of an `in` set.
+	for _, c := range []Comparison{
+		{Eq: "2026-01-01T00:00:02Z"}, {Ne: "2026-01-01T00:00:02Z"},
+		{Lt: "2026-01-01T00:00:02Z"}, {Le: "2026-01-01T00:00:02Z"},
+		{Gt: "2026-01-01T00:00:02Z"}, {Ge: "2026-01-01T00:00:02Z"},
+		{In: []any{"2026-01-01T00:00:02.000000000Z", "2026-01-01T00:00:03Z"}},
+		{Glob: "2026-*"},
+	} {
+		require.ErrorIs(t, ValidateQuery(timeQuery("created_at", c)), ErrQueryTimeOperand)
+	}
+
+	// A field no time rule governs keeps taking whatever it took before.
+	require.NoError(t, ValidateQuery(timeQuery("encoding", Comparison{Glob: "text/*"})))
+	require.NoError(t, ValidateQuery(timeQuery("height", Comparison{Ge: 1})))
+}
+
+// TestFormatTimestampIsTheAdmittedForm: the renderer callers reach for produces what
+// `R-QTIMEOP` admits, so a Go caller holding an instant has a sanctioned spelling.
+func TestFormatTimestampIsTheAdmittedForm(t *testing.T) {
+	s := FormatTimestamp(time.Date(2026, 1, 1, 1, 0, 2, 0, time.FixedZone("CET", 3600)))
+	require.Equal(t, "2026-01-01T00:00:02.000000000Z", s, "rendered in UTC at fixed width")
+
+	require.NoError(t, ValidateQuery(Query{
+		Select: Select{Branch: BranchArchive},
+		Where:  &Where{Field: "created_at", Test: &Comparison{Ge: s}},
+	}))
 }

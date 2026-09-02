@@ -46,7 +46,7 @@ func newSequencer(t *testing.T, ctx context.Context) (*devseq.Sequencer, ranke.C
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clk)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.Seed([]byte(op.ID().String())), op, clk)
 	require.NoError(t, err)
 	return seq, op, clk
 }
@@ -513,4 +513,27 @@ func TestAddWireAbortsOnViolation(t *testing.T) {
 
 	_, err = c.CompleteAndVerify(ctx)
 	require.Error(t, err, "the aborted fill staged nothing")
+}
+
+// noBookmarks presents a Universe holding no 𝒰_hist — neo4j's shape, a projection
+// you drop and reindex.
+type noBookmarks struct{ ranke.Universe }
+
+func (n noBookmarks) Capabilities() ranke.Capabilities {
+	c := n.Universe.Capabilities()
+	c.Bookmarks = false
+	return c
+}
+
+// TestNewSequencerRefusesAUniverseHoldingNoBookmarks: the head has nowhere to be
+// recorded, so the archive it advanced would be unreachable. Refused at construction
+// rather than at the first append, which is already one merge too late.
+func TestNewSequencerRefusesAUniverseHoldingNoBookmarks(t *testing.T) {
+	ctx := context.Background()
+	clk := &clock{t: time.Unix(1000, 0).UTC()}
+	op := operator(t, ctx, clk.Tick())
+
+	_, err := devseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()},
+		ranke.Seed([]byte("no-hist")), op, clk)
+	require.ErrorIs(t, err, ranke.ErrUnsupported)
 }

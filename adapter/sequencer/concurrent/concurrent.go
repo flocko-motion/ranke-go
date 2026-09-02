@@ -22,6 +22,7 @@ import (
 var (
 	errNilArg              = errors.New("concurrent.NewSequencer: nil argument")
 	errNoSigningKey        = errors.New("concurrent.NewSequencer: self contributor carries no signing key")
+	errNoBookmarks         = errors.New("concurrent.NewSequencer: universe holds no 𝒰_hist to bookmark the head in")
 	errNewSequencer        = errors.New("concurrent.NewSequencer")
 	errSequencer           = errors.New("concurrent.Sequencer")
 	errForeignContribution = errors.New("concurrent.Sequencer.Merge: contribution was not opened by this Sequencer")
@@ -82,17 +83,26 @@ func (r receipt) Head() ranke.Id { return r.head }
 
 // NewSequencer bootstraps a fresh archive over u: it stores self and mints the
 // empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive),
-// bookmarked at index 0 in hist under a freshly minted seed. self must carry a
-// signing key, which every branch table and every bookmark it writes is signed with.
-func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.BookmarkStore, self ranke.Contributor, clock Clock) (*Sequencer, error) {
-	if u == nil || hist == nil || self == nil || clock == nil {
+// bookmarked at index 0 of the list loc names. self must carry a signing key, which
+// every branch table and every bookmark it writes is signed with.
+func NewSequencer(ctx context.Context, u ranke.Universe, loc ranke.BookmarkLocator, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+	if u == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
 	if self.SigningKey() == nil {
 		return nil, errNoSigningKey
 	}
+	// Refused here rather than at the first append: a Sequencer that cannot record
+	// its head would advance an archive nobody can reach again.
+	if !u.Capabilities().Bookmarks {
+		return nil, errors.Join(errNoBookmarks, ranke.ErrUnsupported)
+	}
+	marks, err := loc.Open(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open bookmark list: %w", errNewSequencer, err)
+	}
 	s := &Sequencer{
-		u: u, marks: ranke.NewBookmarks(hist, u, nil), self: self, clock: clock,
+		u: u, marks: marks, self: self, clock: clock,
 		heads:     map[string]ranke.Id{},
 		committed: map[string]struct{}{},
 	}

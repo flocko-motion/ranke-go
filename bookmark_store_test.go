@@ -7,13 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The 𝒰_hist reference implementation: what it stores it hands back verbatim, and it
-// holds its own copy, since a bookmark's slot is not derived from its bytes and so
-// nothing else would catch a caller mutating the buffer it wrote.
+// The 𝒰_hist reference implementation, reached the only way there is — from the
+// Universe owning it. What it stores it hands back verbatim, and it holds its own
+// copy, since a bookmark's slot is not derived from its bytes and so nothing else
+// would catch a caller mutating the buffer it wrote.
 
 func TestMemoryBookmarksRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	hist := NewMemoryBookmarks()
+	hist := NewMemoryUniverse().Bookmarks()
 	slot, err := IdSeq(3, []byte("store-seed"))
 	require.NoError(t, err)
 
@@ -35,7 +36,7 @@ func TestMemoryBookmarksRoundTrip(t *testing.T) {
 
 func TestMemoryBookmarksCopiesWhatItHolds(t *testing.T) {
 	ctx := context.Background()
-	hist := NewMemoryBookmarks()
+	hist := NewMemoryUniverse().Bookmarks()
 	slot, err := IdSeq(0, []byte("copy-seed"))
 	require.NoError(t, err)
 
@@ -55,7 +56,7 @@ func TestMemoryBookmarksCopiesWhatItHolds(t *testing.T) {
 
 func TestMemoryBookmarksRefusesANilSlot(t *testing.T) {
 	ctx := context.Background()
-	hist := NewMemoryBookmarks()
+	hist := NewMemoryUniverse().Bookmarks()
 
 	_, err := hist.Get(ctx, nil)
 	require.ErrorIs(t, err, errBookmarkNilSlot)

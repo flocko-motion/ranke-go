@@ -64,15 +64,11 @@ func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: universe in %s: %w", errOpen, dir, err)
 	}
-	hist, err := fs.NewBookmarks(universe)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: bookmarks in %s: %w", errOpen, dir, err)
-	}
 	id, err := readBookmarkId(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", errOpen, err)
 	}
-	marks, err := ranke.OpenBookmarks(ctx, hist, u, id)
+	marks, err := ranke.OpenBookmarks(ctx, u, id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: open bookmark list in %s: %w", errOpen, dir, err)
 	}

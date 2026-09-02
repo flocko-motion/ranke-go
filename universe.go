@@ -50,6 +50,9 @@ type Capabilities struct {
 	ContentCap uint64
 	// Tags: holds mutable per-claim tags (branch membership) and implements Tagger.
 	Tags bool
+	// Bookmarks: holds 𝒰_hist, so this backend can carry an archive's locator. A
+	// rebuildable projection reports false — the head would be lost with the reindex.
+	Bookmarks bool
 	// Tier is the write-durability role this layer is configured in; the stack
 	// composes its write path from each layer's reported tier.
 	Tier StorageTier
@@ -183,6 +186,14 @@ type Universe interface {
 	// (claims + content); a stack calls it on its eager layer with the layers below
 	// as src. A nil src leaves the receiver synced.
 	Sync(ctx context.Context, src Universe, id Id) <-chan SyncResult
+
+	// Bookmarks returns this backend's 𝒰_hist, the second address scheme keyed on
+	// id_seq(i, s) rather than on a record's bytes (foundation paper §Bookmarks).
+	// The Universe owning it is what lets the bookmark list inherit the layering,
+	// replication and backup of the store beneath it (RankeDB paper §Sequencer);
+	// a separate port cannot, which is why there is no way to obtain one.
+	// Capabilities.Bookmarks false returns a store answering ErrUnsupported.
+	Bookmarks() BookmarkStore
 
 	// Capabilities reports optional backend abilities; composites derive theirs.
 	Capabilities() Capabilities

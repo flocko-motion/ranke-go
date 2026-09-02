@@ -116,10 +116,10 @@ func checkLists(ctx context.Context, root string, m *Manifest, u ranke.Universe)
 	return out, nil
 }
 
-// OpenList assembles every case naming list into a 𝒰_hist and opens the list at the
+// OpenList loads every case naming list into u's 𝒰_hist and opens the list at the
 // entry marked Open — the way a reader holding one bookmark id reaches it (§Backup).
 func OpenList(ctx context.Context, root string, m *Manifest, list string, u ranke.Universe) (*ranke.Bookmarks, error) {
-	store := ranke.NewMemoryBookmarks()
+	store := u.Bookmarks()
 	var open ranke.Id
 	for _, c := range m.Bookmarks {
 		if c.List != list {
@@ -139,7 +139,7 @@ func OpenList(ctx context.Context, root string, m *Manifest, list string, u rank
 	if open == nil {
 		return nil, fmt.Errorf("%w: bookmark list %q names no entry to open it from", errCheck, list)
 	}
-	return ranke.OpenBookmarks(ctx, store, u, open)
+	return ranke.OpenBookmarks(ctx, u, open)
 }
 
 // acceptsBookmark reports whether the library takes one record as the bookmark its

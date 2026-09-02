@@ -106,6 +106,7 @@ var (
 	errDecodeQuery           = errors.New("ranke.DecodeQuery")
 	errEncodeQuery           = errors.New("ranke.EncodeQuery")
 	ErrQueryWhereForm        = errors.New("ranke.Query: a where node is exactly one of and | or | not | {field, test}")
+	ErrQueryTimeOperand      = errors.New("ranke.Query: a comparison on a time field takes a `V-TIME` timestamp or an EDTF Level 1 value (`R-QTIMEOP`)")
 	ErrQueryComparisonForm   = errors.New("ranke.Query: a comparison applies exactly one operator (eq | ne | lt | le | gt | ge | in | glob)")
 	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")
@@ -183,12 +184,13 @@ var (
 	// contributor edge alone, so height 1 is the only value that re-derives.
 	ErrArchiveFirstTableHeight = errors.New("ranke.verify: an archive's first branch-table claim must have height 1 (`V-ARCHIVEHEIGHT`)")
 	// --- Bookmarks (𝒰_hist, foundation paper §Bookmarks) ---
-	errBookmarkNoHead   = errors.New("ranke.Bookmarks.Append: nil head id")
-	errBookmarkNoSigner = errors.New("ranke: no contributor with a signing key to sign a bookmark under")
-	errBookmarkNoSeed   = errors.New("ranke.Bookmarks.Append: no seed — index 0 was never appended or given")
-	errBookmarkNilSlot  = errors.New("ranke: nil id_seq(i,s) slot")
-	errBookmarkEncode   = errors.New("ranke.SignBookmark: encode bookmark")
-	errBookmarkSeedGen  = errors.New("ranke.MintSeed: generate seed")
+	errBookmarkNoHead     = errors.New("ranke.Bookmarks.Append: nil head id")
+	errBookmarkNoSigner   = errors.New("ranke: no contributor with a signing key to sign a bookmark under")
+	errBookmarkNoSeed     = errors.New("ranke.NewBookmarks: a list is keyed on a non-empty seed (`V-IDSEQ`)")
+	errBookmarkNilSlot    = errors.New("ranke: nil id_seq(i,s) slot")
+	errBookmarkNoUniverse = errors.New("ranke: a bookmark list needs the Universe holding its 𝒰_hist")
+	errBookmarkEncode     = errors.New("ranke.SignBookmark: encode bookmark")
+	errBookmarkSeedGen    = errors.New("ranke.MintSeed: generate seed")
 	// The shape and authorship a stored record must have to be a bookmark at all.
 	errBookmarkForm    = errors.New("ranke: a bookmark's payload is the three-element S([i, s, k]) (`V-BMENV`)")
 	errBookmarkHeaders = errors.New("ranke: a bookmark's protected header carries alg and kid alone, its unprotected header nothing (`V-BMENV`)")

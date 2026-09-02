@@ -326,7 +326,7 @@ func (p *partition) SetClaimsTags(ctx context.Context, clearTags []string, tags 
 }
 
 func (p *partition) Capabilities() ranke.Capabilities {
-	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, ReverseWalk: true, RawClaims: true, ExternalContent: true, Tags: true}
+	c := ranke.Capabilities{Overwrite: true, Delete: true, Enumerate: true, Persistent: true, ReverseWalk: true, RawClaims: true, ExternalContent: true, Tags: true, Bookmarks: true}
 	for i, s := range p.shards {
 		sc := s.Capabilities()
 		c.Overwrite = c.Overwrite && sc.Overwrite
@@ -337,6 +337,9 @@ func (p *partition) Capabilities() ranke.Capabilities {
 		c.RawClaims = c.RawClaims && sc.RawClaims
 		c.ExternalContent = c.ExternalContent && sc.ExternalContent
 		c.Tags = c.Tags && sc.Tags
+		// ANDed: the list is replicated to every shard, so one shard unable to hold
+		// it leaves the partition unable to.
+		c.Bookmarks = c.Bookmarks && sc.Bookmarks
 		if i == 0 {
 			// Shards share one tier; adopt the first shard's.
 			c.Tier = sc.Tier

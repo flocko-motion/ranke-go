@@ -175,8 +175,9 @@ func main() {
 	// verifies, auto-consolidates the open heads, mints the branch table and
 	// bookmarks it, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(fs.NewBookmarks(helpers.UniverseDir))
-	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	// The list seed is the operator's own id: deterministic, so a rerun lands on the
+	// same id_seq slots and the bundle stays byte-identical.
+	seq := must(devseq.NewSequencer(ctx, u, ranke.Seed([]byte(operator.ID().String())), operator, s))
 	helpers.WriteBookmarkId(seq)
 	must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		agentAClaim, agentBClaim, email,

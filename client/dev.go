@@ -30,7 +30,7 @@ type Clock struct {
 }
 
 // AdvanceClock moves the dev sequencer's clock to at least at, so a client whose
-// story has its own schedule can make the archive's recorded history follow it.
+// story has its own schedule can make the archive's recorded times follow it.
 //
 // The clock only moves forward: an instant already passed is accepted and changes
 // nothing. A stack without the dev routes answers 501, which comes back as

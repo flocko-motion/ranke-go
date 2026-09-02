@@ -63,7 +63,7 @@ func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, erro
 	if err != nil {
 		return nil, fmt.Errorf("%w: operator: %w", errGenerate, err)
 	}
-	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.Seed([]byte(op.ID().String())), op, clock)
 	if err != nil {
 		return nil, fmt.Errorf("%w: sequencer: %w", errGenerate, err)
 	}

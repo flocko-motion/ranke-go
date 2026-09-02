@@ -19,12 +19,14 @@ const gapProbe = 4
 
 // Bookmarks is one bookmark list: entries under id_seq(i, seed) in hist, each recording
 // an archive head in 𝒰.
+// The first three fields are written at construction and never again, so Seed() and
+// BookmarkId() need no lock and cannot answer nil. The rest is the bounds cache.
 type Bookmarks struct {
 	hist     BookmarkStore
 	u        Universe
-	seed     []byte    // nil until the first Append mints one, or one is given (NewBookmarks)
-	id       Id        // the entry it was opened at, or the first it wrote
-	entry    int       // where the searches start, present once the list is non-empty
+	seed     []byte    // the key material id_seq(i, s) derives every slot from
+	id       Id        // id_seq(entry, seed) — the one value that reopens this list
+	entry    int       // where the searches start: 0, or the index opened at
 	lo, hi   int       // the settled range; hi < 0 for an empty list
 	top      *Bookmark // the entry this instance wrote last
 	anchored bool      // opened at a bookmark, its one way to locate the list
@@ -32,19 +34,34 @@ type Bookmarks struct {
 	loaded   bool      // the initial load, and so the gap probe, has happened
 }
 
-// NewBookmarks is the Sequencers' entry point, for minting a list or resuming its own.
-// A nil seed lets the first Append mint one.
-func NewBookmarks(hist BookmarkStore, u Universe, seed []byte) *Bookmarks {
-	return &Bookmarks{hist: hist, u: u, seed: seed, hi: -1}
+// NewBookmarks is a cursor over the list keyed on seed, which starts at index 0
+// (-> Seed). Nothing is minted here: a seed that arrives already made is what lets
+// the field be final, where a constructor minting one would have to report failure.
+func NewBookmarks(u Universe, seed []byte) (*Bookmarks, error) {
+	if u == nil {
+		return nil, errBookmarkNoUniverse
+	}
+	if len(seed) == 0 {
+		return nil, errBookmarkNoSeed
+	}
+	id, err := IdSeq(0, seed)
+	if err != nil {
+		return nil, err
+	}
+	return &Bookmarks{hist: u.Bookmarks(), u: u, seed: bytes.Clone(seed), id: id, hi: -1}, nil
 }
 
 // OpenBookmarks recovers a list from the id of ANY of its entries (foundation paper
 // §Backup): the verified record there yields the seed every entry carries, and its
 // index seeds the search. No index is privileged — 0 may have been purged.
-func OpenBookmarks(ctx context.Context, hist BookmarkStore, u Universe, id Id) (*Bookmarks, error) {
+func OpenBookmarks(ctx context.Context, u Universe, id Id) (*Bookmarks, error) {
+	if u == nil {
+		return nil, errBookmarkNoUniverse
+	}
 	if id == nil {
 		return nil, errBookmarkNilSlot
 	}
+	hist := u.Bookmarks()
 	record, err := hist.Get(ctx, id)
 	if err != nil {
 		return nil, WrapDetail(errBookmarkOpen, id.String(), err)
@@ -60,12 +77,13 @@ func OpenBookmarks(ctx context.Context, hist BookmarkStore, u Universe, id Id) (
 	return b, nil
 }
 
-// Seed returns s, the value id_seq(i, s) keys this list on — a copy, the seed being
-// fixed when the list is opened or minted.
+// Seed returns s, the value id_seq(i, s) keys this list on — a copy, the seed itself
+// being fixed before this object existed.
 func (b *Bookmarks) Seed() []byte { return bytes.Clone(b.seed) }
 
 // BookmarkId returns the id of one entry of this list, which is the single value a
-// bundle keeps to reopen the archive later (foundation paper §Backup).
+// bundle keeps to reopen the archive later (foundation paper §Backup). Fixed at
+// construction, so it answers the same value from any goroutine at any time.
 func (b *Bookmarks) BookmarkId() Id { return b.id }
 
 // Append records head as the next bookmark, signed under self. The index is one past
@@ -77,31 +95,18 @@ func (b *Bookmarks) Append(ctx context.Context, self Contributor, head Id) (Book
 		return Bookmark{}, err
 	}
 	index := hi + 1
-	seed := b.seed
-	if index == 0 && len(seed) == 0 {
-		if seed, err = mintSeed(); err != nil {
-			return Bookmark{}, err
-		}
-	}
-	if len(seed) == 0 {
-		return Bookmark{}, errBookmarkNoSeed
-	}
-	record, err := SignBookmark(self, uint64(index), seed, head)
+	record, err := SignBookmark(self, uint64(index), b.seed, head)
 	if err != nil {
 		return Bookmark{}, err
 	}
-	slot, err := IdSeq(uint64(index), seed)
+	slot, err := IdSeq(uint64(index), b.seed)
 	if err != nil {
 		return Bookmark{}, err
 	}
 	if err := b.hist.Put(ctx, slot, record); err != nil {
 		return Bookmark{}, err
 	}
-	b.seed = seed
-	if b.id == nil {
-		b.id, b.entry = slot, index
-	}
-	written := NewBookmark(uint64(index), seed, head, self.ID())
+	written := NewBookmark(uint64(index), b.seed, head, self.ID())
 	b.lo, b.hi = min(b.lo, index), index
 	b.top, b.wrote, b.loaded = &written, true, true
 	return written, nil
@@ -187,9 +192,6 @@ func (b *Bookmarks) Verify(ctx context.Context) error {
 func (b *Bookmarks) bounds(ctx context.Context) (lo, hi int, err error) {
 	if b.wrote {
 		return b.lo, b.hi, nil
-	}
-	if len(b.seed) == 0 {
-		return 0, -1, nil // no seed was ever minted, so there is no list to search
 	}
 	_, ok, err := b.fetchAt(ctx, b.entry)
 	if err != nil {

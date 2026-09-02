@@ -55,7 +55,8 @@ type Streamer interface {
 //
 //deadcode:keep
 func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
-	u := &blobUniverse{store: store, concurrency: 1, tier: ranke.StorageTierAuthoritative, heights: ranke.NewHeightCache()}
+	u := &blobUniverse{store: store, concurrency: 1, tier: ranke.StorageTierAuthoritative, heights: ranke.NewHeightCache(),
+		marks: newBlobBookmarks(store)}
 	for _, o := range opts {
 		o(u)
 	}
@@ -95,6 +96,8 @@ type blobUniverse struct {
 	sem chan struct{}
 	// heights memoises id→height, warmed by GetClaims/PutClaims traffic.
 	heights *ranke.HeightCache
+	// marks is 𝒰_hist over the same store, its keys held apart by a prefix.
+	marks ranke.BookmarkStore
 }
 
 // forEach runs fn for each index in [0,n), up to u.sem at a time. fn writes to
@@ -322,6 +325,14 @@ func (u *blobUniverse) CopyContents(ctx context.Context, src ranke.Universe, ref
 	return ranke.DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
+// Bookmarks returns 𝒰_hist over the same BlobStore, which is what puts an
+// archive's claims, its content and its locator in one directory or bucket
+// (RankeDB paper §Sequencer). An append writes a fresh id_seq(i, s), so the list
+// asks the store for no overwrite.
+//
+//deadcode:keep
+func (u *blobUniverse) Bookmarks() ranke.BookmarkStore { return u.marks }
+
 // Capabilities surfaces the backing store's declared capabilities.
 //
 //deadcode:keep
@@ -329,6 +340,7 @@ func (u *blobUniverse) Capabilities() ranke.Capabilities {
 	c := u.store.Capabilities()
 	c.RawClaims = true       // a blob store keeps each claim's verbatim canonical bytes
 	c.ExternalContent = true // and holds externalized content of any size (no cap)
+	c.Bookmarks = true       // and 𝒰_hist beside them under R-BMPREFIX
 	c.Tier = u.tier          // the write role the deployment configured (default authoritative)
 	return c
 }

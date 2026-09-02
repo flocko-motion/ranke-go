@@ -3,6 +3,7 @@ package ranke
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,8 +21,15 @@ func bmList(t *testing.T) (context.Context, Universe, BookmarkStore, Contributor
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
-	return ctx, u, hist, self, NewBookmarks(hist, u, nil)
+	return ctx, u, u.Bookmarks(), self, bmOver(t, u, []byte("bm-list-seed"))
+}
+
+// bmOver is NewBookmarks where the seed is already settled, which every test's is.
+func bmOver(t *testing.T, u Universe, seed []byte) *Bookmarks {
+	t.Helper()
+	b, err := NewBookmarks(u, seed)
+	require.NoError(t, err)
+	return b
 }
 
 // appendN appends n bookmarks under self, each recording a branch table of its own,
@@ -59,7 +67,7 @@ func plant(t *testing.T, ctx context.Context, u Universe, hist BookmarkStore, se
 // GetAtIndex and Len read back — on the writer's own settled instance and on an
 // independent reader that has to search for it.
 func TestBookmarksAppendAndLatest(t *testing.T) {
-	ctx, u, hist, self, w := bmList(t)
+	ctx, u, _, self, w := bmList(t)
 	ids := appendN(t, ctx, u, w, self, time.Now(), 3)
 
 	n, err := w.Len(ctx)
@@ -71,7 +79,7 @@ func TestBookmarksAppendAndLatest(t *testing.T) {
 	require.True(t, latest.Head().Equal(ids[2]))
 	require.Equal(t, uint64(2), latest.Index())
 
-	r, err := OpenBookmarks(ctx, hist, u, w.BookmarkId())
+	r, err := OpenBookmarks(ctx, u, w.BookmarkId())
 	require.NoError(t, err)
 	rn, err := r.Len(ctx)
 	require.NoError(t, err)
@@ -91,10 +99,10 @@ func TestBookmarksAppendAndLatest(t *testing.T) {
 func TestBookmarksLatestSearchBoundaries(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 17} {
 		t.Run("n="+strconv.Itoa(n), func(t *testing.T) {
-			ctx, u, hist, self, w := bmList(t)
+			ctx, u, _, self, w := bmList(t)
 			if n == 0 {
-				// Nothing was appended, so no seed was minted — a writer with none must
-				// report an empty list without a search to run at all.
+				// The seed is settled but index 0 was never written, so the list is
+				// empty and the search has nothing to land on.
 				latest, err := w.Latest(ctx)
 				require.NoError(t, err)
 				require.Nil(t, latest.Head())
@@ -107,7 +115,7 @@ func TestBookmarksLatestSearchBoundaries(t *testing.T) {
 
 			top, err := IdSeq(uint64(n-1), w.Seed())
 			require.NoError(t, err)
-			r, err := OpenBookmarks(ctx, hist, u, top)
+			r, err := OpenBookmarks(ctx, u, top)
 			require.NoError(t, err)
 			latest, err := r.Latest(ctx)
 			require.NoError(t, err)
@@ -129,17 +137,17 @@ func TestBookmarksLatestSearchBoundaries(t *testing.T) {
 // already-populated list — no settled range of its own — must still compute the right
 // next index before its first Append, not only once it has written something itself.
 func TestBookmarksAppendResumesFromASearchedIndex(t *testing.T) {
-	ctx, u, hist, self, w := bmList(t)
+	ctx, u, _, self, w := bmList(t)
 	appendN(t, ctx, u, w, self, time.Now(), 3) // indices 0, 1, 2
 
-	resumed := NewBookmarks(hist, u, w.Seed()) // cold: never appended, nothing settled
+	resumed := bmOver(t, u, w.Seed()) // cold: never appended, nothing settled
 	head := bmHead(t, self, time.Now().Add(100*time.Second))
 	putClaims(t, u, head)
 	bm, err := resumed.Append(ctx, self, head.ID())
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), bm.Index(), "a cold instance must search before computing the next slot")
 
-	final, err := NewBookmarks(hist, u, w.Seed()).Len(ctx)
+	final, err := bmOver(t, u, w.Seed()).Len(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 4, final)
 }
@@ -153,7 +161,7 @@ func TestOpenBookmarksFindsTheLowerBound(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("pruned-list-seed")
 
 	var heads []Id
@@ -164,7 +172,7 @@ func TestOpenBookmarksFindsTheLowerBound(t *testing.T) {
 	// Opened at index 4, in the middle: neither bound is the entry it started from.
 	open, err := IdSeq(4, seed)
 	require.NoError(t, err)
-	r, err := OpenBookmarks(ctx, hist, u, open)
+	r, err := OpenBookmarks(ctx, u, open)
 	require.NoError(t, err)
 
 	n, err := r.Len(ctx)
@@ -182,17 +190,17 @@ func TestOpenBookmarksFindsTheLowerBound(t *testing.T) {
 }
 
 // TestOpenBookmarksRecoversFromAnyEntry is the round trip §Backup promises: one
-// bookmark id alone, with no seed given out of band, recovers the list a fresh Append
-// minted — and the entry it is opened at holds no privilege, index 0 included.
+// bookmark id alone, with no seed given out of band, recovers the list a writer
+// built — and the entry it is opened at holds no privilege, index 0 included.
 func TestOpenBookmarksRecoversFromAnyEntry(t *testing.T) {
-	ctx, u, hist, self, w := bmList(t)
+	ctx, u, _, self, w := bmList(t)
 	ids := appendN(t, ctx, u, w, self, time.Now(), 3)
-	require.NotNil(t, w.BookmarkId(), "Append at index 0 mints the id worth persisting")
+	require.NotNil(t, w.BookmarkId(), "the id worth persisting is settled before any append")
 
 	for i := range ids {
 		slot, err := IdSeq(uint64(i), w.Seed())
 		require.NoError(t, err)
-		r, err := OpenBookmarks(ctx, hist, u, slot)
+		r, err := OpenBookmarks(ctx, u, slot)
 		require.NoError(t, err)
 		require.Equal(t, w.Seed(), r.Seed(), "the seed is read back out of the bookmark itself")
 
@@ -208,18 +216,18 @@ func TestOpenBookmarksRecoversFromAnyEntry(t *testing.T) {
 func TestOpenBookmarksRejectsWhatIsNoBookmark(t *testing.T) {
 	ctx, u, hist, self, _ := bmList(t)
 
-	_, err := OpenBookmarks(ctx, hist, u, nil)
+	_, err := OpenBookmarks(ctx, u, nil)
 	require.ErrorIs(t, err, errBookmarkNilSlot)
 
 	// An empty slot: nothing there says which list it would open.
 	empty, err := IdSeq(0, []byte("never-written-seed"))
 	require.NoError(t, err)
-	_, err = OpenBookmarks(ctx, hist, u, empty)
+	_, err = OpenBookmarks(ctx, u, empty)
 	require.ErrorIs(t, err, errBookmarkOpen)
 
 	// Bytes that are not a signed record at all.
 	require.NoError(t, hist.Put(ctx, empty, []byte("not cbor at all")))
-	_, err = OpenBookmarks(ctx, hist, u, empty)
+	_, err = OpenBookmarks(ctx, u, empty)
 	require.ErrorIs(t, err, errBookmarkForm)
 
 	// A well-formed bookmark under an id its own (i, s) does not key: the seed a
@@ -228,10 +236,10 @@ func TestOpenBookmarksRejectsWhatIsNoBookmark(t *testing.T) {
 	putClaims(t, u, head)
 	raw, err := SignBookmark(self, 0, []byte("real-seed"), head.ID())
 	require.NoError(t, err)
-	wrong, err := IdSeq(0, []byte("attacker-chosen-seed"))
+	wrong, err := IdSeq(0, []byte("another-lists-seed"))
 	require.NoError(t, err)
 	require.NoError(t, hist.Put(ctx, wrong, raw))
-	_, err = OpenBookmarks(ctx, hist, u, wrong)
+	_, err = OpenBookmarks(ctx, u, wrong)
 	require.ErrorIs(t, err, errBookmarkSlot,
 		"a bookmark whose own (i, s) does not reproduce the slot it sits under must be refused")
 }
@@ -245,14 +253,14 @@ func TestOpenBookmarksSaysSoWhenItsAnchorGoes(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("anchor-goes-seed")
 	plant(t, ctx, u, hist, self, seed, 0)
 	head := plant(t, ctx, u, hist, self, seed, 1)
 
 	slot1, err := IdSeq(1, seed)
 	require.NoError(t, err)
-	r, err := OpenBookmarks(ctx, hist, u, slot1)
+	r, err := OpenBookmarks(ctx, u, slot1)
 	require.NoError(t, err)
 	latest, err := r.Latest(ctx)
 	require.NoError(t, err)
@@ -284,7 +292,7 @@ func TestBookmarksSlotMismatchReadsAsAbsence(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, hist.Put(ctx, slot1, raw))
 
-	r := NewBookmarks(hist, u, w.Seed())
+	r := bmOver(t, u, w.Seed())
 	_, err = r.GetAtIndex(ctx, 1)
 	require.ErrorIs(t, err, errBookmarkIndexRange, "a bookmark declaring index 5 must not answer for slot 1")
 
@@ -320,7 +328,7 @@ func TestBookmarksReportsADamagedSlot(t *testing.T) {
 			u := NewMemoryUniverse()
 			self := contributor(t)
 			putClaims(t, u, self)
-			hist := NewMemoryBookmarks()
+			hist := u.Bookmarks()
 			seed := []byte("damaged-seed")
 			legitimate := plant(t, ctx, u, hist, self, seed, 0)
 
@@ -328,13 +336,25 @@ func TestBookmarksReportsADamagedSlot(t *testing.T) {
 			require.NoError(t, err)
 			tc.plant(t, ctx, u, hist, self, slot1)
 
-			r := NewBookmarks(hist, u, seed)
+			r := bmOver(t, u, seed)
 			_, err = r.Latest(ctx)
 			require.ErrorIs(t, err, errBookmarkSlotRead,
 				"a damaged slot must be reported, not read as the end of the list")
 
+			// Asked for the slot directly, the damage is what is reported. Collapsing it
+			// into a range error would name the wrong problem: the entry IS there.
+			_, err = bmOver(t, u, seed).GetAtIndex(ctx, 1)
+			require.ErrorIs(t, err, errBookmarkSlotRead)
+			require.NotErrorIs(t, err, errBookmarkIndexRange,
+				"the record is present and unreadable, not outside the list's range")
+
+			// And the whole-list walk reports damage rather than the gap it would leave.
+			_, err = bmOver(t, u, seed).GetBulk(ctx, 0, 2)
+			require.ErrorIs(t, err, errBookmarkSlotRead)
+			require.NotErrorIs(t, err, errBookmarkIndexRange)
+
 			// The legitimate entry below the damage is still readable on its own.
-			fresh := NewBookmarks(hist, u, seed)
+			fresh := bmOver(t, u, seed)
 			bm, err := fresh.GetAtIndex(ctx, 0)
 			require.NoError(t, err)
 			require.True(t, bm.Head().Equal(legitimate))
@@ -351,7 +371,7 @@ func TestOpenBookmarksRefusesAGapAboveTheTop(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("gap-above-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)
@@ -359,7 +379,7 @@ func TestOpenBookmarksRefusesAGapAboveTheTop(t *testing.T) {
 
 	open, err := IdSeq(0, seed)
 	require.NoError(t, err)
-	_, err = OpenBookmarks(ctx, hist, u, open)
+	_, err = OpenBookmarks(ctx, u, open)
 	require.ErrorIs(t, err, errBookmarkGap)
 }
 
@@ -372,7 +392,7 @@ func TestOpenBookmarksGapProbeIsBounded(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("gap-out-of-reach-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)
@@ -380,7 +400,7 @@ func TestOpenBookmarksGapProbeIsBounded(t *testing.T) {
 
 	open, err := IdSeq(0, seed)
 	require.NoError(t, err)
-	r, err := OpenBookmarks(ctx, hist, u, open)
+	r, err := OpenBookmarks(ctx, u, open)
 	require.NoError(t, err, "a gap this far above the top is out of a bounded probe's reach")
 	n, err := r.Len(ctx)
 	require.NoError(t, err)
@@ -396,7 +416,7 @@ func TestBookmarksVerifyFindsAnInnerGap(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("inner-gap-seed")
 
 	// The doubling probes 1, 2, 4, 8 and then bisects, so index 3 is never read and
@@ -407,7 +427,7 @@ func TestBookmarksVerifyFindsAnInnerGap(t *testing.T) {
 
 	open, err := IdSeq(0, seed)
 	require.NoError(t, err)
-	r, err := OpenBookmarks(ctx, hist, u, open)
+	r, err := OpenBookmarks(ctx, u, open)
 	require.NoError(t, err)
 	latest, err := r.Latest(ctx)
 	require.NoError(t, err)
@@ -423,7 +443,7 @@ func TestBookmarksVerifyChecksEveryHead(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("bad-head-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)
@@ -442,7 +462,7 @@ func TestBookmarksVerifyChecksEveryHead(t *testing.T) {
 
 	open, err := IdSeq(0, seed)
 	require.NoError(t, err)
-	r, err := OpenBookmarks(ctx, hist, u, open)
+	r, err := OpenBookmarks(ctx, u, open)
 	require.NoError(t, err)
 	require.ErrorIs(t, r.Verify(ctx), errBookmarkReference)
 }
@@ -453,7 +473,7 @@ func TestBookmarksGetBulkRange(t *testing.T) {
 	ctx, u, hist, self, w := bmList(t)
 	ids := appendN(t, ctx, u, w, self, time.Now(), 4)
 
-	r, err := OpenBookmarks(ctx, hist, u, w.BookmarkId())
+	r, err := OpenBookmarks(ctx, u, w.BookmarkId())
 	require.NoError(t, err)
 	got, err := r.GetBulk(ctx, 1, 3)
 	require.NoError(t, err)
@@ -465,6 +485,14 @@ func TestBookmarksGetBulkRange(t *testing.T) {
 	require.ErrorIs(t, err, errBookmarkRangeInvalid)
 	_, err = r.GetBulk(ctx, 3, 1)
 	require.ErrorIs(t, err, errBookmarkRangeInvalid)
+
+	// An empty half-open range is well formed, and reads no slot: from == toExcluding
+	// asks for nothing, including past the end where a read would have errored.
+	for _, from := range []int{0, 2, 9} {
+		got, err := r.GetBulk(ctx, from, from)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
 
 	// A negative index has no slot, and uint64(-1) is a real one: a record planted
 	// there must not answer for it.
@@ -486,4 +514,68 @@ func TestBookmarksAppendRequiresItsParts(t *testing.T) {
 	require.ErrorIs(t, err, errBookmarkNoHead)
 	_, err = w.Append(ctx, nil, head.ID())
 	require.ErrorIs(t, err, errBookmarkNoSigner)
+}
+
+// TestBookmarksKeyMaterialIsImmutable is the regression guard for the write this
+// design removed: Append used to assign b.seed on every call and b.id on its first,
+// while Seed() and BookmarkId() read both under no lock. Settled at construction,
+// they are safe to read from any goroutine — and under -race this is what says so.
+func TestBookmarksKeyMaterialIsImmutable(t *testing.T) {
+	ctx, u, _, self, w := bmList(t)
+	seed, id := w.Seed(), w.BookmarkId()
+	require.NotEmpty(t, seed, "a constructed list carries its seed")
+	require.NotNil(t, id, "and the locator that reopens it")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		appendN(t, ctx, u, w, self, time.Now(), 4)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			require.Equal(t, seed, w.Seed())
+			require.True(t, id.Equal(w.BookmarkId()))
+		}
+	}()
+	wg.Wait()
+
+	require.Equal(t, seed, w.Seed(), "four appends later, the same seed")
+	require.True(t, id.Equal(w.BookmarkId()), "and the same locator")
+}
+
+// TestBookmarkLocatorArms: both arms settle the seed before the cursor exists — Seed
+// carries it, At reads it out of the verified record its id names. Only the At arm
+// opens a PRUNED list, where index 0 is gone and no seed alone would find the range.
+func TestBookmarkLocatorArms(t *testing.T) {
+	ctx, u, _, self, w := bmList(t)
+	appendN(t, ctx, u, w, self, time.Now(), 3)
+
+	bySeed, err := Seed(w.Seed()).Open(ctx, u)
+	require.NoError(t, err)
+	n, err := bySeed.Len(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 3, n, "the seed arm reaches a list that starts at 0")
+
+	pruned := NewMemoryUniverse()
+	putClaims(t, pruned, self)
+	seed := []byte("locator-pruned-seed")
+	for i := 4; i <= 5; i++ {
+		plant(t, ctx, pruned, pruned.Bookmarks(), self, seed, i)
+	}
+	slot, err := IdSeq(5, seed)
+	require.NoError(t, err)
+
+	byId, err := At(slot).Open(ctx, pruned)
+	require.NoError(t, err)
+	require.Equal(t, seed, byId.Seed(), "the seed comes out of the record the id names")
+	pn, err := byId.Len(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, pn, "indices 4..5 survive, so the list is two entries long")
+
+	// The zero locator names no list at all, rather than defaulting to one.
+	_, err = BookmarkLocator{}.Open(ctx, u)
+	require.ErrorIs(t, err, errBookmarkNoSeed)
 }

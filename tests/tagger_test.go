@@ -17,7 +17,7 @@ import (
 
 // TestTagArchive exercises the archive-wide tagging pass: after a commit,
 // TagArchive descends the branch-table spine and stamps each branch's closure
-// with a _b_<branch> membership tag, returning the head-id history it walked.
+// with a _b_<branch> membership tag, returning the head-id spine it walked.
 func TestTagArchive(t *testing.T) {
 	ctx := context.Background()
 	clock := generator.NewClock(fixtureBase, time.Second)
@@ -25,7 +25,7 @@ func TestTagArchive(t *testing.T) {
 
 	u := mem.New()
 	require.True(t, u.Capabilities().Tags, "mem is Tags-capable")
-	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.Seed([]byte(self.ID().String())), self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	em, err := ranke.NewClaim(ranke.TypeSource("email"), self).
@@ -43,11 +43,11 @@ func TestTagArchive(t *testing.T) {
 
 	// The commit already tagged (the Sequencer signals the storage), so an
 	// incremental pass would find nothing to do. RetagAll walks it regardless —
-	// this is a unit test of the walk, not of who triggers it. History is the
+	// this is a unit test of the walk, not of who triggers it. The spine is the
 	// output of that walk, not an input.
-	history, err := ranke.TagArchive(ctx, arc, ranke.TagArchiveOptions{RetagAll: true})
+	spine, err := ranke.TagArchive(ctx, arc, ranke.TagArchiveOptions{RetagAll: true})
 	require.NoError(t, err, "TagArchive")
-	require.NotEmpty(t, history, "TagArchive produces the walked head-id history")
+	require.NotEmpty(t, spine, "TagArchive produces the walked head-id spine")
 
 	// The branch head joined "main" — its closure carries the _b_main tag.
 	b, err := arc.GetBranch(ctx, "main")
