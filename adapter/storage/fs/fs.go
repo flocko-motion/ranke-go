@@ -35,16 +35,6 @@ func New(dir string) (ranke.Universe, error) {
 	return storage.NewBlobUniverse(s), nil
 }
 
-// NewBookmarks returns the 𝒰_hist over the same directory: prefixed keys, so an
-// archive's bookmark list sits beside the claims it locates.
-func NewBookmarks(dir string) (ranke.BookmarkStore, error) {
-	s, err := open(dir)
-	if err != nil {
-		return nil, err
-	}
-	return storage.NewBlobBookmarks(s), nil
-}
-
 func open(dir string) (*store, error) {
 	if dir == "" {
 		return nil, errEmptyDir

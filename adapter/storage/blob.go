@@ -56,7 +56,7 @@ type Streamer interface {
 //deadcode:keep
 func NewBlobUniverse(store BlobStore, opts ...BlobUniverseOption) ranke.Universe {
 	u := &blobUniverse{store: store, concurrency: 1, tier: ranke.StorageTierAuthoritative, heights: ranke.NewHeightCache(),
-		marks: NewBlobBookmarks(store)}
+		marks: newBlobBookmarks(store)}
 	for _, o := range opts {
 		o(u)
 	}

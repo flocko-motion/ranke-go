@@ -24,7 +24,7 @@ func newSeqWithUniverse(t *testing.T, ctx context.Context) (*devseq.Sequencer, r
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := devseq.NewSequencer(ctx, u, u.Bookmarks(), op, clk)
+	seq, err := devseq.NewSequencer(ctx, u, op, clk)
 	require.NoError(t, err)
 	return seq, u, op, clk
 }

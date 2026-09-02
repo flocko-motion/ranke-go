@@ -135,10 +135,7 @@ func TestBookmarksShareTheDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs.New: %v", err)
 	}
-	hist, err := NewBookmarks(dir)
-	if err != nil {
-		t.Fatalf("fs.NewBookmarks: %v", err)
-	}
+	hist := u.Bookmarks()
 
 	// The content whose hash IS the slot: S([0, s]) stored under H(c).
 	seed := []byte("prefix-collision-seed")
@@ -179,10 +176,11 @@ func TestBookmarksShareTheDirectory(t *testing.T) {
 // than reaching the filesystem as an empty path.
 func TestBookmarkStoreRefusesANilSlot(t *testing.T) {
 	ctx := context.Background()
-	hist, err := NewBookmarks(t.TempDir())
+	u, err := New(t.TempDir())
 	if err != nil {
-		t.Fatalf("fs.NewBookmarks: %v", err)
+		t.Fatalf("fs.New: %v", err)
 	}
+	hist := u.Bookmarks()
 	if _, err := hist.Get(ctx, nil); err == nil {
 		t.Fatal("Get(nil) must be refused")
 	}

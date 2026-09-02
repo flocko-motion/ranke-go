@@ -62,12 +62,11 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	hist := u.Bookmarks()
-	seq, err := concseq.NewSequencer(ctx, u, hist, op, clk)
+	seq, err := concseq.NewSequencer(ctx, u, op, clk)
 	require.NoError(t, err)
 	// A second, independent view over the same bookmark list, reached the way any
 	// external reader would: from one bookmark id, never discovered (paper §Backup).
-	marks, err := ranke.OpenBookmarks(ctx, hist, u, seq.BookmarkId())
+	marks, err := ranke.OpenBookmarks(ctx, u.Bookmarks(), u, seq.BookmarkId())
 	require.NoError(t, err)
 	return &fixture{u: u, marks: marks, seq: seq, op: op, clk: clk}
 }
@@ -437,4 +436,26 @@ func TestMultiHeadContributionKeepsBoth(t *testing.T) {
 	require.NoError(t, err)
 
 	f.requireReachable(t, ctx, "main", []ranke.Id{one.ID(), two.ID()})
+}
+
+// noBookmarks presents a Universe holding no 𝒰_hist — neo4j's shape, a projection
+// you drop and reindex.
+type noBookmarks struct{ ranke.Universe }
+
+func (n noBookmarks) Capabilities() ranke.Capabilities {
+	c := n.Universe.Capabilities()
+	c.Bookmarks = false
+	return c
+}
+
+// TestNewSequencerRefusesAUniverseHoldingNoBookmarks: the head has nowhere to be
+// recorded, so the archive it advanced would be unreachable. Refused at construction
+// rather than at the first append, which is already one merge too late.
+func TestNewSequencerRefusesAUniverseHoldingNoBookmarks(t *testing.T) {
+	ctx := context.Background()
+	clk := &clock{t: time.Unix(1000, 0).UTC()}
+	op := operator(t, ctx, clk.Tick())
+
+	_, err := concseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()}, op, clk)
+	require.ErrorIs(t, err, ranke.ErrUnsupported)
 }

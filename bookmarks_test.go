@@ -20,7 +20,7 @@ func bmList(t *testing.T) (context.Context, Universe, BookmarkStore, Contributor
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	return ctx, u, hist, self, NewBookmarks(hist, u, nil)
 }
 
@@ -153,7 +153,7 @@ func TestOpenBookmarksFindsTheLowerBound(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("pruned-list-seed")
 
 	var heads []Id
@@ -245,7 +245,7 @@ func TestOpenBookmarksSaysSoWhenItsAnchorGoes(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("anchor-goes-seed")
 	plant(t, ctx, u, hist, self, seed, 0)
 	head := plant(t, ctx, u, hist, self, seed, 1)
@@ -320,7 +320,7 @@ func TestBookmarksReportsADamagedSlot(t *testing.T) {
 			u := NewMemoryUniverse()
 			self := contributor(t)
 			putClaims(t, u, self)
-			hist := NewMemoryBookmarks()
+			hist := u.Bookmarks()
 			seed := []byte("damaged-seed")
 			legitimate := plant(t, ctx, u, hist, self, seed, 0)
 
@@ -363,7 +363,7 @@ func TestOpenBookmarksRefusesAGapAboveTheTop(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("gap-above-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)
@@ -384,7 +384,7 @@ func TestOpenBookmarksGapProbeIsBounded(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("gap-out-of-reach-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)
@@ -408,7 +408,7 @@ func TestBookmarksVerifyFindsAnInnerGap(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("inner-gap-seed")
 
 	// The doubling probes 1, 2, 4, 8 and then bisects, so index 3 is never read and
@@ -435,7 +435,7 @@ func TestBookmarksVerifyChecksEveryHead(t *testing.T) {
 	u := NewMemoryUniverse()
 	self := contributor(t)
 	putClaims(t, u, self)
-	hist := NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seed := []byte("bad-head-seed")
 
 	plant(t, ctx, u, hist, self, seed, 0)

@@ -222,7 +222,7 @@ func main() {
 	// deployments would stack a mem cache on top, or swap S3 in below; this keeps
 	// it flat so the bundle is just a directory. ---
 	u := must(fs.New(helpers.UniverseDir))
-	seq := must(devseq.NewSequencer(ctx, u, u.Bookmarks(), alice, s))
+	seq := must(devseq.NewSequencer(ctx, u, alice, s))
 	helpers.WriteBookmarkId(seq)
 	head := must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		emailApples, emailFamily, summary,

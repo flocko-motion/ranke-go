@@ -1,6 +1,6 @@
 // package: adapter / bookmarkstore
 // type:    logic
-// job:     NewBlobBookmarks — a 𝒰_hist over the same BlobStore seam a Universe uses, its entries
+// job:     the 𝒰_hist a blob-backed Universe hands out — over the same BlobStore seam, its entries
 // under a key prefix that keeps the two keyspaces apart (`R-BMPREFIX`)
 // limits:  no storage of its own; the record's shape and its rules are the library's
 // (-> blob.go for the Universe half)
@@ -18,9 +18,10 @@ import (
 // Slash-free, so a flat key namespace needs no directory to hold it.
 const bookmarkPrefix = "hist-"
 
-// NewBlobBookmarks adapts a BlobStore into a ranke.BookmarkStore, so one directory or
-// bucket holds an archive's claims, its content and its bookmark list.
-func NewBlobBookmarks(store BlobStore) ranke.BookmarkStore {
+// newBlobBookmarks adapts a BlobStore into a ranke.BookmarkStore, so one directory or
+// bucket holds an archive's claims, its content and its bookmark list. Unexported, so
+// the Universe owning the store is the only way to a 𝒰_hist over it.
+func newBlobBookmarks(store BlobStore) ranke.BookmarkStore {
 	return &blobBookmarks{store: store}
 }
 

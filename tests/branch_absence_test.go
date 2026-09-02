@@ -25,7 +25,7 @@ func TestGetBranchAbsenceIsMatchable(t *testing.T) {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 
 	u := mem.New()
-	seq, err := devseq.NewSequencer(ctx, u, u.Bookmarks(), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	em, err := ranke.NewClaim(ranke.TypeSource("note"), self).
@@ -73,7 +73,7 @@ func TestAbsentBranchStillRefusesAContribution(t *testing.T) {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 
 	u := mem.New()
-	seq, err := devseq.NewSequencer(ctx, u, u.Bookmarks(), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	arc, err := seq.GetArchive(ctx)

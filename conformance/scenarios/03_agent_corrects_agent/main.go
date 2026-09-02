@@ -175,7 +175,7 @@ func main() {
 	// verifies, auto-consolidates the open heads, mints the branch table and
 	// bookmarks it, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	seq := must(devseq.NewSequencer(ctx, u, u.Bookmarks(), operator, s))
+	seq := must(devseq.NewSequencer(ctx, u, operator, s))
 	helpers.WriteBookmarkId(seq)
 	must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		agentAClaim, agentBClaim, email,
