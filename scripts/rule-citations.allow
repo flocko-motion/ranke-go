@@ -46,6 +46,5 @@ R-QEVAL        citation owed: fixed evaluation order, query.go
 R-QFORM        citation owed: original or materialized field values, query.go
 
 # Translation to Cypher — the neo4j backend's own chapter.
-R-QCYPHER      citation owed: the translation answers what the native engine does
 R-QCCLAUSE     citation owed: block-by-block clause mapping, adapter/storage/neo4j
 R-QCSTEP       citation owed: a step as a variable-length segment, adapter/storage/neo4j

@@ -44,3 +44,10 @@ What each release changed for someone depending on this repository.
   else, so a detached 𝒰_hist — a file bookmark list over an in-memory universe —
   cannot be expressed. Configuration carrying an independent history section has
   nothing left to point at.
+
+### Fixed
+
+- neo4j compared `created_at` against a bound spelled differently from the stored
+  form, so a comparison named the wrong instant: equality matched nothing, `ge`
+  skipped the second it asked for and `lt` included it. Operands are now spelled as
+  the property is stored, matching the reference engine (`R-QCYPHER`).
