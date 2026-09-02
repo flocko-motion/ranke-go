@@ -99,6 +99,12 @@ that works here:
   {{.TestImports}}' ./...` is authoritative. A text search is not: it misses
   build constraints and cannot tell a test import from a real one.
 
+# Versioning
+
+The bump word is the maintainer's, chosen at release time: `make release <fix|minor|major>`.
+An agent never picks it and never argues that a change "is a minor" — describe what moved
+and leave the naming to the release.
+
 # Releasing a change that moves every id, or adds a record kind
 
 An encoder change — a new record key, an alias, anything touching `S(v)` or the
