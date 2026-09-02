@@ -107,7 +107,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor,
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), 0, bt0.Node().CreatedAt()); err != nil {
+	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), bt0.Node().CreatedAt()); err != nil {
 		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
@@ -248,13 +248,10 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	if err != nil {
 		return err
 	}
-	// Step 6 is the advance k→k'; the next Head History entry records it here,
-	// in the same step (`R-C6HISTORY`, `V-HISTADVANCE`).
-	revision, err := s.hist.Len(ctx)
-	if err != nil {
-		return fmt.Errorf("%w: history length: %w", errSequencer, err)
-	}
-	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), revision, bt.Node().CreatedAt()); err != nil {
+	// Step 6 is the advance k→k'; the next Head History entry records it here, in
+	// the same step (`R-C6HISTORY`) — Append derives the revision itself, so this
+	// can never skip a slot or clobber one already written.
+	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), bt.Node().CreatedAt()); err != nil {
 		return fmt.Errorf("%w: append history: %w", errSequencer, err)
 	}
 

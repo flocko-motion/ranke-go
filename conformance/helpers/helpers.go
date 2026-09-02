@@ -25,10 +25,10 @@ const (
 	SourcesDir = "../../fixtures/sources"
 	// DataDir is the scenario's output bundle: tar it and you have
 	// everything a verifier needs.
-	DataDir             = "./data"
-	UniverseDir         = DataDir + "/universe"
-	BranchTableHeadPath = DataDir + "/branches/B_h"
-	IdsPath             = DataDir + "/ids.txt"
+	DataDir         = "./data"
+	UniverseDir     = DataDir + "/universe"
+	HistorySeedPath = DataDir + "/branches/B_h"
+	IdsPath         = DataDir + "/ids.txt"
 )
 
 // Scenario holds the running state of one conformance scenario: its
@@ -62,15 +62,15 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 // so scenario claims and minted branch tables share one monotone timeline.
 func (s *Scenario) Tick() time.Time { return s.NextTimestamp(time.Second) }
 
-// WriteHistorySeed persists seq's Head History seed to BranchTableHeadPath — the
-// one value (foundation paper §Backup) a bundle must carry to be reopened, since
+// WriteHistorySeed persists seq's Head History seed to HistorySeedPath — the one
+// value (foundation paper §Backup) a bundle must carry to be reopened, since
 // there is no way to discover it. A scenario calls this once its Sequencer has
 // bootstrapped, before ReloadAndVerify (or any other process) needs it.
 func WriteHistorySeed(seq ranke.Sequencer) {
-	if err := os.MkdirAll(filepath.Dir(BranchTableHeadPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(HistorySeedPath), 0o755); err != nil {
 		log.Fatalf("scenario.WriteHistorySeed: mkdir: %v", err)
 	}
-	Must(0, os.WriteFile(BranchTableHeadPath, []byte(seq.HistorySeed()+"\n"), 0o644))
+	Must(0, os.WriteFile(HistorySeedPath, []byte(seq.HistorySeed()+"\n"), 0o644))
 }
 
 // ReloadAndVerify reopens the persisted bundle at its latest head, validates every
@@ -79,7 +79,7 @@ func WriteHistorySeed(seq ranke.Sequencer) {
 // code could only be corrected by hand on every intentional change.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch string) {
 	u := Must(fs.New(UniverseDir))
-	seed := strings.TrimSpace(string(Must(os.ReadFile(BranchTableHeadPath))))
+	seed := strings.TrimSpace(string(Must(os.ReadFile(HistorySeedPath))))
 	head := Must(ranke.OpenHistory(u, seed).Latest(ctx)).GetId() // the archive head k the timeline advanced to
 	arc := Must(ranke.NewArchive(ctx, u, head))
 

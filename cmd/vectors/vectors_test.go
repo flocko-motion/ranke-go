@@ -77,6 +77,37 @@ func TestClaimCasesHoldAsDescribed(t *testing.T) {
 	}
 }
 
+// TestToyGraphIsAnArchive: the set carries a Head History, and only an archive has
+// one. Opening it the way §Backup prescribes — from id_seq(0,s) to the head it
+// records — must reach a branch table (`V-ARCHIVE`). CheckClaims verifies claim by
+// claim, so this archive-scoped rule is out of its reach entirely.
+func TestToyGraphIsAnArchive(t *testing.T) {
+	ctx := context.Background()
+	dir, m := generate(t)
+
+	u := ranke.NewMemoryUniverse()
+	for _, c := range m.Claims {
+		if !c.Verify {
+			continue
+		}
+		cl, err := vectors.Decode(dir, c)
+		require.NoError(t, err)
+		require.NoError(t, u.PutClaims(ctx, []ranke.Claim{cl}))
+	}
+
+	latest, err := ranke.OpenHistory(u, historySeed).Latest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, latest.GetId(), "the Head History must resolve to the head it records")
+
+	arc, err := ranke.NewArchive(ctx, u, latest.GetId())
+	require.NoError(t, err)
+	run, err := arc.Verify(ctx)
+	require.NoError(t, err)
+	run.Wait()
+	require.NoError(t, run.Err())
+	require.Empty(t, run.Failures(), "the head the history records must open as a valid archive")
+}
+
 // TestRejectionIsNotMereAbsence is the control the rejected cases need: only the
 // root contributor is stored, yet source-note still verifies. So a rejection above
 // is the case's own defect, not the claim being unknown to the universe.
@@ -153,9 +184,11 @@ func TestEveryReasonIsExercised(t *testing.T) {
 // refused at DECODE. The rest are refused by the closure verifier, where the failure
 // is a set rather than one error, so they are not in reach of this assertion.
 var decodeSentinel = map[string]error{
-	vectors.ReasonTimestampForm: ranke.ErrTimestampForm,
-	vectors.ReasonBothContent:   ranke.ErrContentBothSlots,
-	vectors.ReasonDatedForm:     ranke.ErrDatedForm,
+	vectors.ReasonTimestampForm:     ranke.ErrTimestampForm,
+	vectors.ReasonBothContent:       ranke.ErrContentBothSlots,
+	vectors.ReasonDatedForm:         ranke.ErrDatedForm,
+	vectors.ReasonHistoryClaimForm:  ranke.ErrHistoryClaimForm,
+	vectors.ReasonHistoryClaim0Form: ranke.ErrHistoryClaim0Form,
 }
 
 // TestRejectedCasesFailForTheirStatedReason: rejection alone is cheap — a case with
@@ -178,5 +211,6 @@ func TestRejectedCasesFailForTheirStatedReason(t *testing.T) {
 		checked++
 	}
 	require.Equal(t, len(decodeSentinel)+2, checked,
-		"every V-TIME, V-CONTENT and V-DATED case is covered here: three timestamps, both slots, one dated")
+		"every V-TIME, V-CONTENT, V-DATED and V-HISTCLAIM(0) case is covered here: "+
+			"three timestamps, both slots, one dated, one history claim each")
 }

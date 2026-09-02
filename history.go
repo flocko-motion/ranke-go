@@ -35,21 +35,24 @@ func OpenHistory(u Universe, seed string) *History {
 // mints one. Worth persisting externally to reopen this sequence (paper §Backup).
 func (h *History) Seed() string { return h.seed }
 
-// Append records id as the new head at revision, signed under self — supplied
-// per call, never stored, so no other holder of a *History can mint through it.
-// Revision 0 mints a fresh seed when none is set (`V-HISTCLAIM0`). Caches the
-// result as this instance's own known-latest, so its own Latest/Len skip the
-// search that finding a revision nobody told it about still requires.
-func (h *History) Append(ctx context.Context, self Contributor, id Id, height int, revision int, createdAt time.Time) (HistoryItem, error) {
+// Append records id as the new head, signed under self — supplied per call, never
+// stored. The revision is never taken from the caller: it is always one past
+// what this instance itself last wrote (`Len`), so nothing can skip a slot or
+// clobber one already written. Revision 0 mints a fresh seed when none is set
+// (`V-HISTCLAIM0`); the result is cached as this instance's own known-latest.
+func (h *History) Append(ctx context.Context, self Contributor, id Id, height int, createdAt time.Time) (HistoryItem, error) {
 	if id == nil {
 		return HistoryItem{}, errHistoryNilID
 	}
 	if self == nil {
 		return HistoryItem{}, errHistoryNoSigner
 	}
+	revision, err := h.Len(ctx)
+	if err != nil {
+		return HistoryItem{}, err
+	}
 	seed := h.seed
 	if revision == 0 && seed == "" {
-		var err error
 		if seed, err = randomSeed(); err != nil {
 			return HistoryItem{}, err
 		}
@@ -57,23 +60,11 @@ func (h *History) Append(ctx context.Context, self Contributor, id Id, height in
 	if seed == "" {
 		return HistoryItem{}, errHistoryNoSeed
 	}
-	headEdge, err := NewEdge(EdgeConfig{Reference: id, Type: EdgeTypeHead})
+	b, err := NewHistoryClaimBuilder(self, id, revision, seed)
 	if err != nil {
 		return HistoryItem{}, err
 	}
-	historyID, err := idSeq(uint64(revision), seed)
-	if err != nil {
-		return HistoryItem{}, err
-	}
-	b := NewClaim(NodeTypeHistory, self).
-		WithField(FieldHistoryIndex, strconv.Itoa(revision)).
-		WithEdges(headEdge).
-		WithAutoHeight(ctx, h.u)
-	if revision == 0 {
-		b = b.WithField(FieldHistorySeed, seed)
-	}
-	b.historyID = historyID
-	c, err := b.Sign()
+	c, err := b.WithAutoHeight(ctx, h.u).WithCreatedAt(createdAt).Sign()
 	if err != nil {
 		return HistoryItem{}, err
 	}
@@ -84,6 +75,29 @@ func (h *History) Append(ctx context.Context, self Contributor, id Id, height in
 	item := NewHistoryItem(id, revision, height, c.Node().CreatedAt())
 	h.known = &item
 	return item, nil
+}
+
+// NewHistoryClaimBuilder returns the ClaimBuilder for a Head History entry naming
+// headID at revision under self, with the head edge, required fields
+// (`V-HISTCLAIM`/`V-HISTCLAIM0`) and id_seq(revision, seed) identity (`V-IDSEQ`)
+// already set. The caller still supplies height and CreatedAt before Sign.
+func NewHistoryClaimBuilder(self Contributor, headID Id, revision int, seed string) (ClaimBuilder, error) {
+	headEdge, err := NewEdge(EdgeConfig{Reference: headID, Type: EdgeTypeHead})
+	if err != nil {
+		return ClaimBuilder{}, err
+	}
+	historyID, err := idSeq(uint64(revision), seed)
+	if err != nil {
+		return ClaimBuilder{}, err
+	}
+	b := NewClaim(NodeTypeHistory, self).
+		WithField(FieldHistoryIndex, strconv.Itoa(revision)).
+		WithEdges(headEdge)
+	if revision == 0 {
+		b = b.WithField(FieldHistorySeed, seed)
+	}
+	b.historyID = historyID
+	return b, nil
 }
 
 // Latest returns kₙ, or the zero item when empty. Cached (Append) or else
@@ -177,24 +191,36 @@ func (h *History) Len(ctx context.Context) (int, error) {
 	return latest.GetRevision() + 1, nil
 }
 
-// fetchAt fetches the claim at id_seq(i, h.seed); ok is false when nothing is
-// there, or its own history_index disagrees with i (`V-IDSEQVERIFY`).
+// fetchAt fetches the claim at id_seq(i, h.seed). ok is false only for the two
+// absences `V-IDSEQVERIFY` allows: nothing stored, or a history_index disagreeing
+// with i. Damage errors — a hole would end the head search early (§Head Index).
 func (h *History) fetchAt(ctx context.Context, i int) (Claim, bool, error) {
 	key, err := idSeq(uint64(i), h.seed)
 	if err != nil {
 		return nil, false, err
 	}
-	claims, err := h.u.GetClaims(ctx, []Id{key})
+	raws, err := h.u.GetClaimsRaw(ctx, []Id{key})
 	if errors.Is(err, ErrNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	c := claims[0]
+	raw := raws[0]
+	c, err := DecodeClaim(key, raw)
+	if err != nil {
+		return nil, false, WrapDetail(errHistorySlotDecode, "i="+strconv.Itoa(i), err)
+	}
+	if c.Node().Type() != NodeTypeHistory {
+		return nil, false, WithDetail(errHistorySlotType, "i="+strconv.Itoa(i)+" holds "+c.Node().Type())
+	}
+	// id_seq(i,s) grants access to the slot, not trust in what sits there.
+	if err := verifyClaim(ctx, c, raw, newVerifyConfig(), h.u); err != nil {
+		return nil, false, WrapDetail(errHistorySlotVerify, "i="+strconv.Itoa(i), err)
+	}
 	idx, err := c.Node().GetField(FieldHistoryIndex)
 	if err != nil || idx != strconv.Itoa(i) {
-		return nil, false, nil
+		return nil, false, nil // the one absence `V-IDSEQVERIFY` sanctions
 	}
 	return c, true, nil
 }

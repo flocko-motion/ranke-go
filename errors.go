@@ -195,6 +195,12 @@ var (
 	errHistoryRangeInvalid  = errors.New("ranke.History.GetBulk: invalid range")
 	errHistoryNoHeadEdge    = errors.New("ranke.History: a contribution/history claim carries no contribution/head edge")
 	errHistorySeedGen       = errors.New("ranke.History: generate seed")
+	// The three ways a slot can hold something other than a history entry. Each is
+	// damage rather than a hole: reported as absence it would break the presence
+	// monotonicity the head search rests on (§Head Index).
+	errHistorySlotDecode = errors.New("ranke.History: the claim at id_seq(i,s) does not decode")
+	errHistorySlotType   = errors.New("ranke.History: id_seq(i,s) resolves to a claim that is not contribution/history")
+	errHistorySlotVerify = errors.New("ranke.History: the claim at id_seq(i,s) fails verification (`V-ID` and `V-SIG` apply unchanged, `V-IDSEQVERIFY`)")
 	// ErrUnexplainedGap: a claim's bytes are missing and nothing explains the gap —
 	// no copied delete_by on the edge reaching it, no contribution/delete mark against
 	// it. Indistinguishable from data loss, which is why it fails.

@@ -17,18 +17,21 @@ const Name = "manifest.json"
 
 // Reason codes, so a test asserts the outcome it expected rather than any.
 const (
-	ReasonOK              = "ok"
-	ReasonIDMismatch      = "id_mismatch"
-	ReasonWrongMessage    = "wrong_message"
-	ReasonMalformedID     = "malformed_id"
-	ReasonNotEnveloped    = "not_enveloped"
-	ReasonNoContributor   = "unresolvable_contributor"
-	ReasonHeightWrong     = "height_wrong"
-	ReasonContentMismatch = "content_hash_mismatch"
-	ReasonTimestampForm   = "timestamp_form"
-	ReasonBothContent     = "content_both_slots"
-	ReasonEdgeOrder       = "edge_order"
-	ReasonDatedForm       = "dated_form"
+	ReasonOK                = "ok"
+	ReasonIDMismatch        = "id_mismatch"
+	ReasonWrongMessage      = "wrong_message"
+	ReasonMalformedID       = "malformed_id"
+	ReasonNotEnveloped      = "not_enveloped"
+	ReasonNoContributor     = "unresolvable_contributor"
+	ReasonHeightWrong       = "height_wrong"
+	ReasonContentMismatch   = "content_hash_mismatch"
+	ReasonTimestampForm     = "timestamp_form"
+	ReasonBothContent       = "content_both_slots"
+	ReasonEdgeOrder         = "edge_order"
+	ReasonDatedForm         = "dated_form"
+	ReasonHistoryClaimForm  = "history_claim_form"
+	ReasonHistoryClaim0Form = "history_claim0_form"
+	ReasonHistoryReference  = "history_reference"
 )
 
 // AllReasons is every code above. The list lives beside the declarations so a new
@@ -38,7 +41,7 @@ var AllReasons = []string{
 	ReasonOK, ReasonIDMismatch, ReasonWrongMessage, ReasonMalformedID,
 	ReasonNotEnveloped, ReasonNoContributor, ReasonHeightWrong,
 	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent, ReasonEdgeOrder,
-	ReasonDatedForm,
+	ReasonDatedForm, ReasonHistoryClaimForm, ReasonHistoryClaim0Form, ReasonHistoryReference,
 }
 
 // Manifest names every artifact and the outcome an implementation must reach for it.

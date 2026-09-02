@@ -95,7 +95,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor,
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), 0, bt0.Node().CreatedAt()); err != nil {
+	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), bt0.Node().CreatedAt()); err != nil {
 		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
@@ -203,11 +203,7 @@ func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (r
 	if err != nil {
 		return nil, err
 	}
-	revision, err := s.hist.Len(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w: history length: %w", errSequencer, err)
-	}
-	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), revision, bt.Node().CreatedAt()); err != nil {
+	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), bt.Node().CreatedAt()); err != nil {
 		return nil, fmt.Errorf("%w: append history: %w", errSequencer, err)
 	}
 	s.head = bt.ID()

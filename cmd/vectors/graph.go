@@ -20,7 +20,8 @@ var externalBlob = []byte("externalized content, addressed by hash")
 const rootSeed = "ranke-vectors/root"
 
 // toyGraph builds the claims that must verify: a contributor, a source note, a
-// derived claim citing it, external content, node fields, a dated claim, and a
+// derived claim citing it, external content, node fields, a dated claim, the
+// archive's empty branch table with the Head History entry recording it, and a
 // second contributor.
 func (g *gen) toyGraph(ctx context.Context) error {
 	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
@@ -57,6 +58,13 @@ func (g *gen) toyGraph(ctx context.Context) error {
 		return err
 	}
 	if err := g.dated(who); err != nil {
+		return err
+	}
+	table, err := g.branchTable(root, who)
+	if err != nil {
+		return err
+	}
+	if err := g.historyClaim(table, who); err != nil {
 		return err
 	}
 	return g.secondContributor(ctx)
@@ -143,6 +151,43 @@ func (g *gen) dated(who ranke.Contributor) error {
 	}
 	return g.addClaim("dated", c,
 		"dated as EDTF's date-and-time form (V-DATED) — a numeric offset, no fractional seconds")
+}
+
+// historySeed is the fixed value id_seq(i,s) is keyed on for the history-claim
+// case, so the artifact reproduces byte for byte (§Head Index never mandates
+// randomness — a Sequencer mints one, but any string qualifies).
+const historySeed = "ranke-vectors/history-seed"
+
+// branchTable adds the empty contribution/branches claim a new archive is created
+// with: its id is the archive's head k, and the initial claim is its only
+// reference, so it stands at height 1 (`V-ARCHIVEHEIGHT`, §Ranke-Archive).
+func (g *gen) branchTable(root ranke.Claim, who ranke.Contributor) (ranke.Claim, error) {
+	c, err := ranke.NewClaim(ranke.NodeBranches, who).
+		WithHeight(ranke.HeightOf(root)).
+		WithCreatedAt(epoch.Add(8 * time.Second)).
+		Sign()
+	if err != nil {
+		return nil, err
+	}
+	return c, g.addClaim("branch-table", c,
+		"the empty initial branch table, this archive's head k (§Ranke-Archive)")
+}
+
+// historyClaim adds a Head History entry (`V-HISTCLAIM`/`V-HISTCLAIM0`) recording
+// the branch table as the head at revision 0. Its id is id_seq(0, historySeed)
+// (`V-IDSEQ`), not H(S(env(v))): the one exception `V-ID` carves out
+// (§Verifiability).
+func (g *gen) historyClaim(head ranke.Claim, who ranke.Contributor) error {
+	b, err := ranke.NewHistoryClaimBuilder(who, head.ID(), 0, historySeed)
+	if err != nil {
+		return err
+	}
+	c, err := b.WithHeight(ranke.HeightOf(head)).WithCreatedAt(epoch.Add(9 * time.Second)).Sign()
+	if err != nil {
+		return err
+	}
+	return g.addClaim("history-claim", c,
+		"a Head History entry (§Head Index), keyed at id_seq(0, s) rather than by content")
 }
 
 // secondContributor adds a second identity and a claim of its own, so a case can

@@ -439,13 +439,16 @@ func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVeri
 	return nil
 }
 
-// ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch-table claim may
-// reference a contribution/branches claim, and only through its lineage edges.
+// ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch table's lineage
+// edges, or a history claim's contribution/head edge (`V-HISTCLAIM`), may reach one.
 func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
 	// A table reaches its predecessor through the chain `R-C6MERGE` builds, and
 	// through nothing else: any other edge would take the spine off its own layer.
 	if t.claim.Node().Type() == NodeBranches &&
 		(e.Type() == EdgeTypeDiff || e.Type() == EdgeTypeBranches) {
+		return nil
+	}
+	if t.claim.Node().Type() == NodeTypeHistory && e.Type() == EdgeTypeHead {
 		return nil
 	}
 	ref, err := GetClaim(ctx, t.u, e.Reference())
@@ -461,9 +464,8 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 	return nil
 }
 
-// ruleHistoryReference (per edge) is `V-HISTREF`: a contribution/history claim is
-// reached only through id_seq(i,s) (foundation paper §Head Index); an ordinary
-// edge may never resolve to one.
+// ruleHistoryReference (per edge) is `V-HISTREF`: reached only through id_seq(i,s),
+// never an ordinary edge (§Head Index).
 func ruleHistoryReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
 	ref, err := GetClaim(ctx, t.u, e.Reference())
 	if errors.Is(err, ErrNotFound) {
@@ -530,11 +532,14 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 }
 
 // verifyID checks the id names the bytes stored under it: id = H(S(env(v)))
-// (`V-ID`). Hashing the record as stored is what keeps verification stable as the
-// alias taxonomy grows — a newer encoder emits the same claim more compactly, so a
-// re-encode would shift the hash. It needs no key, so integrity is checkable without
-// resolving a contributor.
+// (`V-ID`). A contribution/history claim is the one exception (§Verifiability):
+// its key id_seq(i,s) doesn't name its content, and s isn't in the claim past
+// revision 0 — its integrity check, `V-IDSEQVERIFY`, is a directed lookup only
+// History.fetchAt has the context to make.
 func (c *claim) verifyID(raw []byte) error {
+	if c.node.typeClass == NodeClassContribution && c.node.typeSub == string(NodeSubtypeHistory) {
+		return nil
+	}
 	recomputed, err := hashContent(raw)
 	if err != nil {
 		return WrapDetail(errVerify, "hash", err)

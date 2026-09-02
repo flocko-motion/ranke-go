@@ -51,7 +51,38 @@ func (g *gen) broken(ctx context.Context) error {
 	if err := g.unresolvableContributor(ctx); err != nil {
 		return err
 	}
+	if err := g.historyReferenced(); err != nil {
+		return err
+	}
 	return g.tamperedBlob()
+}
+
+// historyReferenced points an ordinary edge at history-claim, which `V-HISTREF`
+// forbids: nothing but id_seq(i,s) may reach a contribution/history claim.
+func (g *gen) historyReferenced() error {
+	e, err := ranke.NewEdge(ranke.EdgeConfig{
+		Reference: g.ids["history-claim"],
+		Type:      ranke.TypeDerivation("note"),
+	})
+	if err != nil {
+		return err
+	}
+	c, err := ranke.NewClaim(ranke.TypeDerivation("note"), g.who).
+		WithInlineContent([]byte("a claim that reaches into the Head History")).
+		WithEncoding(ranke.EncodingPlain).
+		WithEdges(e).
+		WithHeight(2).
+		WithCreatedAt(epoch.Add(16 * time.Second)).
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, err := c.Envelope()
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-history-reference", raw, c.ID().String(), vectors.ReasonHistoryReference,
+		"an ordinary edge resolving to a contribution/history claim", "V-HISTREF")
 }
 
 // unenveloped offers the serialized claim on its own, under the hash of those very

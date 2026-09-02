@@ -64,12 +64,21 @@ PAPERS_DIR       := docs/papers
 RELEASE_CYCLER     := bin/release-cycle.sh
 RELEASE_CYCLER_URL ?= https://raw.githubusercontent.com/rankegraph/ranke-graph/$(RANKE_GRAPH_REF)/scripts/release-cycle.sh
 
-# brokkr, the linter `make lint` runs. The installer is run on every lint rather than
-# cached, so the gate tracks the tool: a brokkr release can turn a run red on an
-# untouched branch, which is the intent, as it is for the spec bundle. It compares
-# versions and downloads only when they differ, so the common path is one check.
-# bin/ is gitignored, so the binary is fetched infrastructure and never committed.
-BROKKR           := bin/tools/brokkr
+# brokkr, the linter `make lint` runs.
+#
+# A sindri agent pod already HAS one: the hub bind-mounts the brokkr it built into
+# every pod and /usr/local/bin points there. That copy is the fleet's own — the exact
+# binary every other agent runs, and newer than master — so preferring it keeps this
+# gate on the same tool AND takes a network fetch off the gate's critical path. A 403
+# on the installer failed two gate runs in a row here, on an identical commit.
+#
+# Anywhere else the installer still runs on every lint rather than caching, so the
+# gate tracks the tool: a brokkr release can turn a run red on an untouched branch,
+# which is the intent, as it is for the spec bundle. It compares versions and
+# downloads only when they differ, so the common path is one check. bin/ is
+# gitignored, so the binary is fetched infrastructure and never committed.
+BROKKR_PROVIDED  := $(shell command -v brokkr 2>/dev/null)
+BROKKR           := $(if $(BROKKR_PROVIDED),$(BROKKR_PROVIDED),bin/tools/brokkr)
 BROKKR_INSTALLER := https://raw.githubusercontent.com/flocko-motion/sindri/master/scripts/install-brokkr.sh
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
@@ -318,9 +327,9 @@ scenarios: ## Run every conformance scenario from a clean state
 # Wired into `verify`, so anything that moves an id fails here first — the ids are
 # signatures, and the reference bundle is the only thing holding them to a value.
 #
-# B_h is compared on its id and height columns only. Its third column is the wall
-# clock at which a head was committed, so a byte diff of it can never pass — the
-# timeline records when, which is exactly the part that does not reproduce.
+# B_h is the archive's Head History seed (§Head Index) — a fixed string a
+# scenario's Sequencer derives deterministically, not a timestamped table, so it
+# byte-diffs like every other file here.
 #
 # Update after an intentional change: `make update-references`. Regenerating is
 # not the same as checking: the bundle is self-generated, so promote it only
@@ -329,17 +338,12 @@ verify-scenarios: ## Diff each scenario's fresh run against its committed refere
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
 		(cd "$$d" && rm -rf data && go run . > /dev/null); \
-		want=$$(mktemp); got=$$(mktemp); \
-		awk '{print $$1, $$2}' "$$d/data_reference/branches/B_h" > "$$want"; \
-		awk '{print $$1, $$2}' "$$d/data/branches/B_h" > "$$got"; \
-		if diff -r --exclude=B_h "$$d/data_reference" "$$d/data" > /dev/null \
-			&& diff "$$want" "$$got" > /dev/null; then \
+		if diff -r "$$d/data_reference" "$$d/data" > /dev/null; then \
 			echo "$$d: matches reference ✓"; \
 		else \
 			echo "$$d: DRIFT — differs from checked-in reference"; \
-			rm -f "$$want" "$$got"; exit 1; \
+			exit 1; \
 		fi; \
-		rm -f "$$want" "$$got"; \
 	done
 
 # Replace each scenario's archive_reference/ + ids_reference.txt
@@ -422,11 +426,16 @@ docs-clean: ## Remove the pulled paper references
 lint: tools ## Run the brokkr static-analysis gate
 	$(BROKKR) lint
 
-# Install or update brokkr at $(BROKKR). pipefail is what makes a failed download
-# fail here: without it bash reads an empty script, exits 0, and the missing binary
-# surfaces one target later as a puzzle.
-tools: ## Install or update brokkr at bin/tools/brokkr
+# Install or update brokkr at $(BROKKR), unless the environment already provides one
+# (-> BROKKR_PROVIDED), in which case there is nothing to fetch and nothing that can
+# fail. pipefail is what makes a failed download fail here: without it bash reads an
+# empty script, exits 0, and the missing binary surfaces one target later as a puzzle.
+tools: ## Install or update brokkr at bin/tools/brokkr (nothing to do where one is provided)
+ifneq ($(BROKKR_PROVIDED),)
+	@echo "brokkr provided by the environment: $(BROKKR_PROVIDED)"
+else
 	@bash -o pipefail -c 'curl -fsSL $(BROKKR_INSTALLER) | bash -s -- $(BROKKR)'
+endif
 
 # Rule-citation gate: every backticked `V-…`/`R-…` id a comment cites is one the
 # spec declares, and every declared rule is either cited or listed in

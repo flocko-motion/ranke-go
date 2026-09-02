@@ -61,7 +61,63 @@ func (g *gen) malformed() error {
 	if err := g.badDated(); err != nil {
 		return err
 	}
+	if err := g.badHistoryClaim(); err != nil {
+		return err
+	}
+	if err := g.badHistoryClaim0(); err != nil {
+		return err
+	}
 	return g.bothContentSlots()
+}
+
+// badHistoryClaim signs a contribution/history claim missing history_index. The
+// builder does judge the shape (`V-HISTCLAIM`), so this goes through AllowInvalid
+// to still seal a record.
+func (g *gen) badHistoryClaim() error {
+	headEdge, err := ranke.NewEdge(ranke.EdgeConfig{Reference: g.ids["root-contributor"], Type: ranke.EdgeTypeHead})
+	if err != nil {
+		return err
+	}
+	c, err := ranke.NewClaim(ranke.NodeTypeHistory, g.who).
+		WithEdges(headEdge).
+		WithHeight(1).
+		WithCreatedAt(epoch.Add(14 * time.Second)).
+		AllowInvalid().
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, err := c.Envelope()
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-history-claim-form", raw, c.ID().String(), vectors.ReasonHistoryClaimForm,
+		"a contribution/history claim carrying no history_index", "V-HISTCLAIM")
+}
+
+// badHistoryClaim0 signs revision 0 of a contribution/history claim missing
+// history_seed, the one field `V-HISTCLAIM0` requires only there.
+func (g *gen) badHistoryClaim0() error {
+	headEdge, err := ranke.NewEdge(ranke.EdgeConfig{Reference: g.ids["root-contributor"], Type: ranke.EdgeTypeHead})
+	if err != nil {
+		return err
+	}
+	c, err := ranke.NewClaim(ranke.NodeTypeHistory, g.who).
+		WithField(ranke.FieldHistoryIndex, "0").
+		WithEdges(headEdge).
+		WithHeight(1).
+		WithCreatedAt(epoch.Add(15 * time.Second)).
+		AllowInvalid().
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, err := c.Envelope()
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-history-claim0-form", raw, c.ID().String(), vectors.ReasonHistoryClaim0Form,
+		"revision 0 of a contribution/history claim carrying no history_seed", "V-HISTCLAIM0")
 }
 
 // badDated signs a claim whose `dated` carries an unparsable value — neither a
