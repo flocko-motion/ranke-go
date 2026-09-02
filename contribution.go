@@ -146,8 +146,8 @@ func (c Constraints) unconfined() bool {
 	return slices.Contains(c.referencable, BranchUniverse)
 }
 
-// reservedTypes are the Sequencer's alone (paper 2 §Sequencer step 2): the branch
-// table it mints, and the limiting claims that restrict another claim.
+// reservedTypes are the Sequencer's alone (`R-C2TYPE`): the branch table it mints at
+// merge, and the limiting claims that restrict another claim.
 var reservedTypes = map[string]bool{
 	NodeBranches: true,
 	NodeDelete:   true,

@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/conformance/helpers"
@@ -224,11 +223,12 @@ func main() {
 	}.Sign())
 
 	// --- 7. Merge one contribution carrying every claim; the dev Sequencer
-	// verifies, auto-consolidates the open heads, seeds, and mints the branch
-	// table, advancing branch "main". ---
+	// verifies, auto-consolidates the open heads, mints the branch table and
+	// bookmarks it, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(histfile.New(helpers.BranchTableHeadPath))
+	hist := must(fs.NewBookmarks(helpers.UniverseDir))
 	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	helpers.WriteBookmarkId(seq)
 	must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		agentClaim, emailApples, emailFamily, summary,
 		alice, apples, bobSr, bobJr,

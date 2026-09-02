@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,11 +27,10 @@ func (c *tickClock) Tick() time.Time {
 }
 
 // newTestSequencer stands up a Sequencer over in-memory storage and returns it
-// with its Universe, History, and the operator it signs with.
-func newTestSequencer(t *testing.T, ctx context.Context) (*Sequencer, ranke.Universe, ranke.History, ranke.Contributor, *tickClock) {
+// with its Universe, its bookmark list, and the operator it signs with.
+func newTestSequencer(t *testing.T, ctx context.Context) (*Sequencer, ranke.Universe, *ranke.Bookmarks, ranke.Contributor, *tickClock) {
 	t.Helper()
 	u := ranke.NewMemoryUniverse()
-	hist := historymem.New()
 	clk := &tickClock{t: time.Unix(1000, 0).UTC()}
 
 	_, priv, err := ed25519.GenerateKey(nil)
@@ -48,9 +46,9 @@ func newTestSequencer(t *testing.T, ctx context.Context) (*Sequencer, ranke.Univ
 	op, err := cc.AsContributor(ctx, nil, priv)
 	require.NoError(t, err)
 
-	s, err := NewSequencer(ctx, u, hist, op, clk)
+	s, err := NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clk)
 	require.NoError(t, err)
-	return s, u, hist, op, clk
+	return s, u, s.marks, op, clk
 }
 
 // persisted drives one contribution through steps 1–5 and returns it ready to

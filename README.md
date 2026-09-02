@@ -4,7 +4,7 @@ Go reference implementation of the **Ranke-Graph** ADT (spec §4) — a
 content-addressed, provenance-carrying graph of attributed claims.
 
 The project home, paper, and cross-language conformance suite live at
-[github.com/flocko-motion/ranke-graph](https://github.com/flocko-motion/ranke-graph).
+[github.com/rankegraph/ranke-graph](https://github.com/rankegraph/ranke-graph).
 This repository is the Go module: the canonical library importable from
 downstream projects, and the reference other implementations are checked
 against.

@@ -179,6 +179,30 @@ var (
 	ErrDeleteMarkNoTarget = errors.New("ranke.verify: a contribution/delete claim must carry a contribution/delete edge naming its target")
 	ErrTimestampForm      = errors.New("ranke: a timestamp must be RFC 3339, UTC, at nanosecond precision (2026-01-05T12:00:00.000000000Z)")
 	ErrDatedForm          = errors.New("ranke: dated must be an RFC 3339 timestamp or a valid EDTF Level 1 value (`V-DATED`)")
+	// ErrArchiveFirstTableHeight: the archive's initial branch table stands on its
+	// contributor edge alone, so height 1 is the only value that re-derives.
+	ErrArchiveFirstTableHeight = errors.New("ranke.verify: an archive's first branch-table claim must have height 1 (`V-ARCHIVEHEIGHT`)")
+	// --- Bookmarks (𝒰_hist, foundation paper §Bookmarks) ---
+	errBookmarkNoHead   = errors.New("ranke.Bookmarks.Append: nil head id")
+	errBookmarkNoSigner = errors.New("ranke: no contributor with a signing key to sign a bookmark under")
+	errBookmarkNoSeed   = errors.New("ranke.Bookmarks.Append: no seed — index 0 was never appended or given")
+	errBookmarkNilSlot  = errors.New("ranke: nil id_seq(i,s) slot")
+	errBookmarkEncode   = errors.New("ranke.SignBookmark: encode bookmark")
+	errBookmarkSeedGen  = errors.New("ranke.MintSeed: generate seed")
+	// The shape and authorship a stored record must have to be a bookmark at all.
+	errBookmarkForm    = errors.New("ranke: a bookmark's payload is the three-element S([i, s, k]) (`V-BMENV`)")
+	errBookmarkHeaders = errors.New("ranke: a bookmark's protected header carries alg and kid alone, its unprotected header nothing (`V-BMENV`)")
+	// errBookmarkSlot is the one sanctioned absence: what sits here belongs elsewhere.
+	errBookmarkSlot      = errors.New("ranke: a bookmark's own (i, s) key another slot than the one it was fetched at (`V-BMSLOT`)")
+	errBookmarkSignature = errors.New("ranke: a bookmark's signature does not verify against the pubkey its kid names (`V-BMSIG`)")
+	errBookmarkReference = errors.New("ranke: a bookmark's k does not resolve to a contribution/branches claim (`V-BMREF`)")
+	errBookmarkGap       = errors.New("ranke: a bookmark list's present indices must form one contiguous range (`V-BMGAPLESS`)")
+	// errBookmarkSlotRead is damage rather than a hole: read as absence it would break
+	// the presence monotonicity the O(log n) head search rests on.
+	errBookmarkSlotRead     = errors.New("ranke.Bookmarks: the record at id_seq(i,s) is not a bookmark of this list")
+	errBookmarkOpen         = errors.New("ranke.OpenBookmarks: the id names no bookmark that opens a list")
+	errBookmarkIndexRange   = errors.New("ranke.Bookmarks: index outside the list's range")
+	errBookmarkRangeInvalid = errors.New("ranke.Bookmarks.GetBulk: invalid range")
 	// ErrUnexplainedGap: a claim's bytes are missing and nothing explains the gap —
 	// no copied delete_by on the edge reaching it, no contribution/delete mark against
 	// it. Indistinguishable from data loss, which is why it fails.

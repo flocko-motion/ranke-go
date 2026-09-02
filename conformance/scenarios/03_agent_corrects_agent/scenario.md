@@ -39,7 +39,7 @@ claim declares its Height (§4.1): 1 + the max reference height.
 First a NEGATION — identical relation shape but conviction=-1.0,
 attributed to agentB. Says: "agentA's claim is wrong."
 
-### 6. Merge one contribution carrying every claim; the dev Sequencer verifies, auto-consolidates the open heads, seeds, and mints the branch table, advancing branch "main".
+### 6. Merge one contribution carrying every claim; the dev Sequencer verifies, auto-consolidates the open heads, mints the branch table and bookmarks it, advancing branch "main".
 
 ### 7. Reload, verify every branch closure, dump ids.
 
@@ -47,13 +47,12 @@ attributed to agentB. Says: "agentA's claim is wrong."
 
 `data_reference/` is the committed bundle the scenario emits. A conformant
 implementation reproduces every claim and content blob byte-for-byte, and reaches the
-same branch heads at the same heights. B_h's third column is the wall clock at which
-each head was committed, so it is the one thing that does not reproduce.
+same branch heads at the same heights.
 
 ```
 data_reference/
-  universe/       claims + content blobs (content-addressed)
-  branches/B_h    id of the current contribution/branches claim
+  universe/       claims, content blobs, and the bookmark list under a key prefix
+  branches/B_h    one bookmark id, which recovers the latest recorded head
   ids.txt         sorted set of every id in the closure
 ```
 

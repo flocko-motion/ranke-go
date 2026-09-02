@@ -3,8 +3,8 @@
 // job:     the records every implementation must reject, each isolating one failure — a wrong id, a
 // record stored bare where an envelope belongs, an unresolvable contributor, a declared height that
 // is not the derived one, content that misses its hash
-// limits:  derives from the toy graph (-> graph.go); each case breaks one thing, so a rejection
-// names a cause
+// limits:  derives from the conformance graph (-> graph.go); each case breaks one thing, so a
+// rejection names a cause
 package main
 
 import (
@@ -51,7 +51,31 @@ func (g *gen) broken(ctx context.Context) error {
 	if err := g.unresolvableContributor(ctx); err != nil {
 		return err
 	}
+	if err := g.firstTableHeight(); err != nil {
+		return err
+	}
 	return g.tamperedBlob()
+}
+
+// firstTableHeight declares height 2 on an initial branch table, which stands on its
+// contributor edge alone and so on height 1. One record settles it: the rule needs no
+// seed, no bookmark and no walk to say what that height must be. The derived height
+// disagrees too, so the record breaks `V-HEIGHT` alongside it.
+func (g *gen) firstTableHeight() error {
+	c, err := ranke.NewClaim(ranke.NodeBranches, g.who).
+		WithHeight(2).
+		WithCreatedAt(epoch.Add(16 * time.Second)).
+		Sign()
+	if err != nil {
+		return err
+	}
+	raw, err := c.Envelope()
+	if err != nil {
+		return err
+	}
+	return g.addBroken("rejected-first-table-height", raw, c.ID().String(), vectors.ReasonFirstTableHeight,
+		"an initial branch table declaring height 2, where its lone contributor edge fixes 1",
+		"V-ARCHIVEHEIGHT", "V-HEIGHT")
 }
 
 // unenveloped offers the serialized claim on its own, under the hash of those very

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/mem"
 	"github.com/rankegraph/ranke-go/tests/generator"
@@ -26,7 +25,7 @@ func TestGetBranchAbsenceIsMatchable(t *testing.T) {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 
 	u := mem.New()
-	seq, err := devseq.NewSequencer(ctx, u, devhist.New(clock), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	em, err := ranke.NewClaim(ranke.TypeSource("note"), self).
@@ -74,7 +73,7 @@ func TestAbsentBranchStillRefusesAContribution(t *testing.T) {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 
 	u := mem.New()
-	seq, err := devseq.NewSequencer(ctx, u, devhist.New(clock), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	arc, err := seq.GetArchive(ctx)

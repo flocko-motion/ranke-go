@@ -332,6 +332,9 @@ type verifyRule struct {
 var verifyRules = []verifyRule{
 	{name: "id", rule: "a claim's id is the hash of the envelope it is stored as (`V-ID`)", claim: ruleID},
 	{name: "signature", rule: "a claim's envelope is signed by its contributor's key (`V-ENV`, `V-SIG`)", claim: ruleSignature},
+	// The record-only statement about a first table's height runs ahead of the general
+	// re-derivation, so a violation is named by the rule that FIXES the value.
+	{name: "first branch-table height", rule: "an archive's first branch table, standing on its contributor edge alone, has height 1 (`V-ARCHIVEHEIGHT`)", claim: ruleArchiveFirstTableHeight},
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial claim (`V-HEIGHT`)", claim: ruleHeight},
 	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
@@ -438,8 +441,8 @@ func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVeri
 	return nil
 }
 
-// ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch-table claim may
-// reference a contribution/branches claim, and only through its lineage edges.
+// ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch table's lineage
+// edges may reach one.
 func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
 	// A table reaches its predecessor through the chain `R-C6MERGE` builds, and
 	// through nothing else: any other edge would take the spine off its own layer.
@@ -512,10 +515,8 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 }
 
 // verifyID checks the id names the bytes stored under it: id = H(S(env(v)))
-// (`V-ID`). Hashing the record as stored is what keeps verification stable as the
-// alias taxonomy grows — a newer encoder emits the same claim more compactly, so a
-// re-encode would shift the hash. It needs no key, so integrity is checkable without
-// resolving a contributor.
+// (`V-ID`), which every claim satisfies — id_seq(i,s) addresses bookmarks, and a
+// bookmark is no claim.
 func (c *claim) verifyID(raw []byte) error {
 	recomputed, err := hashContent(raw)
 	if err != nil {

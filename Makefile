@@ -4,7 +4,10 @@
 # (cmd/ranke), the ranke-test harness (cmd/test), and the scenariodoc
 # generator (cmd/scenariodoc).
 
-.PHONY: all build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt tidy lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean release major minor patch breaking feature fix
+.PHONY: all help build install uninstall check/full test test/full full-intended test/core test/core/coverage test/vectors test/integration test/matrix test/concurrency test/performance test-verbose coverage coverage-gaps vet fmt fmt-check tidy upgrade lint tools rule-citations rql-schema verify check clean scenarios verify-scenarios update-references scenarios-docs verify-docs conformance-bundle docs docs-current docs-clean check-clean-tree check-release-bump release major minor patch breaking feature fix
+
+# ask = prompt before raising the go directive (`make upgrade`); keep = leave it; or a version.
+GO_VERSION ?= ask
 
 # "The library" for coverage purposes = the root package plus the mem
 # storage adapter. mem is the fundamental, always-present, dependency-free
@@ -48,16 +51,34 @@ FULL_PERF_SIZE ?= 800
 # Foundational papers live in the ranke-graph repo. `make docs` pulls a
 # fresh copy into docs/papers/ for local reference; the directory is
 # gitignored and never committed — always fetched, never vendored.
-RANKE_GRAPH_REPO ?= https://github.com/flocko-motion/ranke-graph
+RANKE_GRAPH_REPO ?= https://github.com/rankegraph/ranke-graph
 RANKE_GRAPH_REF  ?= main
 PAPERS_DIR       := docs/papers
 
-# brokkr, the linter `make lint` runs. The installer is run on every lint rather than
-# cached, so the gate tracks the tool: a brokkr release can turn a run red on an
-# untouched branch, which is the intent, as it is for the spec bundle. It compares
-# versions and downloads only when they differ, so the common path is one check.
-# bin/ is gitignored, so the binary is fetched infrastructure and never committed.
-BROKKR           := bin/tools/brokkr
+# release-cycle.sh lives in ranke-graph and serves every consumer repo, so the git
+# mechanics of a release (branch resolution, the merge-then-tag dance, the wait for
+# CI) are written once, there. Cached under bin/ (gitignored), like brokkr below.
+# scripts/release.sh here is this repo's own dispatcher: it delegates a real
+# release to this, and keeps only the prerelease mode ("make release pre <bump>"),
+# which release-cycle.sh's fixed sequence has no shape for.
+RELEASE_CYCLER     := bin/release-cycle.sh
+RELEASE_CYCLER_URL ?= https://raw.githubusercontent.com/rankegraph/ranke-graph/$(RANKE_GRAPH_REF)/scripts/release-cycle.sh
+
+# brokkr, the linter `make lint` runs.
+#
+# A sindri agent pod already HAS one: the hub bind-mounts the brokkr it built into
+# every pod and /usr/local/bin points there. That copy is the fleet's own — the exact
+# binary every other agent runs, and newer than master — so preferring it keeps this
+# gate on the same tool AND takes a network fetch off the gate's critical path. A 403
+# on the installer failed two gate runs in a row here, on an identical commit.
+#
+# Anywhere else the installer still runs on every lint rather than caching, so the
+# gate tracks the tool: a brokkr release can turn a run red on an untouched branch,
+# which is the intent, as it is for the spec bundle. It compares versions and
+# downloads only when they differ, so the common path is one check. bin/ is
+# gitignored, so the binary is fetched infrastructure and never committed.
+BROKKR_PROVIDED  := $(shell command -v brokkr 2>/dev/null)
+BROKKR           := $(if $(BROKKR_PROVIDED),$(BROKKR_PROVIDED),bin/tools/brokkr)
 BROKKR_INSTALLER := https://raw.githubusercontent.com/flocko-motion/sindri/master/scripts/install-brokkr.sh
 
 SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
@@ -65,11 +86,15 @@ SCENARIO_DIRS := $(wildcard conformance/scenarios/*)
 # Default target: the static gates (build, gofmt, lint, rule citations, scenario
 # bundles) plus the fast test gate. The full suite is a deliberate ask —
 # `make test/full` — since it needs every service up.
-all: verify test
+all: verify test ## Default: static gates + the fast test suite
+
+help: ## Show this help
+	@grep -hE '^[a-zA-Z0-9_/-]+:.*?## ' $(MAKEFILE_LIST) \
+		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 # Build all binaries into bin/: the ranke CLI, the ranke-test harness,
 # and the scenariodoc generator.
-build:
+build: ## Compile the CLI, ranke-test harness and scenariodoc into bin/
 	@mkdir -p bin
 	go build -o bin/ranke ./cmd/ranke
 	go build -o bin/ranke-test ./cmd/test
@@ -77,17 +102,17 @@ build:
 
 # Copy the built CLI to $(BINDIR)/ranke (default: ~/.local/bin).
 # No sudo needed; just make sure $(BINDIR) is on your PATH.
-install: build
+install: build ## Copy the built CLI to $(BINDIR)/ranke (default ~/.local/bin)
 	@mkdir -p $(BINDIR)
 	install -m 0755 bin/ranke $(BINDIR)/ranke
 
-uninstall:
+uninstall: ## Remove the installed CLI from $(BINDIR)
 	rm -f $(BINDIR)/ranke
 
 # test/core — the datatype unit layer (root package): claims, codec,
 # content, id, signing, graph, guarantees. No infrastructure, no fs, no
 # adapters. Fast; the correctness of the datatype itself lives here.
-test/core:
+test/core: ## Datatype unit layer only — fast, no infrastructure
 	$(GOTEST) .
 
 # test/core/coverage — the datatype layer with statement coverage. Prints a
@@ -96,7 +121,7 @@ test/core:
 #   go tool cover -func=coverage-core.out | grep node.go
 # or open the annotated source with:
 #   go tool cover -html=coverage-core.out
-test/core/coverage:
+test/core/coverage: ## test/core with a per-file coverage breakdown
 	@$(GOTEST) . -covermode=atomic -coverprofile=coverage-core.out
 	@echo ""
 	@echo "coverage by file:"
@@ -110,7 +135,7 @@ test/core/coverage:
 # (RANKE_FS_DIR, default /tmp/ranke-go-test) that TestMain wipes and
 # recreates each run; the path is echoed so it's visible without `-v`.
 RANKE_FS_DIR ?= /tmp/ranke-go-test
-test/integration:
+test/integration: ## Archive/Sequencer blackbox suite across adapters
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) ./tests/... && \
 	echo "" && \
 	echo "fs archive directory (preserved for inspection):" && \
@@ -124,7 +149,7 @@ test/integration:
 #   services/redis.sh native up    # the redis row
 #   services/s3.sh native up       # the s3 row, and the neo4j/redis/s3 stack
 # Verbose so the per-row, per-query sub-tests are visible.
-test/matrix:
+test/matrix: ## Cross-backend RQL conformance matrix (RANKE_ROWS to narrow; needs services up)
 	$(GOTEST) ./tests/matrix/ -v -count=1
 
 # test/concurrency/N — N writers contributing at once, over every (Sequencer,
@@ -153,7 +178,7 @@ test/performance/%:
 # run it offline. Unreachable is a failure, here as in CI: not checking conformance
 # is worse than a red run. The bundle is cached and revalidated, so a run that finds
 # the release unchanged transfers nothing.
-test/vectors:
+test/vectors: ## The published cross-implementation conformance vectors (RANKE_TESTDATA_DIR to work offline)
 	go test ./tests/ -run TestPublished -v -count=1
 
 # test — the fast gate, and one pass over every package: the datatype, the feature
@@ -164,7 +189,7 @@ test/vectors:
 #
 # What it deliberately does not do: the performance benchmark, the 10k-claim scale
 # set, and the service rows. `make test/full` is where those live.
-test:
+test: ## Fast gate: one pass over ./..., the rows needing no service (RANKE_ROWS to change)
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_ROWS=$(FAST_ROWS) $(GOTEST) ./...
 
 # test/full — everything, and the target CI runs, so the gate and the local run are
@@ -182,7 +207,7 @@ test:
 # Guarded because it is minutes, CI runs it on every push, and it was being reached
 # for during ordinary work where `make test` was the answer. CI passes the guard by
 # being CI; a person passes it by saying so.
-test/full: full-intended
+test/full: full-intended ## Full gate: every backend row, benchmark, 10k-claim scale, scenario docs (needs RANKE_FULL=1)
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) RANKE_PERF_SIZE=$(FULL_PERF_SIZE) RANKE_SCALE=1 \
 		$(GOTEST) -timeout 30m ./...
 	@$(MAKE) verify-scenarios verify-docs
@@ -207,20 +232,20 @@ full-intended:
 		exit 1; \
 	fi
 
-test-verbose:
+test-verbose: ## Verbose test run over ./tests/...
 	$(GOTEST) -v ./tests/...
 
 # Merged library coverage from `go test ./...`. -coverpkg attributes
 # coverage to the /tests package, which imports the library. (Packages
 # without _test.go files, like conformance, are skipped by go test.)
-coverage:
+coverage: ## Merged library coverage (writes coverage.out)
 	@RANKE_FS_DIR=$(RANKE_FS_DIR) $(GOTEST) -coverpkg=$(COVERPKG) \
 		-covermode=atomic -coverprofile=coverage.out $(COVERDRIVERS)
 	@go tool cover -func=coverage.out | tail -1
 
 # Map of where coverage is missing: every library function below 100%,
 # worst first. Refreshes the profile via `coverage` first.
-coverage-gaps: coverage
+coverage-gaps: coverage ## Functions below 100% coverage, worst first
 	@echo ""
 	@echo "Functions below 100% coverage (worst first):"
 	@go tool cover -func=coverage.out \
@@ -230,26 +255,35 @@ coverage-gaps: coverage
 
 # Narrative output: scenarios print what they are doing at every step.
 # Useful for understanding what the integration suite covers.
-test-debug:
+test-debug: ## Narrative integration/provenance run, verbose
 	$(GOTEST) -v -run "TestIntegration|TestProvenance" ./...
 
 # Static checks.
-vet:
+vet: ## go vet ./...
 	go vet ./...
 
-fmt:
+fmt: ## gofmt -w . (writes)
 	gofmt -w .
 
 # Fail if any Go file is not gofmt-clean (lists the offenders). The check half
 # of `fmt`; wired into `verify`. Skips .worktrees (sibling agent checkouts).
-fmt-check:
+fmt-check: ## Fail if any Go file needs gofmt — the check half of fmt
 	@out="$$(find . -path ./.worktrees -prune -o -name '*.go' -print | xargs gofmt -l)"; \
 	if [ -n "$$out" ]; then \
 		echo "gofmt needed (run 'make fmt'):"; echo "$$out"; exit 1; \
 	fi
 
-tidy:
+tidy: ## go mod tidy
 	go mod tidy
+
+# $(RELEASE_CYCLER) is a file target with no prerequisite, so once cached under bin/
+# it is never re-fetched on its own — a stale copy (missing a ranke-graph fix) would
+# sit there forever otherwise. upgrade is the one command that already means "bring
+# everything to latest", so refreshing it here is what makes that true.
+upgrade: ## Upgrade all deps and brokkr to latest, tidy, then check; asks before raising the go directive (GO_VERSION=keep|1.26.5)
+	@GO_VERSION=$(GO_VERSION) ./scripts/upgrade.sh
+	@rm -f $(RELEASE_CYCLER)
+	@$(MAKE) $(RELEASE_CYCLER)
 
 # Cut a release: verify → rebase onto the default branch → merge via PR → tag the
 # merged tip → push the tag → watch the release workflow, failing here if it fails.
@@ -258,7 +292,20 @@ tidy:
 # `make release pre <bump>` tags a candidate on the branch instead, merging nothing —
 # a version the proxy resolves, so ranke-graph can regenerate the vectors before the
 # real release is cut. See scripts/release.sh for why that order matters.
-release: verify
+# check-clean-tree first, ahead of verify: a dirty tree is a free, instant check,
+# and verify is not — failing on it should not cost a build first.
+check-clean-tree:
+	@[ -z "$$(git status --porcelain)" ] || { echo "working tree is dirty — commit or stash before releasing" >&2; exit 1; }
+
+# Same reasoning as check-clean-tree: a missing or misspelled bump word is a free,
+# instant check, and verify is not — release-cycle.sh (or scripts/release.sh, for a
+# prerelease) has its own case statement that validates it too, but only after
+# verify already ran.
+check-release-bump:
+	@[ -n "$(filter major minor patch breaking feature fix,$(MAKECMDGOALS))" ] || \
+		{ echo "usage: make release [pre] <major|breaking | minor|feature | patch|fix>" >&2; exit 1; }
+
+release: check-clean-tree check-release-bump verify $(RELEASE_CYCLER) ## Cut a release: make release <major|minor|patch> (aliases breaking|feature|fix; prefix pre for a candidate)
 	@./scripts/release.sh $(filter pre major minor patch breaking feature fix,$(MAKECMDGOALS))
 
 # Absorb the positional bump word in `make release <bump>` so it isn't treated
@@ -266,8 +313,13 @@ release: verify
 pre major minor patch breaking feature fix:
 	@:
 
+$(RELEASE_CYCLER): ## Cache release-cycle.sh from ranke-graph (bin/ is gitignored — infra, never vendored)
+	@mkdir -p $(dir $(RELEASE_CYCLER))
+	@curl -fsSL $(RELEASE_CYCLER_URL) -o $(RELEASE_CYCLER)
+	@chmod +x $(RELEASE_CYCLER)
+
 # Run every conformance scenario from a clean state.
-scenarios:
+scenarios: ## Run every conformance scenario from a clean state
 	@conformance/run.sh
 
 # Run each scenario fresh and diff the produced bundle against the committed
@@ -275,34 +327,29 @@ scenarios:
 # Wired into `verify`, so anything that moves an id fails here first — the ids are
 # signatures, and the reference bundle is the only thing holding them to a value.
 #
-# B_h is compared on its id and height columns only. Its third column is the wall
-# clock at which a head was committed, so a byte diff of it can never pass — the
-# timeline records when, which is exactly the part that does not reproduce.
+# B_h is one bookmark id from the archive's list (§Bookmarks) — a scenario's
+# Sequencer derives its seed deterministically, so the id is fixed rather than
+# timestamped and byte-diffs like every other file here.
 #
 # Update after an intentional change: `make update-references`. Regenerating is
 # not the same as checking: the bundle is self-generated, so promote it only
 # after reading what changed and confirming each scenario still verifies clean.
-verify-scenarios:
+verify-scenarios: ## Diff each scenario's fresh run against its committed reference
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- verify $$d ---"; \
 		(cd "$$d" && rm -rf data && go run . > /dev/null); \
-		want=$$(mktemp); got=$$(mktemp); \
-		awk '{print $$1, $$2}' "$$d/data_reference/branches/B_h" > "$$want"; \
-		awk '{print $$1, $$2}' "$$d/data/branches/B_h" > "$$got"; \
-		if diff -r --exclude=B_h "$$d/data_reference" "$$d/data" > /dev/null \
-			&& diff "$$want" "$$got" > /dev/null; then \
+		if diff -r "$$d/data_reference" "$$d/data" > /dev/null; then \
 			echo "$$d: matches reference ✓"; \
 		else \
 			echo "$$d: DRIFT — differs from checked-in reference"; \
-			rm -f "$$want" "$$got"; exit 1; \
+			exit 1; \
 		fi; \
-		rm -f "$$want" "$$got"; \
 	done
 
 # Replace each scenario's archive_reference/ + ids_reference.txt
 # with its current generated outputs. Run after an intentional
 # scenario change, review the diff, then commit.
-update-references:
+update-references: ## Promote each scenario's fresh run to its committed reference (review before commit)
 	@for d in $(SCENARIO_DIRS); do \
 		echo "--- update $$d ---"; \
 		(cd "$$d" && rm -rf data && go run . > /dev/null); \
@@ -311,7 +358,7 @@ update-references:
 	done
 	@echo "References updated. Review with: git diff conformance/scenarios/"
 
-clean:
+clean: ## Remove bin/, dist/, and generated scenario data
 	rm -rf bin/ dist/
 	@for d in $(SCENARIO_DIRS); do \
 		rm -rf "$$d/data"; \
@@ -319,12 +366,12 @@ clean:
 
 # Regenerate each scenario.md from comments in main.go + the
 # template at conformance/helpers/scenario.md.tmpl.
-scenarios-docs:
+scenarios-docs: ## Regenerate each scenario.md from its main.go comments
 	@go run ./cmd/scenariodoc
 
 # Verify scenario.md files are in sync with main.go comments.
 # Regenerates and diffs against checked-in state — fails on drift.
-verify-docs: scenarios-docs
+verify-docs: scenarios-docs ## Fail if scenario.md is out of sync with main.go
 	@git diff --exit-code conformance/scenarios/*/scenario.md \
 		|| { echo "scenario.md out of sync — run 'make scenarios-docs' and commit"; exit 1; }
 
@@ -335,7 +382,7 @@ verify-docs: scenarios-docs
 # VERSION defaults to the current git describe (tag if on one, else
 # short SHA). Override with `make conformance-bundle VERSION=v0.2.0`.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-conformance-bundle: verify-scenarios scenarios-docs
+conformance-bundle: verify-scenarios scenarios-docs ## Pack conformance/ into dist/ranke-conformance-<VERSION>.tar.gz
 	@mkdir -p dist
 	@BUNDLE=ranke-conformance-$(VERSION); \
 	WORK=$$(mktemp -d); \
@@ -350,7 +397,7 @@ conformance-bundle: verify-scenarios scenarios-docs
 
 # Pull the latest ranke-graph papers into docs/papers/ for reference.
 # Not committed — fetched fresh (see .gitignore).
-docs:
+docs: ## Pull the latest ranke-graph papers into docs/papers/ (not committed)
 	@RANKE_GRAPH_REPO=$(RANKE_GRAPH_REPO) RANKE_GRAPH_REF=$(RANKE_GRAPH_REF) \
 		PAPERS_DIR=$(PAPERS_DIR) ./scripts/fetch-papers.sh
 
@@ -366,24 +413,29 @@ docs:
 #
 # It needs the network. RANKE_DOCS_OFFLINE=1 keeps the copy on disk instead, and
 # RANKE_SPEC / RANKE_RQL_SCHEMA point the individual gates at a copy of your own.
-docs-current:
+docs-current: ## Re-pull docs/papers/ only if ranke-graph moved (what verify depends on)
 	@RANKE_GRAPH_REPO=$(RANKE_GRAPH_REPO) RANKE_GRAPH_REF=$(RANKE_GRAPH_REF) \
 		PAPERS_DIR=$(PAPERS_DIR) ./scripts/fetch-papers.sh --if-moved
 
 # Remove the pulled paper references.
-docs-clean:
+docs-clean: ## Remove the pulled paper references
 	rm -rf $(PAPERS_DIR)
 
 # brokkr static-analysis gate: canonical headers, exported-doc coverage,
 # deadcode (with --test), and the line-count limit.
-lint: tools
+lint: tools ## Run the brokkr static-analysis gate
 	$(BROKKR) lint
 
-# Install or update brokkr at $(BROKKR). pipefail is what makes a failed download
-# fail here: without it bash reads an empty script, exits 0, and the missing binary
-# surfaces one target later as a puzzle.
-tools:
+# Install or update brokkr at $(BROKKR), unless the environment already provides one
+# (-> BROKKR_PROVIDED), in which case there is nothing to fetch and nothing that can
+# fail. pipefail is what makes a failed download fail here: without it bash reads an
+# empty script, exits 0, and the missing binary surfaces one target later as a puzzle.
+tools: ## Install or update brokkr at bin/tools/brokkr (nothing to do where one is provided)
+ifneq ($(BROKKR_PROVIDED),)
+	@echo "brokkr provided by the environment: $(BROKKR_PROVIDED)"
+else
 	@bash -o pipefail -c 'curl -fsSL $(BROKKR_INSTALLER) | bash -s -- $(BROKKR)'
+endif
 
 # Rule-citation gate: every backticked `V-…`/`R-…` id a comment cites is one the
 # spec declares, and every declared rule is either cited or listed in
@@ -392,7 +444,7 @@ tools:
 #
 # The spec comes from $(PAPERS_DIR), or from RANKE_SPEC when you are working
 # against a copy of your own:  make rule-citations RANKE_SPEC=path/to/spec.typ
-rule-citations:
+rule-citations: ## Every cited V-*/R-* rule id exists in the spec, and every declared one is accounted for
 	@./scripts/rule-citations.sh
 
 # Rule-coverage gate for the published reference vectors: every ADT (V-*) rule the
@@ -402,7 +454,7 @@ rule-citations:
 #
 # Coverage is per RULE, not per clause — see the script's header for what that misses.
 # Needs the spec, like rule-citations; RANKE_SPEC points it at a copy.
-rule-vectors:
+rule-vectors: ## Every declared V-* rule has a conformance case that breaks it, or is on the allowlist
 	@./scripts/rule-vectors.sh
 
 # rql-schema: the machine-readable projection of the query language against the Go
@@ -411,7 +463,7 @@ rule-vectors:
 # Needs the schema from gitignored docs/papers/, which `verify` fetches through
 # `docs-current` before this runs; on its own it fails on a bare checkout rather than
 # passing blind. RANKE_RQL_SCHEMA points it elsewhere.
-rql-schema:
+rql-schema: ## Check the Go query implementation against rql.schema.json
 	@go run ./scripts/rqlgate
 
 # The static gates: build the binaries, check formatting, run the lint gate, check
@@ -433,15 +485,15 @@ rql-schema:
 # the desk, and that is how the 0.18.0 signature framing landed against a bundle
 # it had invalidated. `release` depends on this target, so an id-moving release
 # now stops here rather than shipping a reference that reproduces nothing.
-verify: docs-current build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios
+verify: docs-current build fmt-check lint rule-citations rule-vectors rql-schema verify-scenarios ## Static gates: docs, build, gofmt, lint, rule citations, scenario bundles
 
 # One-shot "is everything green", and the name people reach for, so it costs what
 # that name promises: the static gates, vet, and the fast suite. Seconds. The full
 # suite against live services is `RANKE_FULL=1 make test/full`, which CI runs on
 # every push.
-check: verify vet test
+check: verify vet test ## Everything green: static gates + vet + the fast suite
 
 # check/full — check with the full suite instead of the fast one: the gate CI runs,
 # and what to run by hand before a release. Guarded through test/full, so it needs
 # GITHUB_ACTIONS, CI or RANKE_FULL.
-check/full: verify vet test/full
+check/full: verify vet test/full ## check, with the full suite instead of the fast one (needs RANKE_FULL=1)

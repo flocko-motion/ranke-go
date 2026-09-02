@@ -1,7 +1,7 @@
 // package: main / vectors_graph
 // type:    cmd
-// job:     the toy graph every implementation must verify — one claim per ADT shape, small enough
-// that a reader can check each record against §4.1 by eye
+// job:     the conformance graph every implementation must verify — one claim per ADT shape, small
+// enough that a reader can check each record against §4.1 by eye
 // limits:  valid records only; the rejected ones derive from these (-> broken.go)
 package main
 
@@ -19,10 +19,10 @@ var externalBlob = []byte("externalized content, addressed by hash")
 // rootSeed derives the identity that signs most of the set, patched records included.
 const rootSeed = "ranke-vectors/root"
 
-// toyGraph builds the claims that must verify: a contributor, a source note, a
-// derived claim citing it, external content, node fields, a dated claim, and a
-// second contributor.
-func (g *gen) toyGraph(ctx context.Context) error {
+// conformanceGraph builds the claims that must verify: a contributor, a source note, a
+// derived claim citing it, external content, node fields, a dated claim, the
+// archive's empty branch table and one revision of it, and a second contributor.
+func (g *gen) conformanceGraph(ctx context.Context) error {
 	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
 		return err
@@ -57,6 +57,13 @@ func (g *gen) toyGraph(ctx context.Context) error {
 		return err
 	}
 	if err := g.dated(who); err != nil {
+		return err
+	}
+	table, err := g.branchTable(root, who)
+	if err != nil {
+		return err
+	}
+	if err := g.tableRevision(table, who); err != nil {
 		return err
 	}
 	return g.secondContributor(ctx)
@@ -143,6 +150,41 @@ func (g *gen) dated(who ranke.Contributor) error {
 	}
 	return g.addClaim("dated", c,
 		"dated as EDTF's date-and-time form (V-DATED) — a numeric offset, no fractional seconds")
+}
+
+// branchTable adds the empty contribution/branches claim a new archive is created
+// with: its id is the archive's head k, and the initial claim is its only
+// reference, so it stands at height 1 (`V-ARCHIVEHEIGHT`, §Ranke-Archive).
+func (g *gen) branchTable(root ranke.Claim, who ranke.Contributor) (ranke.Claim, error) {
+	c, err := ranke.NewClaim(ranke.NodeBranches, who).
+		WithHeight(ranke.HeightOf(root)).
+		WithCreatedAt(epoch.Add(8 * time.Second)).
+		Sign()
+	if err != nil {
+		return nil, err
+	}
+	return c, g.addClaim("branch-table", c,
+		"the empty initial branch table, this archive's head k (§Ranke-Archive)")
+}
+
+// tableRevision adds the archive's second head k₁: a branch table restating the whole
+// table rather than diffing over it, so it carries a contribution/branches edge to its
+// predecessor and is a base claim (`R-C6MERGE`). The bookmark list records both heads.
+func (g *gen) tableRevision(prev ranke.Claim, who ranke.Contributor) error {
+	e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: prev.ID(), Type: ranke.EdgeTypeBranches})
+	if err != nil {
+		return err
+	}
+	c, err := ranke.NewClaim(ranke.NodeBranches, who).
+		WithEdges(e).
+		WithHeight(ranke.HeightOf(prev)).
+		WithCreatedAt(epoch.Add(9 * time.Second)).
+		Sign()
+	if err != nil {
+		return err
+	}
+	return g.addClaim("branch-table-revision", c,
+		"the archive's second head k₁, restating the table over its predecessor (§Branches)")
 }
 
 // secondContributor adds a second identity and a claim of its own, so a case can

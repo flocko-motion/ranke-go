@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 )
 
@@ -26,10 +25,11 @@ const (
 	SourcesDir = "../../fixtures/sources"
 	// DataDir is the scenario's output bundle: tar it and you have
 	// everything a verifier needs.
-	DataDir             = "./data"
-	UniverseDir         = DataDir + "/universe"
-	BranchTableHeadPath = DataDir + "/branches/B_h"
-	IdsPath             = DataDir + "/ids.txt"
+	DataDir     = "./data"
+	UniverseDir = DataDir + "/universe"
+	// BookmarkIdPath holds the one bookmark id the bundle is reopened from.
+	BookmarkIdPath = DataDir + "/branches/B_h"
+	IdsPath        = DataDir + "/ids.txt"
 )
 
 // Scenario holds the running state of one conformance scenario: its
@@ -43,7 +43,7 @@ type Scenario struct {
 // whose logical clock starts at at.
 func New(title string, at time.Time) *Scenario {
 	fmt.Printf("scenario %s\n\n", title)
-	fmt.Printf("output bundle:\n  %s/\n    universe/   (claims + content)\n    branches/B_h\n    ids.txt\n\n", DataDir)
+	fmt.Printf("output bundle:\n  %s/\n    universe/   (claims, content, bookmarks)\n    branches/B_h\n    ids.txt\n\n", DataDir)
 	if err := os.RemoveAll(DataDir); err != nil {
 		log.Fatalf("scenario.New: wipe %s: %v", DataDir, err)
 	}
@@ -63,14 +63,27 @@ func (s *Scenario) NextTimestamp(d ...time.Duration) time.Time {
 // so scenario claims and minted branch tables share one monotone timeline.
 func (s *Scenario) Tick() time.Time { return s.NextTimestamp(time.Second) }
 
+// WriteBookmarkId persists one of seq's bookmark ids to BookmarkIdPath — the one value
+// (foundation paper §Backup) a bundle must carry to be reopened, since there is no way
+// to discover it. A scenario calls this once its Sequencer has bootstrapped, before
+// ReloadAndVerify (or any other process) needs it.
+func WriteBookmarkId(seq ranke.Sequencer) {
+	if err := os.MkdirAll(filepath.Dir(BookmarkIdPath), 0o755); err != nil {
+		log.Fatalf("scenario.WriteBookmarkId: mkdir: %v", err)
+	}
+	Must(0, os.WriteFile(BookmarkIdPath, []byte(seq.BookmarkId().String()+"\n"), 0o644))
+}
+
 // ReloadAndVerify reopens the persisted bundle at its latest head, validates every
 // branch closure, requires expectBranch among them, and writes ids.txt. What the head
 // ids are is the reference bundle's business, so nothing here pins one: a value in
 // code could only be corrected by hand on every intentional change.
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch string) {
 	u := Must(fs.New(UniverseDir))
-	hist := Must(histfile.New(BranchTableHeadPath))
-	head := Must(hist.Latest(ctx)).GetId() // the archive head k the timeline advanced to
+	hist := Must(fs.NewBookmarks(UniverseDir))
+	id := Must(ranke.ParseId(strings.TrimSpace(string(Must(os.ReadFile(BookmarkIdPath))))))
+	marks := Must(ranke.OpenBookmarks(ctx, hist, u, id))
+	head := Must(marks.Latest(ctx)).Head() // the archive head k the list advanced to
 	arc := Must(ranke.NewArchive(ctx, u, head))
 
 	allIds := make(map[string]struct{})

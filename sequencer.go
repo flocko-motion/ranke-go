@@ -21,11 +21,16 @@ type Sequencer interface {
 	// GetContributor returns the contributor the Sequencer attests branch
 	// advances with.
 	GetContributor() Contributor
+	// BookmarkId returns the id of a bookmark in this archive's list — the one
+	// written at bootstrap. Any single bookmark id recovers the latest recorded
+	// head (foundation paper §Backup), so this is what a bundle keeps to be
+	// reopened later via OpenBookmarks.
+	BookmarkId() Id
 	// NewContribution opens a contribution against the current archive, under the
 	// constraints opts declare (step 1).
 	NewContribution(ctx context.Context, opts ...ContributionOption) (Contribution, error)
-	// Merge commits a persisted contribution, advancing the head (step 6),
-	// and returns a Receipt.
+	// Merge commits a persisted contribution: it mints the branch table (step 6)
+	// and takes the advance into effect against a new bookmark (step 7).
 	Merge(ctx context.Context, c MergableContribution) (Receipt, error)
 }
 

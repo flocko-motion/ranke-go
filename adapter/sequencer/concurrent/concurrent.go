@@ -1,7 +1,7 @@
 // package: adapter/sequencer/concurrent / adapter
 // type:    adapter
-// job:     the concurrent Sequencer — the paper's six steps with 2–5 run in parallel off the
-// sequencing thread, and step 6 a serialised group commit folding a whole batch of
+// job:     the concurrent Sequencer — the paper's seven steps with 2–5 run in parallel off the
+// sequencing thread, and steps 6–7 a serialised group commit folding a whole batch of
 // contributions into ONE branch-table advance
 // limits:  single-process (the sequencing thread is a mutex, not consensus); its committed-id set
 // grows with the archive; step 6 costs one closure test per contributed head, so a
@@ -39,7 +39,7 @@ type Clock interface {
 // consolidates the first's head alongside its own.
 type Sequencer struct {
 	u     ranke.Universe
-	hist  ranke.History
+	marks *ranke.Bookmarks
 	self  ranke.Contributor
 	clock Clock
 
@@ -81,9 +81,10 @@ type receipt struct{ head ranke.Id }
 func (r receipt) Head() ranke.Id { return r.head }
 
 // NewSequencer bootstraps a fresh archive over u: it stores self and mints the
-// empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive).
-// self must carry a signing key, which every branch table it mints is signed with.
-func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+// empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive),
+// bookmarked at index 0 in hist under a freshly minted seed. self must carry a
+// signing key, which every branch table and every bookmark it writes is signed with.
+func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.BookmarkStore, self ranke.Contributor, clock Clock) (*Sequencer, error) {
 	if u == nil || hist == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
@@ -91,7 +92,7 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 		return nil, errNoSigningKey
 	}
 	s := &Sequencer{
-		u: u, hist: hist, self: self, clock: clock,
+		u: u, marks: ranke.NewBookmarks(hist, u, nil), self: self, clock: clock,
 		heads:     map[string]ranke.Id{},
 		committed: map[string]struct{}{},
 	}
@@ -100,13 +101,13 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 	if err := s.u.PutClaims(ctx, []ranke.Claim{self}); err != nil {
 		return nil, fmt.Errorf("%w: store contributor: %w", errNewSequencer, err)
 	}
-	// Empty branch table → archive head k₀, revision 0.
+	// Empty branch table → archive head k₀, bookmark index 0.
 	bt0, err := s.mintBranchTable(ctx, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, bt0.ID(), int(bt0.Node().Height()), 0); err != nil {
-		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
+	if _, err := s.marks.Append(ctx, self, bt0.ID()); err != nil {
+		return nil, fmt.Errorf("%w: bookmark k₀: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
 	s.markCommitted(self.ID(), bt0.ID())
@@ -120,6 +121,9 @@ func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.History, sel
 
 // GetContributor returns the contributor branch advances are signed with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
+
+// BookmarkId returns the id of the bookmark written at bootstrap.
+func (s *Sequencer) BookmarkId() ranke.Id { return s.marks.BookmarkId() }
 
 // currentHead reads the archive head k under the sequencing thread.
 func (s *Sequencer) currentHead() ranke.Id {
@@ -148,7 +152,7 @@ func (s *Sequencer) NewContribution(ctx context.Context, opts ...ranke.Contribut
 	}, nil
 }
 
-// Merge is step 6: it queues the contribution, then races the other writers for
+// Merge is steps 6–7: it queues the contribution, then races the other writers for
 // the sequencing thread. Enqueueing strictly before contending for the lock
 // strands nothing — a caller holding it finds its entry committed or in its batch.
 func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (ranke.Receipt, error) {
@@ -202,9 +206,9 @@ func (s *Sequencer) drain(ctx context.Context) {
 	}
 }
 
-// commit performs step 6 for a batch: fold each touched branch into a new head,
-// mint ONE branch table restating them, append to history, then publish — the
-// mutation coming last, so a failure changes nothing.
+// commit performs steps 6–7 for a batch: fold each touched branch into a new head,
+// mint ONE branch table restating them, bookmark it, then publish — the mutation
+// coming last, so a failure changes nothing.
 func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	byBranch := map[string][]ranke.Id{}
 	for _, p := range batch {
@@ -243,12 +247,11 @@ func (s *Sequencer) commit(ctx context.Context, batch []*pending) error {
 	if err != nil {
 		return err
 	}
-	revision, err := s.hist.Len(ctx)
-	if err != nil {
-		return fmt.Errorf("%w: history length: %w", errSequencer, err)
-	}
-	if _, err := s.hist.Append(ctx, bt.ID(), int(bt.Node().Height()), revision); err != nil {
-		return fmt.Errorf("%w: append history: %w", errSequencer, err)
+	// Step 7 is where the advance k→k' takes effect, and it writes k' as the next
+	// bookmark (`R-C7BOOKMARK`) — Append derives the index itself, so this can neither
+	// skip a slot nor clobber one already written.
+	if _, err := s.marks.Append(ctx, s.self, bt.ID()); err != nil {
+		return fmt.Errorf("%w: bookmark advance: %w", errSequencer, err)
 	}
 
 	for b, h := range newHeads {

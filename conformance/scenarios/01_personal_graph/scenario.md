@@ -32,7 +32,7 @@ Run from anywhere:
 
 ### 6. "Bob and Bob Jr are family" (symmetric) — Bob already built.
 
-### 7. Compose the bundle (filesystem Universe under data/universe/, head-id timeline under data/branches/B_h) and merge one contribution carrying every claim. The dev Sequencer runs the paper's six steps — verify, auto-consolidate the open heads, seed, and mint the branch table — advancing branch "main". Real deployments would stack a mem cache on top, or swap S3 in below; this keeps it flat so the bundle is just a directory.
+### 7. Compose the bundle (filesystem Universe under data/universe/, its bookmark list co-located there under a key prefix, one bookmark id under data/branches/B_h) and merge one contribution carrying every claim. The dev Sequencer runs the paper's seven steps — verify, auto-consolidate the open heads, mint the branch table, bookmark it — advancing branch "main". Real deployments would stack a mem cache on top, or swap S3 in below; this keeps it flat so the bundle is just a directory.
 
 ### 8. Reload, verify every branch closure, dump ids.
 
@@ -40,13 +40,12 @@ Run from anywhere:
 
 `data_reference/` is the committed bundle the scenario emits. A conformant
 implementation reproduces every claim and content blob byte-for-byte, and reaches the
-same branch heads at the same heights. B_h's third column is the wall clock at which
-each head was committed, so it is the one thing that does not reproduce.
+same branch heads at the same heights.
 
 ```
 data_reference/
-  universe/       claims + content blobs (content-addressed)
-  branches/B_h    id of the current contribution/branches claim
+  universe/       claims, content blobs, and the bookmark list under a key prefix
+  branches/B_h    one bookmark id, which recovers the latest recorded head
   ids.txt         sorted set of every id in the closure
 ```
 

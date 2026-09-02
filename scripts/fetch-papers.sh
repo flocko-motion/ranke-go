@@ -31,7 +31,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-repo="${RANKE_GRAPH_REPO:-https://github.com/flocko-motion/ranke-graph}"
+repo="${RANKE_GRAPH_REPO:-https://github.com/rankegraph/ranke-graph}"
 ref="${RANKE_GRAPH_REF:-main}"
 dir="${PAPERS_DIR:-docs/papers}"
 stamp="$dir/.ranke-graph-sha"

@@ -142,8 +142,9 @@ func nameFor(master int64, index int) string {
 }
 
 // datedForms cycles through the EDTF Level 1 corners `V-DATED` admits: a plain date,
-// an interval, an unspecified-digit year, and a qualified value.
-var datedForms = []string{"2014-06-11", "2014/2016", "201X", "2014?"}
+// an interval, an unspecified-digit year, a qualified value, and an instant carrying a
+// time of day — the one corner whose span is narrower than a day.
+var datedForms = []string{"2014-06-11", "2014/2016", "201X", "2014?", "2014-06-11T09:30:00+02:00?"}
 
 // datedFor returns a deterministic `dated` value for a claim, one of datedForms.
 func datedFor(index int) string {

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/tests/helpers"
 )
@@ -54,18 +53,17 @@ type Manifest struct {
 }
 
 // Generate builds the archive described by spec into u over the dev testkit
-// (deterministic clock, in-memory history, blocking Sequencer), returning its
-// Manifest. Same (u-kind, spec) → identical ids on every run.
+// (deterministic clock, blocking Sequencer), returning its Manifest. Same
+// (u-kind, spec) → identical ids on every run.
 func Generate(ctx context.Context, u ranke.Universe, spec Spec) (*Manifest, error) {
 	clock := NewClock(spec.Base, spec.Step)
-	hist := devhist.New(clock)
 
 	// Contributor 0 is the operator the Sequencer signs branch tables with.
 	op, err := contributor(ctx, spec.Seed, 0, clock.Tick())
 	if err != nil {
 		return nil, fmt.Errorf("%w: operator: %w", errGenerate, err)
 	}
-	seq, err := devseq.NewSequencer(ctx, u, hist, op, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clock)
 	if err != nil {
 		return nil, fmt.Errorf("%w: sequencer: %w", errGenerate, err)
 	}

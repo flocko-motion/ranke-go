@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	historymem "github.com/rankegraph/ranke-go/adapter/history/mem"
 	concseq "github.com/rankegraph/ranke-go/adapter/sequencer/concurrent"
 	"github.com/rankegraph/ranke-go/tests/helpers"
 	"github.com/stretchr/testify/require"
@@ -51,22 +50,26 @@ func operator(t *testing.T, ctx context.Context, at time.Time) ranke.Contributor
 }
 
 type fixture struct {
-	u    ranke.Universe
-	hist ranke.History
-	seq  *concseq.Sequencer
-	op   ranke.Contributor
-	clk  *clock
+	u     ranke.Universe
+	marks *ranke.Bookmarks
+	seq   *concseq.Sequencer
+	op    ranke.Contributor
+	clk   *clock
 }
 
 func newFixture(t *testing.T, ctx context.Context) *fixture {
 	t.Helper()
 	u := ranke.NewMemoryUniverse()
-	hist := historymem.New()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
+	hist := ranke.NewMemoryBookmarks()
 	seq, err := concseq.NewSequencer(ctx, u, hist, op, clk)
 	require.NoError(t, err)
-	return &fixture{u: u, hist: hist, seq: seq, op: op, clk: clk}
+	// A second, independent view over the same bookmark list, reached the way any
+	// external reader would: from one bookmark id, never discovered (paper §Backup).
+	marks, err := ranke.OpenBookmarks(ctx, hist, u, seq.BookmarkId())
+	require.NoError(t, err)
+	return &fixture{u: u, marks: marks, seq: seq, op: op, clk: clk}
 }
 
 // note builds a source/note claim attributed to the operator: its only reference
@@ -203,7 +206,7 @@ func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
 	_, err = helpers.Contribute(ctx, f.seq, "beta", []ranke.Claim{seedB})
 	require.NoError(t, err)
 	beforeA, beforeB := f.branchHead(t, ctx, "alpha"), f.branchHead(t, ctx, "beta")
-	revisions, err := f.hist.Len(ctx)
+	revisions, err := f.marks.Len(ctx)
 	require.NoError(t, err)
 
 	onAlpha, onBeta := f.note(t, "for alpha"), f.note(t, "for beta")
@@ -221,7 +224,7 @@ func TestOneContributionAdvancesSeveralBranches(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, r.Head().Equal(f.head(t, ctx)))
 
-	after, err := f.hist.Len(ctx)
+	after, err := f.marks.Len(ctx)
 	require.NoError(t, err)
 	require.Equal(t, revisions+1, after, "one contribution, one revision, two branches advanced")
 	require.False(t, beforeA.Equal(f.branchHead(t, ctx, "alpha")), "alpha advanced")

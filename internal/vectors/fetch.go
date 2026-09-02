@@ -23,7 +23,7 @@ import (
 
 // LatestURL serves the newest published artifact set. The asset name carries no
 // version, so this URL is stable while what it returns moves.
-const LatestURL = "https://github.com/flocko-motion/ranke-graph/releases/latest/download/ranke-testdata.tar.gz"
+const LatestURL = "https://github.com/rankegraph/ranke-graph/releases/latest/download/ranke-testdata.tar.gz"
 
 // maxBundle caps what will be read from the network, so a wrong URL cannot fill the
 // disk. The real set is a few kilobytes.

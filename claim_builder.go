@@ -177,7 +177,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkClaim(cfg); err != nil {
+	if err := checkClaim(cfg, edges); err != nil {
 		return nil, err
 	}
 
@@ -222,7 +222,7 @@ func buildClaim(cfg ClaimBuilder) (Claim, error) {
 
 // checkClaim applies the rules a claim must satisfy, which AllowInvalid skips. The
 // steps around it resolve and seal, so what it governs is validity alone.
-func checkClaim(cfg ClaimBuilder) error {
+func checkClaim(cfg ClaimBuilder, edges []*edge) error {
 	if cfg.allowInvalid {
 		return nil
 	}

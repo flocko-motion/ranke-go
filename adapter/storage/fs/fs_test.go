@@ -122,3 +122,71 @@ func TestStreamContent(t *testing.T) {
 		}
 	})
 }
+
+// TestBookmarksShareTheDirectory is `R-BMPREFIX`, and the collision it exists to rule
+// out is real rather than theoretical: external content whose bytes are S([i, s]) is
+// stored at H(c) = id_seq(i, s), which is a bookmark's own slot. One directory holds
+// both here, so unprefixed the two would overwrite each other.
+func TestBookmarksShareTheDirectory(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	u, err := New(dir)
+	if err != nil {
+		t.Fatalf("fs.New: %v", err)
+	}
+	hist, err := NewBookmarks(dir)
+	if err != nil {
+		t.Fatalf("fs.NewBookmarks: %v", err)
+	}
+
+	// The content whose hash IS the slot: S([0, s]) stored under H(c).
+	seed := []byte("prefix-collision-seed")
+	collide, err := ranke.MarshalCBOR([]any{uint64(0), seed})
+	if err != nil {
+		t.Fatalf("marshal id_seq input: %v", err)
+	}
+	slot, err := ranke.IdSeq(0, seed)
+	if err != nil {
+		t.Fatalf("IdSeq: %v", err)
+	}
+	if err := ranke.PutContent(ctx, u, slot, collide); err != nil {
+		t.Fatalf("put content at the slot's hash: %v", err)
+	}
+
+	record := []byte("a bookmark record, not content")
+	if err := hist.Put(ctx, slot, record); err != nil {
+		t.Fatalf("put bookmark: %v", err)
+	}
+
+	got, err := hist.Get(ctx, slot)
+	if err != nil {
+		t.Fatalf("get bookmark: %v", err)
+	}
+	if string(got) != string(record) {
+		t.Fatalf("bookmark reads back as %q, want %q", got, record)
+	}
+	back, err := u.GetContents(ctx, []ranke.ContentRef{{Hash: slot, ContentSize: uint64(len(collide))}})
+	if err != nil {
+		t.Fatalf("get content: %v", err)
+	}
+	if string(back[0]) != string(collide) {
+		t.Fatalf("content reads back as %q, want %q", back[0], collide)
+	}
+}
+
+// TestBookmarkStoreRefusesANilSlot: a nil key names no slot, so it is refused rather
+// than reaching the filesystem as an empty path.
+func TestBookmarkStoreRefusesANilSlot(t *testing.T) {
+	ctx := context.Background()
+	hist, err := NewBookmarks(t.TempDir())
+	if err != nil {
+		t.Fatalf("fs.NewBookmarks: %v", err)
+	}
+	if _, err := hist.Get(ctx, nil); err == nil {
+		t.Fatal("Get(nil) must be refused")
+	}
+	if err := hist.Put(ctx, nil, []byte("x")); err == nil {
+		t.Fatal("Put(nil) must be refused")
+	}
+}

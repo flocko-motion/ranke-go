@@ -1,6 +1,6 @@
 // package: fs / persistence
 // type:    adapter
-// job:     stores claims and content blobs as files in a single flat directory
+// job:     stores claims, content blobs and bookmark records as files in a single flat directory
 // limits:  no indexing or codec logic; a BlobStore behind storage.NewBlobUniverse (-> adapter)
 //
 // Package fs names claims and blobs by their id strings in one flat directory.
@@ -28,13 +28,31 @@ var (
 // content blobs share the namespace, addressed by their id strings as
 // filenames.
 func New(dir string) (ranke.Universe, error) {
+	s, err := open(dir)
+	if err != nil {
+		return nil, err
+	}
+	return storage.NewBlobUniverse(s), nil
+}
+
+// NewBookmarks returns the 𝒰_hist over the same directory: prefixed keys, so an
+// archive's bookmark list sits beside the claims it locates.
+func NewBookmarks(dir string) (ranke.BookmarkStore, error) {
+	s, err := open(dir)
+	if err != nil {
+		return nil, err
+	}
+	return storage.NewBlobBookmarks(s), nil
+}
+
+func open(dir string) (*store, error) {
 	if dir == "" {
 		return nil, errEmptyDir
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("%w: mkdir %s: %w", errIO, dir, err)
 	}
-	return storage.NewBlobUniverse(&store{dir: dir, caps: detectCaps(dir)}), nil
+	return &store{dir: dir, caps: detectCaps(dir)}, nil
 }
 
 type store struct {

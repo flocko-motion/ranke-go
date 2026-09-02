@@ -83,6 +83,43 @@ func TestOpenContributionSubtypeMayScheduleDeletion(t *testing.T) {
 	require.Empty(t, verifyOne(t, c, ctr, c))
 }
 
+// TestFirstTableHeightIsFixed is `V-ARCHIVEHEIGHT`: an archive's first branch table
+// stands on its contributor edge alone, resolving to the initial claim at height 0, so
+// height 1 is the only value it can carry. The rule reads that off the record — no
+// seed, no bookmark, no walk — which is why it runs ahead of the re-derivation.
+func TestFirstTableHeightIsFixed(t *testing.T) {
+	ctr := contributor(t)
+	first, err := NewClaim(NodeBranches, ctr).WithHeight(2).Sign()
+	require.NoError(t, err, "the builder takes a height as given; the verifier judges it")
+
+	fs := verifyOne(t, first, ctr, first)
+	require.Len(t, fs, 1)
+	require.ErrorIs(t, fs[0].Err, ErrArchiveFirstTableHeight)
+}
+
+// TestFirstTableAtHeightOnePasses is the control, and the shape every Sequencer here
+// mints at bootstrap.
+func TestFirstTableAtHeightOnePasses(t *testing.T) {
+	ctr := contributor(t)
+	first, err := NewClaim(NodeBranches, ctr).WithHeight(HeightOf(ctr)).Sign()
+	require.NoError(t, err)
+	require.Empty(t, verifyOne(t, first, ctr, first))
+}
+
+// TestLaterTableHeightIsUnconstrained is the rule's bound: it speaks about the FIRST
+// table alone, told apart by carrying no lineage edge (`R-C6MERGE`). A revision over a
+// predecessor stands at whatever height its references derive, and 2 here is that.
+func TestLaterTableHeightIsUnconstrained(t *testing.T) {
+	ctr := contributor(t)
+	first, err := NewClaim(NodeBranches, ctr).WithHeight(HeightOf(ctr)).Sign()
+	require.NoError(t, err)
+	next := table(t, ctr, first, EdgeTypeBranches)
+
+	fs := verifyOne(t, next, ctr, first, next)
+	require.Empty(t, fs)
+	require.Equal(t, uint64(2), next.Node().Height(), "a second table stands above the first")
+}
+
 // TestNamedContributionSubtypesRefuseDeletion is that loosening's bound: the four
 // `R-DSTRUCT` names are still refused, each being what another rule reads.
 func TestNamedContributionSubtypesRefuseDeletion(t *testing.T) {

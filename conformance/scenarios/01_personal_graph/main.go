@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	histfile "github.com/rankegraph/ranke-go/adapter/history/file"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/fs"
 	"github.com/rankegraph/ranke-go/conformance/helpers"
@@ -215,16 +214,17 @@ func main() {
 		},
 	}.Sign())
 
-	// --- 7. Compose the bundle (filesystem Universe under data/universe/,
-	// head-id timeline under data/branches/B_h) and merge one contribution
-	// carrying every claim. The dev Sequencer runs the paper's six steps —
-	// verify, auto-consolidate the open heads, seed, and mint the branch
-	// table — advancing branch "main". Real deployments would stack a mem
-	// cache on top, or swap S3 in below; this keeps it flat so the bundle
-	// is just a directory. ---
+	// --- 7. Compose the bundle (filesystem Universe under data/universe/, its
+	// bookmark list co-located there under a key prefix, one bookmark id under
+	// data/branches/B_h) and merge one contribution carrying every claim. The dev
+	// Sequencer runs the paper's seven steps — verify, auto-consolidate the open
+	// heads, mint the branch table, bookmark it — advancing branch "main". Real
+	// deployments would stack a mem cache on top, or swap S3 in below; this keeps
+	// it flat so the bundle is just a directory. ---
 	u := must(fs.New(helpers.UniverseDir))
-	hist := must(histfile.New(helpers.BranchTableHeadPath))
+	hist := must(fs.NewBookmarks(helpers.UniverseDir))
 	seq := must(devseq.NewSequencer(ctx, u, hist, alice, s))
+	helpers.WriteBookmarkId(seq)
 	head := must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		emailApples, emailFamily, summary,
 		aliceEntity, applesEntity, likes,

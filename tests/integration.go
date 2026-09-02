@@ -4,9 +4,10 @@
 // dev Sequencer over a pluggable storage backend
 // limits:  no scenario bodies here; those live alongside (-> tests/scenarios.go)
 //
-// Package tests is the public conformance suite: a backend (Universe + History)
-// proves it conforms to the Ranke-Graph ADT by running IntegrationTest, which stands
-// the dev Sequencer over it and validates every closure it reads back.
+// Package tests is the public conformance suite: a backend (a Universe) proves it
+// conforms to the Ranke-Graph ADT by running IntegrationTest, which stands the dev
+// Sequencer over it (its bookmark list in an in-process 𝒰_hist) and validates every
+// closure it reads back.
 package tests
 
 import (
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/rankegraph/ranke-go"
-	devhist "github.com/rankegraph/ranke-go/adapter/history/dev"
 	devseq "github.com/rankegraph/ranke-go/adapter/sequencer/dev"
 	"github.com/rankegraph/ranke-go/adapter/storage/mem"
 	"github.com/rankegraph/ranke-go/tests/generator"
@@ -26,8 +26,8 @@ import (
 )
 
 // Backend opens a fresh, isolated storage tier for one scenario: a Universe for
-// claims + content and a History for the head timeline, over the shared clock.
-type Backend func(t *testing.T, clock *generator.Clock) (ranke.Universe, ranke.History, error)
+// claims + content, over the shared clock.
+type Backend func(t *testing.T, clock *generator.Clock) (ranke.Universe, error)
 
 // IntegrationTest runs the full Ranke-Graph integration suite against the storage
 // backend, giving each scenario its own fixture: a fresh backend and Sequencer.
@@ -60,9 +60,9 @@ func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
 	t.Helper()
 	clock := generator.NewClock(fixtureBase, time.Second)
 	self := keyedContributor(t, ctx, clock, "sequencer")
-	u, hist, err := backend(t, clock)
+	u, err := backend(t, clock)
 	require.NoError(t, err, "open backend")
-	seq, err := devseq.NewSequencer(ctx, u, hist, self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
 	require.NoError(t, err, "stand up dev Sequencer")
 	return &fixture{ctx: ctx, u: u, seq: seq, clock: clock, self: self}
 }
@@ -159,11 +159,11 @@ func (f *fixture) entity(t *testing.T, ctr ranke.Contributor, sub, label string,
 	return c
 }
 
-// memFixture builds a fixture over an in-memory Universe + History — the
-// backend the sequencer unit tests drive directly.
+// memFixture builds a fixture over an in-memory Universe — the backend the
+// sequencer unit tests drive directly.
 func memFixture(t *testing.T, ctx context.Context) *fixture {
 	t.Helper()
-	return newFixture(t, ctx, func(_ *testing.T, clk *generator.Clock) (ranke.Universe, ranke.History, error) {
-		return mem.New(), devhist.New(clk), nil
+	return newFixture(t, ctx, func(_ *testing.T, _ *generator.Clock) (ranke.Universe, error) {
+		return mem.New(), nil
 	})
 }
