@@ -47,7 +47,10 @@ What each release changed for someone depending on this repository.
 
 ### Fixed
 
-- neo4j compared `created_at` against a bound spelled differently from the stored
-  form, so a comparison named the wrong instant: equality matched nothing, `ge`
-  skipped the second it asked for and `lt` included it. Operands are now spelled as
-  the property is stored, matching the reference engine (`R-QCYPHER`).
+- A comparison on a time field is held to one spelling (`R-QTIMEOP`): a `V-TIME`
+  timestamp on `created_at`, `delete_by`, `pubkey_valid_from` and
+  `pubkey_expires_after`, an EDTF Level 1 value on `dated`, and `ErrQueryTimeOperand`
+  for anything else. Loosely written bounds used to be compared as text against the
+  stored fixed-width form, which named the wrong instant — equality matched nothing,
+  `ge` skipped the second it asked for and `lt` included it. `FormatTimestamp` renders
+  the form a caller holding a `time.Time` needs.

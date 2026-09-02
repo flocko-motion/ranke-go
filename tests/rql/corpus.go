@@ -77,8 +77,10 @@ func Corpus(m *generator.Manifest, root ranke.Id) []NamedQuery {
 	unanchored := func(steps ...ranke.PathStep) ranke.Select {
 		return ranke.Select{Branch: ranke.BranchArchive, Path: steps}
 	}
-	// A mid-graph instant: the clock starts at Base and advances Step per claim.
-	midpoint := m.Spec.Base.Add(time.Duration(m.Spec.Size/2) * m.Spec.Step).Format(time.RFC3339Nano)
+	// A mid-graph instant: the clock starts at Base and advances Step per claim. Spelled
+	// as `V-TIME` fixes it, the only form a time comparison takes (`R-QTIMEOP`) —
+	// RFC3339Nano would drop the trailing zeros and name no valid operand.
+	midpoint := ranke.FormatTimestamp(m.Spec.Base.Add(time.Duration(m.Spec.Size/2) * m.Spec.Step))
 
 	return []NamedQuery{
 		// ── traversal: the whole closure, in each of the three scopes ────────

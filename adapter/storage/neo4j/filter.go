@@ -9,7 +9,6 @@ package neo4j
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rankegraph/ranke-go"
 )
@@ -18,32 +17,10 @@ import (
 // ORDER BY use them without coercion. Other fields are strings; type is a label.
 var intField = map[string]bool{"height": true, "content_size": true}
 
-// timeField names the properties stored as fixed-width iso8601Nano, whose
-// lexicographic order is their instant order.
-var timeField = map[string]bool{"created_at": true}
-
-// atStoredPrecision spells a time operand the way the property holds it. Cypher
-// compares these as strings, and RFC3339 omits trailing zeros: the stored
-// "…:02.000000000Z" sorts BELOW a bound written "…:02Z", "." (0x2E) preceding "Z"
-// (0x5A). So Eq matched nothing, Ge skipped the instant it named and Lt included it,
-// where evalComparison compares instants.
-func atStoredPrecision(field string, v any) any {
-	if !timeField[field] {
-		return v
-	}
-	switch t := v.(type) {
-	case time.Time:
-		return t.UTC().Format(iso8601Nano)
-	case string:
-		// The layouts asTime accepts, so both engines agree on what is a time.
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if p, err := time.Parse(layout, t); err == nil {
-				return p.UTC().Format(iso8601Nano)
-			}
-		}
-	}
-	return v
-}
+// A time operand reaches here already in `V-TIME` form, the only spelling
+// `R-QTIMEOP` admits, so it matches the stored property byte for byte and Cypher's
+// string comparison is its instant comparison. Respelling one here would accept what
+// the rule says to reject.
 
 // whereClause lowers a Where tree to a Cypher boolean over node. A nil tree is
 // "true". p names the bound-parameter sink and ctr the next free index.
@@ -90,18 +67,17 @@ func cmpClause(field string, cmp ranke.Comparison, node string, p map[string]any
 	}
 	acc := node + "." + field // property accessor
 	num := intField[field]
-	at := func(v any) any { return atStoredPrecision(field, v) }
 	ord := func(op string, v any) string {
 		if num || isNumeric(v) {
 			return "toFloat(" + acc + ") " + op + " " + bind(toFloatVal(v), p, ctr)
 		}
-		return acc + " " + op + " " + bind(at(v), p, ctr)
+		return acc + " " + op + " " + bind(v, p, ctr)
 	}
 	switch {
 	case cmp.Eq != nil:
-		return acc + " = " + bind(at(cmp.Eq), p, ctr)
+		return acc + " = " + bind(cmp.Eq, p, ctr)
 	case cmp.Ne != nil:
-		return acc + " <> " + bind(at(cmp.Ne), p, ctr)
+		return acc + " <> " + bind(cmp.Ne, p, ctr)
 	case cmp.Lt != nil:
 		return ord("<", cmp.Lt)
 	case cmp.Le != nil:
@@ -111,11 +87,7 @@ func cmpClause(field string, cmp ranke.Comparison, node string, p map[string]any
 	case cmp.Ge != nil:
 		return ord(">=", cmp.Ge)
 	case cmp.In != nil:
-		in := make([]any, len(cmp.In))
-		for i, v := range cmp.In {
-			in[i] = at(v)
-		}
-		return acc + " IN " + bind(in, p, ctr)
+		return acc + " IN " + bind(cmp.In, p, ctr)
 	case cmp.Glob != "":
 		return acc + " =~ " + bind(globToRegex(cmp.Glob), p, ctr)
 	default:

@@ -106,6 +106,7 @@ var (
 	errDecodeQuery           = errors.New("ranke.DecodeQuery")
 	errEncodeQuery           = errors.New("ranke.EncodeQuery")
 	ErrQueryWhereForm        = errors.New("ranke.Query: a where node is exactly one of and | or | not | {field, test}")
+	ErrQueryTimeOperand      = errors.New("ranke.Query: a comparison on a time field takes a `V-TIME` timestamp or an EDTF Level 1 value (`R-QTIMEOP`)")
 	ErrQueryComparisonForm   = errors.New("ranke.Query: a comparison applies exactly one operator (eq | ne | lt | le | gt | ge | in | glob)")
 	ErrQueryHops             = errors.New("ranke.Query: a PathStep's hop bounds admit no count")
 	ErrQueryEnum             = errors.New("ranke.Query: value outside the set the schema fixes for its field")

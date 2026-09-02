@@ -140,7 +140,7 @@ func validateWhere(w Where) error {
 		if w.Field == "" || w.Test == nil {
 			return WithDetail(ErrQueryWhereForm, "a leaf carries both a field and a test")
 		}
-		return validateComparison(*w.Test)
+		return validateComparison(w.Field, *w.Test)
 	}
 	for _, sub := range append(append([]Where{}, w.And...), w.Or...) {
 		if err := validateWhere(sub); err != nil {
@@ -155,7 +155,7 @@ func validateWhere(w Where) error {
 
 // validateComparison holds a comparison to one operator. An explicit empty `in` set
 // counts, being present.
-func validateComparison(c Comparison) error {
+func validateComparison(field string, c Comparison) error {
 	ops := 0
 	for _, set := range []bool{
 		c.Eq != nil, c.Ne != nil, c.Lt != nil, c.Le != nil,
@@ -168,7 +168,43 @@ func validateComparison(c Comparison) error {
 	if ops != 1 {
 		return WithDetail(ErrQueryComparisonForm, strconv.Itoa(ops)+" operators set")
 	}
+	check := timeOperandCheck(field)
+	if check == nil {
+		return nil
+	}
+	for _, v := range append([]any{c.Eq, c.Ne, c.Lt, c.Le, c.Gt, c.Ge}, c.In...) {
+		if v == nil {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			return WithDetail(ErrQueryTimeOperand, field+" is "+toStringValue(v))
+		}
+		if err := check(s); err != nil {
+			return WithDetail(ErrQueryTimeOperand, field+"="+s)
+		}
+	}
+	if c.Glob != "" {
+		// A pattern names no time, being neither form.
+		return WithDetail(ErrQueryTimeOperand, field+" glob "+c.Glob)
+	}
 	return nil
+}
+
+// timeOperandCheck returns the form `R-QTIMEOP` holds a comparison on field to, or
+// nil where no time rule governs it. The FIELD picks which of the two forms applies:
+// EDTF admits `2026-01-01T00:00:02Z` as readily as the fixed-width spelling, so
+// allowing either form on a `V-TIME` field would leave one instant with several
+// spellings — and a text comparison lands on a different second for each.
+func timeOperandCheck(field string) func(string) error {
+	switch field {
+	case "created_at", FieldDeleteBy, FieldPubkeyValidFrom, FieldPubkeyExpiresAfter:
+		return func(s string) error { _, err := parseRFC3339Nano(s); return err }
+	case "dated":
+		return validateDated
+	default:
+		return nil
+	}
 }
 
 // validateOutput checks each output axis against the values the schema fixes.
