@@ -62,7 +62,7 @@ func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 	u, err := backend(t, clock)
 	require.NoError(t, err, "open backend")
-	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, u.Bookmarks(), self, clock)
 	require.NoError(t, err, "stand up dev Sequencer")
 	return &fixture{ctx: ctx, u: u, seq: seq, clock: clock, self: self}
 }

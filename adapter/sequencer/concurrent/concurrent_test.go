@@ -62,7 +62,7 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	hist := ranke.NewMemoryBookmarks()
+	hist := u.Bookmarks()
 	seq, err := concseq.NewSequencer(ctx, u, hist, op, clk)
 	require.NoError(t, err)
 	// A second, independent view over the same bookmark list, reached the way any

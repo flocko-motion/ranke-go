@@ -46,7 +46,7 @@ func newTestSequencer(t *testing.T, ctx context.Context) (*Sequencer, ranke.Univ
 	op, err := cc.AsContributor(ctx, nil, priv)
 	require.NoError(t, err)
 
-	s, err := NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clk)
+	s, err := NewSequencer(ctx, u, u.Bookmarks(), op, clk)
 	require.NoError(t, err)
 	return s, u, s.marks, op, clk
 }
