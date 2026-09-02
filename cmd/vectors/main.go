@@ -1,7 +1,7 @@
 // package: main / vectors
 // type:    cmd
-// job:     generates the cross-implementation reference artifacts — a toy graph of claim records
-// plus records that must be rejected, described by a manifest
+// job:     generates the cross-implementation reference artifacts — a toy graph of claim records,
+// the archive's bookmark list, plus records that must be rejected, described by a manifest
 // limits:  renders bytes only; the artifacts are the spec's, and which of them are correct is
 // settled against the paper, not against this program
 package main
@@ -60,13 +60,16 @@ func generatorVersion() string {
 // run builds the artifacts and writes them under dir.
 func run(ctx context.Context, dir string, p vectors.Provenance) error {
 	g := &gen{dir: dir, prov: p, ids: map[string]ranke.Id{}, raw: map[string][]byte{}}
-	for _, sub := range []string{"claims", "content"} {
+	for _, sub := range []string{"claims", "content", "bookmarks"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return err
 		}
 	}
 	if err := g.toyGraph(ctx); err != nil {
 		return fmt.Errorf("toy graph: %w", err)
+	}
+	if err := g.bookmarkCases(); err != nil {
+		return fmt.Errorf("bookmarks: %w", err)
 	}
 	if err := g.broken(ctx); err != nil {
 		return fmt.Errorf("broken records: %w", err)
@@ -79,13 +82,14 @@ func run(ctx context.Context, dir string, p vectors.Provenance) error {
 
 // gen accumulates artifacts and the cases describing them.
 type gen struct {
-	dir     string
-	prov    vectors.Provenance
-	claims  []vectors.ClaimCase
-	content []vectors.ContentCase
-	ids     map[string]ranke.Id
-	raw     map[string][]byte
-	who     ranke.Contributor // the root identity, which the rejected cases reuse
+	dir       string
+	prov      vectors.Provenance
+	claims    []vectors.ClaimCase
+	content   []vectors.ContentCase
+	bookmarks []vectors.BookmarkCase
+	ids       map[string]ranke.Id
+	raw       map[string][]byte
+	who       ranke.Contributor // the root identity, which the rejected cases reuse
 }
 
 // writeManifest renders the manifest last, when every case is known.
@@ -93,10 +97,13 @@ func (g *gen) writeManifest() error {
 	m := vectors.Manifest{
 		Note: "Reference artifacts for the Ranke-Graph ADT. A claim record is {1: S(node)}; " +
 			"its id is not in the record, so each case pairs bytes with the id they are offered " +
-			"under. Verification hashes the record as received, never a re-encode.",
+			"under. Verification hashes the record as received, never a re-encode. A bookmark " +
+			"record is a COSE_Sign1 over S([i, s, k]), paired with the id_seq(i, s) slot it is " +
+			"offered at.",
 		Provenance: g.prov,
 		Claims:     g.claims,
 		Content:    g.content,
+		Bookmarks:  g.bookmarks,
 	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -132,6 +139,22 @@ func (g *gen) addBroken(name string, raw []byte, id, reason, why string, violate
 	g.claims = append(g.claims, vectors.ClaimCase{
 		File: file, Id: id, Verify: false, Reason: reason, Why: why, Violates: violates,
 	})
+	return nil
+}
+
+// addBookmark writes a bookmark record under the id_seq(index, seed) slot it is
+// offered at, filling in the case's file and slot around what the caller stated.
+func (g *gen) addBookmark(name string, raw []byte, index uint64, seed []byte, c vectors.BookmarkCase) error {
+	slot, err := ranke.IdSeq(index, seed)
+	if err != nil {
+		return err
+	}
+	c.File = filepath.Join("bookmarks", name+".cbor")
+	c.Slot = slot.String()
+	if err := os.WriteFile(filepath.Join(g.dir, c.File), raw, 0o644); err != nil {
+		return err
+	}
+	g.bookmarks = append(g.bookmarks, c)
 	return nil
 }
 

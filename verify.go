@@ -332,6 +332,9 @@ type verifyRule struct {
 var verifyRules = []verifyRule{
 	{name: "id", rule: "a claim's id is the hash of the envelope it is stored as (`V-ID`)", claim: ruleID},
 	{name: "signature", rule: "a claim's envelope is signed by its contributor's key (`V-ENV`, `V-SIG`)", claim: ruleSignature},
+	// The record-only statement about a first table's height runs ahead of the general
+	// re-derivation, so a violation is named by the rule that FIXES the value.
+	{name: "first branch-table height", rule: "an archive's first branch table, standing on its contributor edge alone, has height 1 (`V-ARCHIVEHEIGHT`)", claim: ruleArchiveFirstTableHeight},
 	{name: "§4.1 height", rule: "height = 1 + max(reference heights), and 0 for an initial claim (`V-HEIGHT`)", claim: ruleHeight},
 	{name: "created_at monotonicity", rule: "a claim is dated no earlier than every claim it references (`V-MONO`)", claim: ruleCreatedAtMonotone},
 	{name: "type classes", rule: "the node's class and every edge's class is one of the fixed set, the subtype being open vocabulary (`V-TYPE`)", claim: ruleTypeClasses},
@@ -341,7 +344,6 @@ var verifyRules = []verifyRule{
 	{name: "content integrity", rule: "content with a content_hash matches it and content_size, inline content being committed by the claim id (`V-CONTENT`)", content: ruleContent},
 	{name: "content encoding", rule: "a node or edge that carries content declares an encoding (media type) (`V-CONTENT`)", content: ruleContentEncoding},
 	{name: "branch-table reference", rule: "a branch-table (contribution/branches) claim may be referenced only by another branch-table claim, and only through its contribution/diff or contribution/branches edge (`V-TABLEREF`)", edge: ruleBranchTableReference},
-	{name: "history reference", rule: "an edge's reference must not resolve to a contribution/history claim (`V-HISTREF`)", edge: ruleHistoryReference},
 	{name: "archive head", rule: "an archive's head claim is a branch table (contribution/branches) (`V-ARCHIVE`)", archive: ruleArchiveHead},
 	{name: "key validity", rule: "a claim is dated within its contributor key's validity window, as an expiry edge against that contributor shortens it (`R-DEXPIRY`)", claim: ruleKeyWindow},
 	{name: "delete_by carried", rule: "an edge carries exactly the delete_by its referenced claim declares (`R-DPLANNED`)", edge: ruleDeleteByCopied},
@@ -440,15 +442,12 @@ func ruleContentEncoding(_ context.Context, cc contentCarrier, _ *claimUnderVeri
 }
 
 // ruleBranchTableReference (per edge) is `V-TABLEREF`: only a branch table's lineage
-// edges, or a history claim's contribution/head edge (`V-HISTCLAIM`), may reach one.
+// edges may reach one.
 func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
 	// A table reaches its predecessor through the chain `R-C6MERGE` builds, and
 	// through nothing else: any other edge would take the spine off its own layer.
 	if t.claim.Node().Type() == NodeBranches &&
 		(e.Type() == EdgeTypeDiff || e.Type() == EdgeTypeBranches) {
-		return nil
-	}
-	if t.claim.Node().Type() == NodeTypeHistory && e.Type() == EdgeTypeHead {
 		return nil
 	}
 	ref, err := GetClaim(ctx, t.u, e.Reference())
@@ -460,22 +459,6 @@ func ruleBranchTableReference(ctx context.Context, e Edge, t *claimUnderVerifica
 	}
 	if ref.Node().Type() == NodeBranches {
 		return WithDetail(errRefsBranchTable, t.claim.Node().Type()+" → "+e.Reference().String())
-	}
-	return nil
-}
-
-// ruleHistoryReference (per edge) is `V-HISTREF`: reached only through id_seq(i,s),
-// never an ordinary edge (§Head Index).
-func ruleHistoryReference(ctx context.Context, e Edge, t *claimUnderVerification) error {
-	ref, err := GetClaim(ctx, t.u, e.Reference())
-	if errors.Is(err, ErrNotFound) {
-		return nil // dangling refs are caught elsewhere; judge only resolvable ones
-	}
-	if err != nil {
-		return err
-	}
-	if ref.Node().Type() == NodeTypeHistory {
-		return WithDetail(ErrHistoryReference, t.claim.Node().Type()+" → "+e.Reference().String())
 	}
 	return nil
 }
@@ -532,14 +515,9 @@ func ruleArchiveHead(_ context.Context, t *claimUnderVerification) error {
 }
 
 // verifyID checks the id names the bytes stored under it: id = H(S(env(v)))
-// (`V-ID`). A contribution/history claim is the one exception (§Verifiability):
-// its key id_seq(i,s) doesn't name its content, and s isn't in the claim past
-// revision 0 — its integrity check, `V-IDSEQVERIFY`, is a directed lookup only
-// History.fetchAt has the context to make.
+// (`V-ID`), which every claim satisfies — id_seq(i,s) addresses bookmarks, and a
+// bookmark is no claim.
 func (c *claim) verifyID(raw []byte) error {
-	if c.node.typeClass == NodeClassContribution && c.node.typeSub == string(NodeSubtypeHistory) {
-		return nil
-	}
 	recomputed, err := hashContent(raw)
 	if err != nil {
 		return WrapDetail(errVerify, "hash", err)

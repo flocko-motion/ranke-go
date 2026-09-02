@@ -27,12 +27,12 @@ R-AGRANT       another layer's: grants and accounts are the server's configurati
 R-ABRANCH      another layer's: per-branch rights are checked before the library is called
 R-ATABLE       another layer's: rights over $branches are the server's to check
 R-AUNIVERSE    another layer's: the privileged $universe read is the server's to grant
+R-ABOOKMARK    another layer's: no access grant covers a 𝒰_hist write, so there is none to check here
 
 # Contribution rules — the six-step procedure, whose write path is the Sequencer
 # in adapter/sequencer.
 R-C1BASE       citation owed: base (k, t) at open, adapter/sequencer
 R-C2DATE       citation owed: no claim dated after the base time, adapter/sequencer
-R-C2TYPE       citation owed: reserved types, contribution.go reservedTypes
 R-C3CLOSE      citation owed: closing over references, contribution.go
 R-C4KEY        citation owed: claim dated inside its key's window, verify.go ruleKeyWindow
 R-C4SEAL       citation owed: sealed once verified, adapter/sequencer

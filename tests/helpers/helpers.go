@@ -10,8 +10,8 @@ import (
 	"github.com/rankegraph/ranke-go"
 )
 
-// Contribute drives one contribution through the Sequencer contract's six steps —
-// open, fill, verify, persist, merge — returning the archive head it advanced to.
+// Contribute drives one contribution through the Sequencer contract's seven steps —
+// open, fill, verify, persist, merge, bookmark — returning the head it advanced to.
 // opts carry the constraints the contribution opens under.
 func Contribute(ctx context.Context, seq ranke.Sequencer, branch string, claims []ranke.Claim,
 	opts ...ranke.ContributionOption) (ranke.Id, error) {

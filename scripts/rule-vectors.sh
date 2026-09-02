@@ -20,7 +20,8 @@
 # demanded R-* would be publishing policy as conformance.
 #
 # Coverage is read from the generated manifest, not from the source, so what is gated
-# is the artifact a downstream implementation would actually receive.
+# is the artifact a downstream implementation would actually receive. All three of its
+# keyspaces count: claims, content, and the bookmark records 𝒰_hist holds.
 #
 # It needs the spec, which lands in gitignored docs/papers/. Run through `make verify`
 # that copy has just been brought up to the ranke-graph ref; run on its own it reads
@@ -72,7 +73,7 @@ if ! go run ./cmd/vectors -out "$work/set" > "$work/gen.log" 2>&1; then
 	cat "$work/gen.log" >&2
 	exit 1
 fi
-jq -r '[.claims[], .content[]] | map(select(.verify == false)) | .[].violates // [] | .[]' \
+jq -r '[.claims[], .content[], (.bookmarks // [])[]] | map(select(.verify == false)) | .[].violates // [] | .[]' \
 	"$work/set/manifest.json" | sort -u > "$work/covered"
 if [ ! -s "$work/covered" ]; then
 	echo "rule vectors: no case names a rule it breaks — the manifest's violates field is empty" >&2

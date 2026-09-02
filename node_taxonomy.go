@@ -81,10 +81,6 @@ const (
 	NodeSubtypeDeleteAlias NodeSubtype = "x"
 	NodeSubtypeExpiry      NodeSubtype = "expiry"
 	NodeSubtypeExpiryAlias NodeSubtype = "e"
-	// NodeSubtypeHistory is a Head History entry (foundation paper §Head Index):
-	// addressed by id_seq(i,s) rather than its own content (`V-IDSEQ`).
-	NodeSubtypeHistory      NodeSubtype = "history"
-	NodeSubtypeHistoryAlias NodeSubtype = "y"
 )
 
 // nodeSubtypeToAlias / nodeSubtypeFromAlias convert the closed node
@@ -101,8 +97,6 @@ func nodeSubtypeToAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeDeleteAlias
 	case NodeSubtypeExpiry:
 		return NodeSubtypeExpiryAlias
-	case NodeSubtypeHistory:
-		return NodeSubtypeHistoryAlias
 	default:
 		return s
 	}
@@ -120,8 +114,6 @@ func nodeSubtypeFromAlias(s NodeSubtype) NodeSubtype {
 		return NodeSubtypeDelete
 	case NodeSubtypeExpiryAlias:
 		return NodeSubtypeExpiry
-	case NodeSubtypeHistoryAlias:
-		return NodeSubtypeHistory
 	default:
 		return s
 	}
@@ -132,5 +124,4 @@ const (
 	NodeTypeContributor = string(NodeClassContribution) + "/" + string(NodeSubtypeContributor)
 	NodeTypeHead        = string(NodeClassContribution) + "/" + string(NodeSubtypeHead)
 	NodeTypBranches     = string(NodeClassContribution) + "/" + string(NodeSubtypeBranches)
-	NodeTypeHistory     = string(NodeClassContribution) + "/" + string(NodeSubtypeHistory)
 )

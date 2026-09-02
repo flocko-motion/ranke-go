@@ -26,13 +26,13 @@ var (
 	errOpen     = errors.New("open archive")
 	errShow     = errors.New("show")
 	errValidate = errors.New("validate")
-	// errNoSeed: id_seq(0,s) is a fixed external anchor (foundation paper §Backup) —
-	// given, never discovered. Without it this archive cannot be opened at all.
-	errNoSeed = errors.New("no Head History seed at dir/branches/B_h — an archive cannot be opened without one")
+	// errNoBookmark: a bookmark id is given, never discovered (foundation paper
+	// §Backup). Without one this archive cannot be opened at all.
+	errNoBookmark = errors.New("no bookmark id at dir/branches/B_h — an archive cannot be opened without one")
 )
 
 // dirHelp describes the one argument every command shares.
-const dirHelp = "dir is a data bundle: dir/universe/ (claims + content) plus dir/branches/B_h (the Head History seed)."
+const dirHelp = "dir is a data bundle: dir/universe/ (claims, content and bookmarks) plus dir/branches/B_h (one bookmark id)."
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -55,43 +55,55 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
-// openArchive opens the bundle at dir — fs Universe plus the Head History seed at
-// dir/branches/B_h — at its latest head. The Universe comes back too, for closure
-// walks over it directly.
+// openArchive opens the bundle at dir — fs Universe and 𝒰_hist over one directory,
+// plus the bookmark id at dir/branches/B_h — at its latest recorded head. The
+// Universe comes back too, for closure walks over it directly.
 func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive, error) {
-	u, err := fs.New(filepath.Join(dir, "universe"))
+	universe := filepath.Join(dir, "universe")
+	u, err := fs.New(universe)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: universe in %s: %w", errOpen, dir, err)
 	}
-	seed, err := readSeed(filepath.Join(dir, "branches", "B_h"))
+	hist, err := fs.NewBookmarks(universe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: bookmarks in %s: %w", errOpen, dir, err)
+	}
+	id, err := readBookmarkId(filepath.Join(dir, "branches", "B_h"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", errOpen, err)
 	}
-	head, err := ranke.OpenHistory(u, seed).Latest(ctx)
+	marks, err := ranke.OpenBookmarks(ctx, hist, u, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: open bookmark list in %s: %w", errOpen, dir, err)
+	}
+	head, err := marks.Latest(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: latest head in %s: %w", errOpen, dir, err)
 	}
-	arc, err := ranke.NewArchive(ctx, u, head.GetId())
+	arc, err := ranke.NewArchive(ctx, u, head.Head())
 	if err != nil {
 		return nil, nil, err
 	}
 	return u, arc, nil
 }
 
-// readSeed reads the Head History seed a bundle carries at path — id_seq(0,s) is a
-// fixed external anchor (foundation paper §Backup), given rather than discovered,
-// so a missing or empty file is refused outright rather than treated as an empty
-// archive.
-func readSeed(path string) (string, error) {
+// readBookmarkId reads the bookmark id a bundle carries at path. It is given rather
+// than discovered (foundation paper §Backup), so a missing, empty, or unparsable file
+// is refused outright rather than treated as an empty archive.
+func readBookmarkId(path string) (ranke.Id, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s: %w", errNoSeed, path, err)
+		return nil, fmt.Errorf("%w: %s: %w", errNoBookmark, path, err)
 	}
-	seed := strings.TrimSpace(string(b))
-	if seed == "" {
-		return "", fmt.Errorf("%w: %s is empty", errNoSeed, path)
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return nil, fmt.Errorf("%w: %s is empty", errNoBookmark, path)
 	}
-	return seed, nil
+	id, err := ranke.ParseId(s)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errNoBookmark, path, err)
+	}
+	return id, nil
 }
 
 // infoCmd summarises an archive: its branch count and each head.

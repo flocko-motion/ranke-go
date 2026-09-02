@@ -57,13 +57,6 @@ const (
 	// schedule travels with the reference and explains the gap the deletion leaves.
 	FieldDeleteBy      = "delete_by"
 	FieldDeleteByAlias = "d"
-	// FieldHistoryIndex is a contribution/history claim's step i (`V-HISTCLAIM`);
-	// FieldHistorySeed is s, carried only at i=0 (`V-HISTCLAIM0`) — the foundation
-	// paper's Head History (§Head Index).
-	FieldHistoryIndex      = "history_index"
-	FieldHistoryIndexAlias = "I"
-	FieldHistorySeed       = "history_seed"
-	FieldHistorySeedAlias  = "S"
 )
 
 // splitLines parses a newline-separated list (a *_diff_omit field) into a set.
@@ -191,10 +184,6 @@ func fieldNameToAlias(n Field) Field {
 		return FieldPubkeyValidFromAlias
 	case FieldPubkeyExpiresAfter:
 		return FieldPubkeyExpiresAfterAlias
-	case FieldHistoryIndex:
-		return FieldHistoryIndexAlias
-	case FieldHistorySeed:
-		return FieldHistorySeedAlias
 	default:
 		return n
 	}
@@ -225,10 +214,6 @@ func fieldNameFromAlias(c Field) Field {
 		return FieldPubkeyValidFrom
 	case FieldPubkeyExpiresAfterAlias:
 		return FieldPubkeyExpiresAfter
-	case FieldHistoryIndexAlias:
-		return FieldHistoryIndex
-	case FieldHistorySeedAlias:
-		return FieldHistorySeed
 	default:
 		return c
 	}

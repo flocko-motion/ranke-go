@@ -20,7 +20,7 @@ import (
 // advance would inflate.
 func (f *fixture) revisions(t *testing.T, ctx context.Context) int {
 	t.Helper()
-	n, err := f.hist.Len(ctx)
+	n, err := f.marks.Len(ctx)
 	require.NoError(t, err)
 	return n
 }

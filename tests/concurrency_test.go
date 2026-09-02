@@ -82,12 +82,12 @@ func sequencerRows() []sequencerRow {
 	return []sequencerRow{
 		{Name: "concurrent", New: func(ctx context.Context, u ranke.Universe,
 			op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
-			return concseq.NewSequencer(ctx, u, op, clk)
+			return concseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clk)
 		}},
 		{Name: "dev", Cap: serialWriters,
 			New: func(ctx context.Context, u ranke.Universe,
 				op ranke.Contributor, clk *tickClock) (ranke.Sequencer, error) {
-				return devseq.NewSequencer(ctx, u, op, clk)
+				return devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clk)
 			}},
 	}
 }

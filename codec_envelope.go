@@ -15,12 +15,19 @@ import (
 	cose "github.com/veraison/go-cose"
 )
 
-// The payload rides as bytes, so verification reads what is stored: re-encoding the
-// map to recover what was signed would shift it as the alias taxonomy grows.
+// The payload rides as bytes, so verification reads what is stored: re-encoding it
+// would shift as the alias taxonomy grows.
 
 // signEnvelope returns S(env(v)): payload signed under signingKey, as a tagged
 // COSE_Sign1. The id is the hash of these bytes (`V-ID`).
 func signEnvelope(signingKey crypto.Signer, payload []byte) ([]byte, error) {
+	return signCOSE(signingKey, payload, nil)
+}
+
+// signCOSE returns payload as a tagged COSE_Sign1 under signingKey, its protected header
+// carrying alg plus whatever extra names — nothing for a claim (`V-ENV`), the kid for a
+// bookmark (`V-BMENV`). One signer for both, so the key checks are stated once.
+func signCOSE(signingKey crypto.Signer, payload []byte, extra cose.ProtectedHeader) ([]byte, error) {
 	if signingKey == nil {
 		return nil, errEnvelopeNoKey
 	}
@@ -34,6 +41,9 @@ func signEnvelope(signingKey crypto.Signer, payload []byte) ([]byte, error) {
 	msg := cose.NewSign1Message()
 	msg.Payload = payload
 	msg.Headers.Protected[cose.HeaderLabelAlgorithm] = cose.AlgorithmEd25519
+	for label, value := range extra {
+		msg.Headers.Protected[label] = value
+	}
 	if err := msg.Sign(nil, nil, signer); err != nil {
 		return nil, WrapDetail(errSignEnvelope, "sign", err)
 	}
@@ -60,6 +70,16 @@ func envelopePayload(raw []byte) ([]byte, error) {
 // verifyEnvelope checks the signature against a multikey pubkey (`V-SIG`). It covers
 // the stored payload, so authorship holds for the bytes filed under the id.
 func verifyEnvelope(pubkey, raw []byte) error {
+	msg, err := decodeEnvelope(raw)
+	if err != nil {
+		return err
+	}
+	return verifySign1(pubkey, msg)
+}
+
+// verifySign1 checks msg's signature against a multikey pubkey (`V-SIGN`), whatever
+// shape of record the message carries.
+func verifySign1(pubkey []byte, msg *cose.Sign1Message) error {
 	if len(pubkey) == 0 {
 		return errEnvelopeNoPubkey
 	}
@@ -71,10 +91,6 @@ func verifyEnvelope(pubkey, raw []byte) error {
 	if !ok {
 		return WithDetail(errVerifyEnvelope, "ed25519 pubkey type "+reflect.TypeOf(pub).String())
 	}
-	msg, err := decodeEnvelope(raw)
-	if err != nil {
-		return err
-	}
 	verifier, err := cose.NewVerifier(cose.AlgorithmEd25519, edPub)
 	if err != nil {
 		return WrapDetail(errVerifyEnvelope, "verifier", err)
@@ -85,11 +101,8 @@ func verifyEnvelope(pubkey, raw []byte) error {
 	return nil
 }
 
-// decodeEnvelope parses the stored bytes as a COSE_Sign1. go-cose refuses an
-// untagged message and an empty signature, so what parses here is a signed record.
-//
-// `V-ENV` pins the headers to alg and nothing else, which is what makes the envelope
-// canonical: the id hashes these bytes, so a spare header would give one claim a
+// decodeEnvelope parses the stored bytes as a COSE_Sign1, and holds the headers to alg
+// alone (`V-ENV`) — the id hashes these bytes, so a spare header would give one claim a
 // second stored form and a second id, both verifying.
 func decodeEnvelope(raw []byte) (*cose.Sign1Message, error) {
 	var msg cose.Sign1Message

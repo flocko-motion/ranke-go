@@ -21,8 +21,7 @@ const rootSeed = "ranke-vectors/root"
 
 // toyGraph builds the claims that must verify: a contributor, a source note, a
 // derived claim citing it, external content, node fields, a dated claim, the
-// archive's empty branch table with the Head History entry recording it, and a
-// second contributor.
+// archive's empty branch table and one revision of it, and a second contributor.
 func (g *gen) toyGraph(ctx context.Context) error {
 	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
@@ -64,7 +63,7 @@ func (g *gen) toyGraph(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := g.historyClaim(table, who); err != nil {
+	if err := g.tableRevision(table, who); err != nil {
 		return err
 	}
 	return g.secondContributor(ctx)
@@ -153,11 +152,6 @@ func (g *gen) dated(who ranke.Contributor) error {
 		"dated as EDTF's date-and-time form (V-DATED) — a numeric offset, no fractional seconds")
 }
 
-// historySeed is the fixed value id_seq(i,s) is keyed on for the history-claim
-// case, so the artifact reproduces byte for byte (§Head Index never mandates
-// randomness — a Sequencer mints one, but any string qualifies).
-const historySeed = "ranke-vectors/history-seed"
-
 // branchTable adds the empty contribution/branches claim a new archive is created
 // with: its id is the archive's head k, and the initial claim is its only
 // reference, so it stands at height 1 (`V-ARCHIVEHEIGHT`, §Ranke-Archive).
@@ -173,21 +167,24 @@ func (g *gen) branchTable(root ranke.Claim, who ranke.Contributor) (ranke.Claim,
 		"the empty initial branch table, this archive's head k (§Ranke-Archive)")
 }
 
-// historyClaim adds a Head History entry (`V-HISTCLAIM`/`V-HISTCLAIM0`) recording
-// the branch table as the head at revision 0. Its id is id_seq(0, historySeed)
-// (`V-IDSEQ`), not H(S(env(v))): the one exception `V-ID` carves out
-// (§Verifiability).
-func (g *gen) historyClaim(head ranke.Claim, who ranke.Contributor) error {
-	b, err := ranke.NewHistoryClaimBuilder(who, head.ID(), 0, historySeed)
+// tableRevision adds the archive's second head k₁: a branch table restating the whole
+// table rather than diffing over it, so it carries a contribution/branches edge to its
+// predecessor and is a base claim (`R-C6MERGE`). The bookmark list records both heads.
+func (g *gen) tableRevision(prev ranke.Claim, who ranke.Contributor) error {
+	e, err := ranke.NewEdge(ranke.EdgeConfig{Reference: prev.ID(), Type: ranke.EdgeTypeBranches})
 	if err != nil {
 		return err
 	}
-	c, err := b.WithHeight(ranke.HeightOf(head)).WithCreatedAt(epoch.Add(9 * time.Second)).Sign()
+	c, err := ranke.NewClaim(ranke.NodeBranches, who).
+		WithEdges(e).
+		WithHeight(ranke.HeightOf(prev)).
+		WithCreatedAt(epoch.Add(9 * time.Second)).
+		Sign()
 	if err != nil {
 		return err
 	}
-	return g.addClaim("history-claim", c,
-		"a Head History entry (§Head Index), keyed at id_seq(0, s) rather than by content")
+	return g.addClaim("branch-table-revision", c,
+		"the archive's second head k₁, restating the table over its predecessor (§Branches)")
 }
 
 // secondContributor adds a second identity and a claim of its own, so a case can

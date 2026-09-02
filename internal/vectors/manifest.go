@@ -1,7 +1,7 @@
 // package: internal/vectors / manifest
 // type:    data
-// job:     the reference-artifact manifest — the schema both the generator and the CLI read, plus
-// lookup of the case describing one file
+// job:     the reference-artifact manifest — the schema both the generator and the CLI read, over
+// claims, content and bookmark records, plus lookup of the case describing one file
 // limits:  the description only; generating artifacts is cmd/vectors' and verifying them is the
 // library's (-> verify, verify_content)
 package vectors
@@ -17,21 +17,26 @@ const Name = "manifest.json"
 
 // Reason codes, so a test asserts the outcome it expected rather than any.
 const (
-	ReasonOK                = "ok"
-	ReasonIDMismatch        = "id_mismatch"
-	ReasonWrongMessage      = "wrong_message"
-	ReasonMalformedID       = "malformed_id"
-	ReasonNotEnveloped      = "not_enveloped"
-	ReasonNoContributor     = "unresolvable_contributor"
-	ReasonHeightWrong       = "height_wrong"
-	ReasonContentMismatch   = "content_hash_mismatch"
-	ReasonTimestampForm     = "timestamp_form"
-	ReasonBothContent       = "content_both_slots"
-	ReasonEdgeOrder         = "edge_order"
-	ReasonDatedForm         = "dated_form"
-	ReasonHistoryClaimForm  = "history_claim_form"
-	ReasonHistoryClaim0Form = "history_claim0_form"
-	ReasonHistoryReference  = "history_reference"
+	ReasonOK              = "ok"
+	ReasonIDMismatch      = "id_mismatch"
+	ReasonWrongMessage    = "wrong_message"
+	ReasonMalformedID     = "malformed_id"
+	ReasonNotEnveloped    = "not_enveloped"
+	ReasonNoContributor   = "unresolvable_contributor"
+	ReasonHeightWrong     = "height_wrong"
+	ReasonContentMismatch = "content_hash_mismatch"
+	ReasonTimestampForm   = "timestamp_form"
+	ReasonBothContent     = "content_both_slots"
+	ReasonEdgeOrder       = "edge_order"
+	ReasonDatedForm       = "dated_form"
+	// The first branch table's fixed height, read off the record alone.
+	ReasonFirstTableHeight = "first_table_height"
+	// The bookmark codes, one per rule a 𝒰_hist record can break.
+	ReasonBookmarkForm      = "bookmark_form"
+	ReasonBookmarkSignature = "bookmark_signature"
+	ReasonBookmarkSlot      = "bookmark_slot"
+	ReasonBookmarkReference = "bookmark_reference"
+	ReasonBookmarkGap       = "bookmark_gap"
 )
 
 // AllReasons is every code above. The list lives beside the declarations so a new
@@ -41,15 +46,18 @@ var AllReasons = []string{
 	ReasonOK, ReasonIDMismatch, ReasonWrongMessage, ReasonMalformedID,
 	ReasonNotEnveloped, ReasonNoContributor, ReasonHeightWrong,
 	ReasonContentMismatch, ReasonTimestampForm, ReasonBothContent, ReasonEdgeOrder,
-	ReasonDatedForm, ReasonHistoryClaimForm, ReasonHistoryClaim0Form, ReasonHistoryReference,
+	ReasonDatedForm, ReasonFirstTableHeight,
+	ReasonBookmarkForm, ReasonBookmarkSignature, ReasonBookmarkSlot,
+	ReasonBookmarkReference, ReasonBookmarkGap,
 }
 
 // Manifest names every artifact and the outcome an implementation must reach for it.
 type Manifest struct {
-	Note       string        `json:"note"`
-	Provenance Provenance    `json:"provenance"`
-	Claims     []ClaimCase   `json:"claims"`
-	Content    []ContentCase `json:"content"`
+	Note       string         `json:"note"`
+	Provenance Provenance     `json:"provenance"`
+	Claims     []ClaimCase    `json:"claims"`
+	Content    []ContentCase  `json:"content"`
+	Bookmarks  []BookmarkCase `json:"bookmarks,omitempty"`
 }
 
 // Provenance records what produced the set, so a reader can reproduce it. Version is
@@ -70,6 +78,21 @@ type ClaimCase struct {
 	Why    string `json:"why"`
 	// Violates names the rules this record breaks, and is what the coverage gate
 	// counts (-> scripts/rule-vectors.sh). Empty for a case that must verify.
+	Violates []string `json:"violates,omitempty"`
+}
+
+// BookmarkCase is one 𝒰_hist record under the id_seq(i, s) slot it is offered at
+// (`V-BMENV`). A case naming a List belongs to that whole list rather than standing
+// alone: the list is assembled from every case sharing the name, opened at the one
+// marked Open, and judged together — which is the only register `V-BMGAPLESS` has.
+type BookmarkCase struct {
+	File     string   `json:"file"`
+	Slot     string   `json:"slot"`
+	Verify   bool     `json:"verify"`
+	Reason   string   `json:"reason"`
+	Why      string   `json:"why"`
+	List     string   `json:"list,omitempty"`
+	Open     bool     `json:"open,omitempty"`
 	Violates []string `json:"violates,omitempty"`
 }
 

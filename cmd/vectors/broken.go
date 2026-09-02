@@ -51,26 +51,18 @@ func (g *gen) broken(ctx context.Context) error {
 	if err := g.unresolvableContributor(ctx); err != nil {
 		return err
 	}
-	if err := g.historyReferenced(); err != nil {
+	if err := g.firstTableHeight(); err != nil {
 		return err
 	}
 	return g.tamperedBlob()
 }
 
-// historyReferenced points an ordinary edge at history-claim, which `V-HISTREF`
-// forbids: nothing but id_seq(i,s) may reach a contribution/history claim.
-func (g *gen) historyReferenced() error {
-	e, err := ranke.NewEdge(ranke.EdgeConfig{
-		Reference: g.ids["history-claim"],
-		Type:      ranke.TypeDerivation("note"),
-	})
-	if err != nil {
-		return err
-	}
-	c, err := ranke.NewClaim(ranke.TypeDerivation("note"), g.who).
-		WithInlineContent([]byte("a claim that reaches into the Head History")).
-		WithEncoding(ranke.EncodingPlain).
-		WithEdges(e).
+// firstTableHeight declares height 2 on an initial branch table, which stands on its
+// contributor edge alone and so on height 1. One record settles it: the rule needs no
+// seed, no bookmark and no walk to say what that height must be. The derived height
+// disagrees too, so the record breaks `V-HEIGHT` alongside it.
+func (g *gen) firstTableHeight() error {
+	c, err := ranke.NewClaim(ranke.NodeBranches, g.who).
 		WithHeight(2).
 		WithCreatedAt(epoch.Add(16 * time.Second)).
 		Sign()
@@ -81,8 +73,9 @@ func (g *gen) historyReferenced() error {
 	if err != nil {
 		return err
 	}
-	return g.addBroken("rejected-history-reference", raw, c.ID().String(), vectors.ReasonHistoryReference,
-		"an ordinary edge resolving to a contribution/history claim", "V-HISTREF")
+	return g.addBroken("rejected-first-table-height", raw, c.ID().String(), vectors.ReasonFirstTableHeight,
+		"an initial branch table declaring height 2, where its lone contributor edge fixes 1",
+		"V-ARCHIVEHEIGHT", "V-HEIGHT")
 }
 
 // unenveloped offers the serialized claim on its own, under the hash of those very

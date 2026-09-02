@@ -77,8 +77,42 @@ func TestClaimCasesHoldAsDescribed(t *testing.T) {
 	}
 }
 
-// TestToyGraphIsAnArchive: the set carries a Head History, and only an archive has
-// one. Opening it the way §Backup prescribes — from id_seq(0,s) to the head it
+// TestBookmarkCasesHoldAsDescribed verifies every 𝒰_hist case through the library,
+// using the same checker the conformance gate runs.
+func TestBookmarkCasesHoldAsDescribed(t *testing.T) {
+	dir, m := generate(t)
+	require.NotEmpty(t, m.Bookmarks)
+
+	outcomes, err := vectors.CheckBookmarks(context.Background(), dir, &m)
+	require.NoError(t, err)
+	require.Len(t, outcomes, len(m.Bookmarks))
+	for _, o := range outcomes {
+		t.Run(filepath.Base(o.File), func(t *testing.T) {
+			require.Truef(t, o.Holds(), "expected verify=%v, got %v (%s) — %s",
+				o.Expected, o.Accepted, o.Reason, o.Why)
+		})
+	}
+}
+
+// TestBookmarkSlotsAreDistinctPerList: a downstream implementation loads the whole set
+// into one 𝒰_hist, so two cases sharing a slot would file one record under the other's
+// key — and a rejected record landing in a valid list would fail it for the wrong
+// reason. Cases of one list are the exception: sharing the seed is what makes them one.
+func TestBookmarkSlotsAreDistinctPerList(t *testing.T) {
+	_, m := generate(t)
+	require.NotEmpty(t, m.Bookmarks)
+
+	seen := map[string]string{}
+	for _, c := range m.Bookmarks {
+		if prev, dup := seen[c.Slot]; dup {
+			require.Failf(t, "two cases share a slot", "%s and %s both sit at %s", prev, c.File, c.Slot)
+		}
+		seen[c.Slot] = c.File
+	}
+}
+
+// TestToyGraphIsAnArchive: the set carries a bookmark list, and only an archive has
+// one. Opening it the way §Backup prescribes — one bookmark id to the latest head it
 // records — must reach a branch table (`V-ARCHIVE`). CheckClaims verifies claim by
 // claim, so this archive-scoped rule is out of its reach entirely.
 func TestToyGraphIsAnArchive(t *testing.T) {
@@ -95,17 +129,19 @@ func TestToyGraphIsAnArchive(t *testing.T) {
 		require.NoError(t, u.PutClaims(ctx, []ranke.Claim{cl}))
 	}
 
-	latest, err := ranke.OpenHistory(u, historySeed).Latest(ctx)
+	marks, err := vectors.OpenList(ctx, dir, &m, "archive", u)
 	require.NoError(t, err)
-	require.NotNil(t, latest.GetId(), "the Head History must resolve to the head it records")
+	latest, err := marks.Latest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, latest.Head(), "the bookmark list must resolve to the head it records")
 
-	arc, err := ranke.NewArchive(ctx, u, latest.GetId())
+	arc, err := ranke.NewArchive(ctx, u, latest.Head())
 	require.NoError(t, err)
 	run, err := arc.Verify(ctx)
 	require.NoError(t, err)
 	run.Wait()
 	require.NoError(t, run.Err())
-	require.Empty(t, run.Failures(), "the head the history records must open as a valid archive")
+	require.Empty(t, run.Failures(), "the head the list records must open as a valid archive")
 }
 
 // TestRejectionIsNotMereAbsence is the control the rejected cases need: only the
@@ -175,6 +211,9 @@ func TestEveryReasonIsExercised(t *testing.T) {
 	for _, c := range m.Content {
 		seen[c.Reason] = true
 	}
+	for _, c := range m.Bookmarks {
+		seen[c.Reason] = true
+	}
 	for _, want := range vectors.AllReasons {
 		require.Truef(t, seen[want], "no case carries reason %q", want)
 	}
@@ -184,11 +223,9 @@ func TestEveryReasonIsExercised(t *testing.T) {
 // refused at DECODE. The rest are refused by the closure verifier, where the failure
 // is a set rather than one error, so they are not in reach of this assertion.
 var decodeSentinel = map[string]error{
-	vectors.ReasonTimestampForm:     ranke.ErrTimestampForm,
-	vectors.ReasonBothContent:       ranke.ErrContentBothSlots,
-	vectors.ReasonDatedForm:         ranke.ErrDatedForm,
-	vectors.ReasonHistoryClaimForm:  ranke.ErrHistoryClaimForm,
-	vectors.ReasonHistoryClaim0Form: ranke.ErrHistoryClaim0Form,
+	vectors.ReasonTimestampForm: ranke.ErrTimestampForm,
+	vectors.ReasonBothContent:   ranke.ErrContentBothSlots,
+	vectors.ReasonDatedForm:     ranke.ErrDatedForm,
 }
 
 // TestRejectedCasesFailForTheirStatedReason: rejection alone is cheap — a case with
@@ -211,6 +248,6 @@ func TestRejectedCasesFailForTheirStatedReason(t *testing.T) {
 		checked++
 	}
 	require.Equal(t, len(decodeSentinel)+2, checked,
-		"every V-TIME, V-CONTENT, V-DATED and V-HISTCLAIM(0) case is covered here: "+
-			"three timestamps, both slots, one dated, one history claim each")
+		"every V-TIME, V-CONTENT and V-DATED case is covered here: three timestamps, "+
+			"both slots, one dated")
 }

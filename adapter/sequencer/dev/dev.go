@@ -1,7 +1,7 @@
 // package: adapter/sequencer/dev / testkit
 // type:    adapter
 // job:     a blocking reference Sequencer for tests and development — the sole writer that
-// advances a Ranke-Archive by driving the paper's six steps one contribution at a time
+// advances a Ranke-Archive by driving the paper's seven steps one contribution at a time
 // limits:  a merge holds the lock end to end, so callers queue; manages named branches
 // without propagating between them (paper 2's cross-branch merge); mints from the
 // injected Clock. NOT for production (-> adapter/sequencer/concurrent).
@@ -40,11 +40,11 @@ type Clock interface {
 
 // Sequencer is the reference Ranke-Archive write path (RankeDB §Sequencer): the
 // single writer advancing the head k → k′ by merging a contribution, running the
-// six steps serially in one blocking AddClaims call. Safe for concurrent use, bought
+// seven steps serially in one blocking AddClaims call. Safe for concurrent use, bought
 // by queueing — a merge runs alone (-> adapter/sequencer/concurrent for parallel).
 type Sequencer struct {
 	u     ranke.Universe
-	hist  *ranke.History
+	marks *ranke.Bookmarks
 	self  ranke.Contributor
 	clock Clock
 
@@ -69,34 +69,32 @@ func (s *Sequencer) tick() time.Time {
 
 // NewSequencer bootstraps a fresh archive over u, storing the key-carrying self
 // contributor and minting the empty contribution/branches claim whose id is the
-// archive head k₀ (foundation §Ranke-Archive), recorded in a fresh Head History
-// (§Head Index) — u is where that history lives too, no separate port.
-func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor, clock Clock) (*Sequencer, error) {
-	if u == nil || self == nil || clock == nil {
+// archive head k₀ (foundation §Ranke-Archive), bookmarked at index 0 in hist.
+func NewSequencer(ctx context.Context, u ranke.Universe, hist ranke.BookmarkStore, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+	if u == nil || hist == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
 	if self.SigningKey() == nil {
 		return nil, errNoSigningKey
 	}
-	// The Head History seed is normally random (V-HISTCLAIM0) — but this Sequencer
-	// exists for reproducible tests (package doc), so it derives one from self's
-	// own (already deterministic, per-fixture) id instead of minting one from
-	// crypto/rand, keeping "same (seed, spec) → identical ids" true of the whole
-	// archive, history claims included.
-	hist := ranke.OpenHistory(u, self.ID().String())
-	s := &Sequencer{u: u, hist: hist, self: self, clock: clock, heads: map[string]ranke.Id{}}
+	// A bookmark seed is normally random — but this Sequencer exists for reproducible
+	// tests (package doc), so it derives one from self's own (already deterministic,
+	// per-fixture) id, keeping "same (seed, spec) → identical ids" true of the whole
+	// archive, bookmark slots included.
+	marks := ranke.NewBookmarks(hist, u, []byte(self.ID().String()))
+	s := &Sequencer{u: u, marks: marks, self: self, clock: clock, heads: map[string]ranke.Id{}}
 
 	// Store the self contributor so branch-table claims attributed to it resolve.
 	if err := s.u.PutClaims(ctx, []ranke.Claim{self}); err != nil {
 		return nil, fmt.Errorf("%w: store contributor: %w", errNewSequencer, err)
 	}
-	// Empty branch table → archive head k₀, revision 0.
+	// Empty branch table → archive head k₀, bookmark index 0.
 	bt0, err := s.mintBranchTable(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, self, bt0.ID(), int(bt0.Node().Height()), bt0.Node().CreatedAt()); err != nil {
-		return nil, fmt.Errorf("%w: append history: %w", errNewSequencer, err)
+	if _, err := s.marks.Append(ctx, self, bt0.ID()); err != nil {
+		return nil, fmt.Errorf("%w: bookmark k₀: %w", errNewSequencer, err)
 	}
 	s.head = bt0.ID()
 	// Index k₀, so a layer answering membership from its own index holds the operator,
@@ -110,8 +108,8 @@ func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor,
 // GetContributor returns the contributor the Sequencer signs branch advances with.
 func (s *Sequencer) GetContributor() ranke.Contributor { return s.self }
 
-// HistorySeed returns the Head History's seed, minted at bootstrap.
-func (s *Sequencer) HistorySeed() string { return s.hist.Seed() }
+// BookmarkId returns the id of the bookmark written at bootstrap.
+func (s *Sequencer) BookmarkId() ranke.Id { return s.marks.BookmarkId() }
 
 // GetArchive returns the immutable snapshot RA_k at the current head, read under the
 // lock and built outside it, so a reader neither tears nor waits on a merge's I/O.
@@ -138,9 +136,9 @@ func (s *Sequencer) NewContribution(_ context.Context, opts ...ranke.Contributio
 	}, nil
 }
 
-// Merge is step 6: it folds each named branch's head in, mints one branch table
-// restating them all, records the revision, and publishes the new archive head. The
-// lock covers the whole step, since it derives the next head from the one it read.
+// Merge is steps 6–7: it folds each named branch's head in, mints one branch table
+// restating them all, bookmarks it, and publishes the new archive head. The lock
+// covers both steps, since it derives the next head from the one it read.
 func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (ranke.Receipt, error) {
 	m, ok := mc.(*mergable)
 	if !ok || m.s != s {
@@ -203,8 +201,11 @@ func (s *Sequencer) Merge(ctx context.Context, mc ranke.MergableContribution) (r
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.hist.Append(ctx, s.self, bt.ID(), int(bt.Node().Height()), bt.Node().CreatedAt()); err != nil {
-		return nil, fmt.Errorf("%w: append history: %w", errSequencer, err)
+	// Step 7 is where the advance k→k' takes effect, and it writes k' as the next
+	// bookmark (`R-C7BOOKMARK`) — Append derives the index itself, so this can neither
+	// skip a slot nor clobber one already written.
+	if _, err := s.marks.Append(ctx, s.self, bt.ID()); err != nil {
+		return nil, fmt.Errorf("%w: bookmark advance: %w", errSequencer, err)
 	}
 	s.head = bt.ID()
 	// The head advanced: signal storage to refresh its query accelerators. What a

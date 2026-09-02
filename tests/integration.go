@@ -6,8 +6,8 @@
 //
 // Package tests is the public conformance suite: a backend (a Universe) proves it
 // conforms to the Ranke-Graph ADT by running IntegrationTest, which stands the dev
-// Sequencer over it (its own Head History riding the same Universe) and validates
-// every closure it reads back.
+// Sequencer over it (its bookmark list in an in-process 𝒰_hist) and validates every
+// closure it reads back.
 package tests
 
 import (
@@ -62,7 +62,7 @@ func newFixture(t *testing.T, ctx context.Context, backend Backend) *fixture {
 	self := keyedContributor(t, ctx, clock, "sequencer")
 	u, err := backend(t, clock)
 	require.NoError(t, err, "open backend")
-	seq, err := devseq.NewSequencer(ctx, u, self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), self, clock)
 	require.NoError(t, err, "stand up dev Sequencer")
 	return &fixture{ctx: ctx, u: u, seq: seq, clock: clock, self: self}
 }

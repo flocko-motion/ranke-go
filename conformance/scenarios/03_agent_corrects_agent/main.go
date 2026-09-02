@@ -172,11 +172,12 @@ func main() {
 	}.Sign())
 
 	// --- 6. Merge one contribution carrying every claim; the dev Sequencer
-	// verifies, auto-consolidates the open heads, seeds, and mints the branch
-	// table, advancing branch "main". ---
+	// verifies, auto-consolidates the open heads, mints the branch table and
+	// bookmarks it, advancing branch "main". ---
 	u := must(fs.New(helpers.UniverseDir))
-	seq := must(devseq.NewSequencer(ctx, u, operator, s))
-	helpers.WriteHistorySeed(seq)
+	hist := must(fs.NewBookmarks(helpers.UniverseDir))
+	seq := must(devseq.NewSequencer(ctx, u, hist, operator, s))
+	helpers.WriteBookmarkId(seq)
 	must(testhelpers.Contribute(ctx, seq, "main", []ranke.Claim{
 		agentAClaim, agentBClaim, email,
 		alice, bob, siblingA, siblingNeg, employedBy,

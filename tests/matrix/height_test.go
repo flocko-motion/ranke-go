@@ -82,7 +82,7 @@ func buildRevisions(ctx context.Context, u ranke.Universe) (revisions, error) {
 		return revisions{}, err
 	}
 
-	seq, err := devseq.NewSequencer(ctx, u, op, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.NewMemoryBookmarks(), op, clock)
 	if err != nil {
 		return revisions{}, err
 	}

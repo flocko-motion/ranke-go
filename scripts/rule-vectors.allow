@@ -17,5 +17,4 @@ V-ARCHIVE an archive-level rule: it judges a head and its branch table, not one 
 V-TABLEREF a branch table reaching its predecessor through the wrong edge type; needs a table pair
 V-REL a relation edge whose endpoints break the rule; the toy graph has no relation edge
 V-SIGN an envelope whose protected header names an algorithm other than EdDSA; the signer here holds Ed25519 keys alone, so a header naming another scheme cannot carry a signature made under it, and the case would break the signature rule too
-V-IDSEQ defines id_seq(i,s) itself; the accepted history-claim case already exercises the computation it names, and a claim whose id disagrees is accepted, not rejected, once V-ID exempts the type — nothing here breaks it
-V-IDSEQVERIFY a fetch-time check (declared i against the slot fetched at); History.fetchAt, not the closure verifier this set drives, is what makes that check — needs a directed lookup, not one record
+V-IDSEQ defines id_seq(i,s) itself, and every bookmark case exercises the computation by being offered at the slot it names; a record whose own (i,s) key another slot breaks V-BMSLOT, which has its own case, so nothing is left here to break

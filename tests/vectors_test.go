@@ -100,6 +100,26 @@ func TestPublishedContentVectors(t *testing.T) {
 	}
 }
 
+// TestPublishedBookmarkVectors: each 𝒰_hist case must land the way the manifest says.
+// The set expectedGenerator names carries none yet — bookmarks are newer than it — so
+// this asserts over an empty list until the set is regenerated and republished. It is
+// here rather than with that republish so the cases are checked the moment they arrive
+// (-> TestPublishedVectorsCoverBothOutcomes, which is where a demand for them belongs
+// once the set has any).
+func TestPublishedBookmarkVectors(t *testing.T) {
+	root, m := artifacts(t)
+
+	outcomes, err := vectors.CheckBookmarks(context.Background(), root, m)
+	require.NoError(t, err)
+	require.Len(t, outcomes, len(m.Bookmarks))
+	for _, o := range outcomes {
+		t.Run(o.File, func(t *testing.T) {
+			require.Truef(t, o.Holds(), "expected verify=%v, got %v (%s) — %s%s",
+				o.Expected, o.Accepted, o.Reason, o.Why, diagnose(m))
+		})
+	}
+}
+
 // TestPublishedVectorsCoverBothOutcomes: a set of only-valid records would pass an
 // implementation that accepts everything, so the gate needs both kinds present.
 func TestPublishedVectorsCoverBothOutcomes(t *testing.T) {

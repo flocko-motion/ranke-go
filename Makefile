@@ -327,9 +327,9 @@ scenarios: ## Run every conformance scenario from a clean state
 # Wired into `verify`, so anything that moves an id fails here first — the ids are
 # signatures, and the reference bundle is the only thing holding them to a value.
 #
-# B_h is the archive's Head History seed (§Head Index) — a fixed string a
-# scenario's Sequencer derives deterministically, not a timestamped table, so it
-# byte-diffs like every other file here.
+# B_h is one bookmark id from the archive's list (§Bookmarks) — a scenario's
+# Sequencer derives its seed deterministically, so the id is fixed rather than
+# timestamped and byte-diffs like every other file here.
 #
 # Update after an intentional change: `make update-references`. Regenerating is
 # not the same as checking: the bundle is self-generated, so promote it only
