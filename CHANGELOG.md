@@ -16,13 +16,26 @@ What each release changed for someone depending on this repository.
   shard does, the list being replicated to all of them.
 - `UnsupportedBookmarks()` — the store a Universe reporting `Bookmarks` false hands
   out, answering `ErrUnsupported`.
+- `BookmarkLocator`, with two arms carrying two contracts: `Seed(s)` for a list that
+  starts at index 0 and is never pruned, and `At(id)` for a pruned one, opened from a
+  surviving entry whose record yields the seed. `Open` resolves either against a
+  Universe.
+- `MintSeed()` — a fresh 128-bit list seed (`V-BMENV`), for whoever founds a list and
+  keeps the value.
 
 ### Changed
 
-- `dev.NewSequencer` and `concurrent.NewSequencer` take the bookmark store from the
-  Universe instead of a parameter: `NewSequencer(ctx, u, self, clock)`. Both refuse
-  a Universe reporting `Capabilities.Bookmarks` false at construction, joining
-  `ErrUnsupported` so the refusal stays matchable.
+- `dev.NewSequencer` and `concurrent.NewSequencer` take a `BookmarkLocator` and read
+  the store off the Universe: `NewSequencer(ctx, u, loc, self, clock)`. Both refuse a
+  Universe reporting `Capabilities.Bookmarks` false at construction, joining
+  `ErrUnsupported` so the refusal stays matchable. `dev` no longer derives a seed of
+  its own, so a reproducible run states the one it wants.
+- `NewBookmarks(u, seed)` and `OpenBookmarks(ctx, u, id)` name a Universe rather than
+  a store, which is what stops a caller pairing one Universe's 𝒰_hist with another.
+  `NewBookmarks` now reports an error, refusing an empty seed.
+- A bookmark list's seed, locator and entry index are fixed at construction. `Append`
+  mints nothing and writes none of them, so `Seed()` and `BookmarkId()` answer the
+  same value from any goroutine and never answer nil.
 
 ### Removed
 

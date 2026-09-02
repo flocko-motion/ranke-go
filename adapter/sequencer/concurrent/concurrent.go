@@ -83,9 +83,9 @@ func (r receipt) Head() ranke.Id { return r.head }
 
 // NewSequencer bootstraps a fresh archive over u: it stores self and mints the
 // empty branch table whose id is the archive head k₀ (foundation §Ranke-Archive),
-// bookmarked at index 0 in u's 𝒰_hist under a freshly minted seed. self must carry a
-// signing key, which every branch table and every bookmark it writes is signed with.
-func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+// bookmarked at index 0 of the list loc names. self must carry a signing key, which
+// every branch table and every bookmark it writes is signed with.
+func NewSequencer(ctx context.Context, u ranke.Universe, loc ranke.BookmarkLocator, self ranke.Contributor, clock Clock) (*Sequencer, error) {
 	if u == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
@@ -97,8 +97,12 @@ func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor,
 	if !u.Capabilities().Bookmarks {
 		return nil, errors.Join(errNoBookmarks, ranke.ErrUnsupported)
 	}
+	marks, err := loc.Open(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open bookmark list: %w", errNewSequencer, err)
+	}
 	s := &Sequencer{
-		u: u, marks: ranke.NewBookmarks(u.Bookmarks(), u, nil), self: self, clock: clock,
+		u: u, marks: marks, self: self, clock: clock,
 		heads:     map[string]ranke.Id{},
 		committed: map[string]struct{}{},
 	}

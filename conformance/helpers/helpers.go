@@ -81,7 +81,7 @@ func WriteBookmarkId(seq ranke.Sequencer) {
 func (s *Scenario) ReloadAndVerify(ctx context.Context, expectBranch string) {
 	u := Must(fs.New(UniverseDir))
 	id := Must(ranke.ParseId(strings.TrimSpace(string(Must(os.ReadFile(BookmarkIdPath))))))
-	marks := Must(ranke.OpenBookmarks(ctx, u.Bookmarks(), u, id))
+	marks := Must(ranke.OpenBookmarks(ctx, u, id))
 	head := Must(marks.Latest(ctx)).Head() // the archive head k the list advanced to
 	arc := Must(ranke.NewArchive(ctx, u, head))
 

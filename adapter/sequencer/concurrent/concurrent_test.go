@@ -62,11 +62,11 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := concseq.NewSequencer(ctx, u, op, clk)
+	seq, err := concseq.NewSequencer(ctx, u, ranke.Seed([]byte(op.ID().String())), op, clk)
 	require.NoError(t, err)
 	// A second, independent view over the same bookmark list, reached the way any
 	// external reader would: from one bookmark id, never discovered (paper §Backup).
-	marks, err := ranke.OpenBookmarks(ctx, u.Bookmarks(), u, seq.BookmarkId())
+	marks, err := ranke.OpenBookmarks(ctx, u, seq.BookmarkId())
 	require.NoError(t, err)
 	return &fixture{u: u, marks: marks, seq: seq, op: op, clk: clk}
 }
@@ -456,6 +456,36 @@ func TestNewSequencerRefusesAUniverseHoldingNoBookmarks(t *testing.T) {
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
 
-	_, err := concseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()}, op, clk)
+	_, err := concseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()},
+		ranke.Seed([]byte("no-hist")), op, clk)
 	require.ErrorIs(t, err, ranke.ErrUnsupported)
+}
+
+// TestBookmarkIdIsRaceFreeUnderMerge: BookmarkId() takes no lock, where Merge holds
+// the sequencing lock across the Append that used to write the field it reads. The
+// value is settled before the Sequencer exists, so there is nothing to race on —
+// under -race this test is what says so.
+func TestBookmarkIdIsRaceFreeUnderMerge(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, ctx)
+	want := f.seq.BookmarkId()
+	require.NotNil(t, want, "the locator is settled at construction, not at the first append")
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := helpers.Contribute(ctx, f.seq, "main", []ranke.Claim{f.note(t, "merging")})
+			require.NoError(t, err)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				require.True(t, want.Equal(f.seq.BookmarkId()), "the locator never moves")
+			}
+		}()
+	}
+	wg.Wait()
 }

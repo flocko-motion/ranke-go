@@ -332,12 +332,12 @@ func TestCheckBookmarkHeadRequiresABranchTable(t *testing.T) {
 // TestMintedSeedCarriesEntropy: `V-BMENV` asks a seed for at least 128 bits, and two
 // mints must not collide — a shared seed would put two archives in one list.
 func TestMintedSeedCarriesEntropy(t *testing.T) {
-	a, err := mintSeed()
+	a, err := MintSeed()
 	require.NoError(t, err)
 	require.Len(t, a, seedBytes)
 	require.GreaterOrEqual(t, seedBytes*8, 128, "a minted seed carries at least 128 bits")
 
-	b, err := mintSeed()
+	b, err := MintSeed()
 	require.NoError(t, err)
 	require.NotEqual(t, a, b)
 }

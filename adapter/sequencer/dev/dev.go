@@ -70,8 +70,10 @@ func (s *Sequencer) tick() time.Time {
 
 // NewSequencer bootstraps a fresh archive over u, storing the key-carrying self
 // contributor and minting the empty contribution/branches claim whose id is the
-// archive head k₀ (foundation §Ranke-Archive), bookmarked at index 0 in u's 𝒰_hist.
-func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor, clock Clock) (*Sequencer, error) {
+// archive head k₀ (foundation §Ranke-Archive), bookmarked at index 0 of the list loc
+// names. A reproducible run passes a seed derived from its own fixture, keeping
+// "same (seed, spec) → identical ids" true of the bookmark slots too.
+func NewSequencer(ctx context.Context, u ranke.Universe, loc ranke.BookmarkLocator, self ranke.Contributor, clock Clock) (*Sequencer, error) {
 	if u == nil || self == nil || clock == nil {
 		return nil, errNilArg
 	}
@@ -83,11 +85,10 @@ func NewSequencer(ctx context.Context, u ranke.Universe, self ranke.Contributor,
 	if !u.Capabilities().Bookmarks {
 		return nil, errors.Join(errNoBookmarks, ranke.ErrUnsupported)
 	}
-	// A bookmark seed is normally random — but this Sequencer exists for reproducible
-	// tests (package doc), so it derives one from self's own (already deterministic,
-	// per-fixture) id, keeping "same (seed, spec) → identical ids" true of the whole
-	// archive, bookmark slots included.
-	marks := ranke.NewBookmarks(u.Bookmarks(), u, []byte(self.ID().String()))
+	marks, err := loc.Open(ctx, u)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open bookmark list: %w", errNewSequencer, err)
+	}
 	s := &Sequencer{u: u, marks: marks, self: self, clock: clock, heads: map[string]ranke.Id{}}
 
 	// Store the self contributor so branch-table claims attributed to it resolve.

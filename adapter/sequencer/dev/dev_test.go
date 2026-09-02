@@ -46,7 +46,7 @@ func newSequencer(t *testing.T, ctx context.Context) (*devseq.Sequencer, ranke.C
 	u := ranke.NewMemoryUniverse()
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
-	seq, err := devseq.NewSequencer(ctx, u, op, clk)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.Seed([]byte(op.ID().String())), op, clk)
 	require.NoError(t, err)
 	return seq, op, clk
 }
@@ -533,6 +533,7 @@ func TestNewSequencerRefusesAUniverseHoldingNoBookmarks(t *testing.T) {
 	clk := &clock{t: time.Unix(1000, 0).UTC()}
 	op := operator(t, ctx, clk.Tick())
 
-	_, err := devseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()}, op, clk)
+	_, err := devseq.NewSequencer(ctx, noBookmarks{ranke.NewMemoryUniverse()},
+		ranke.Seed([]byte("no-hist")), op, clk)
 	require.ErrorIs(t, err, ranke.ErrUnsupported)
 }

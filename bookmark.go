@@ -74,9 +74,10 @@ func IdSeq(i uint64, s []byte) (Id, error) {
 	return hashContent(b)
 }
 
-// mintSeed returns a fresh bookmark seed: seedBytes of crypto/rand, distinct from every
-// other list's.
-func mintSeed() ([]byte, error) {
+// MintSeed returns a fresh bookmark seed: seedBytes of crypto/rand, distinct from
+// every other list's. Whoever founds a list mints its seed and keeps it — the value
+// arrives at a Bookmarks already made (-> Seed), so nothing inside mints.
+func MintSeed() ([]byte, error) {
 	s := make([]byte, seedBytes)
 	if _, err := rand.Read(s); err != nil {
 		return nil, WrapDetail(errBookmarkSeedGen, "crypto/rand", err)

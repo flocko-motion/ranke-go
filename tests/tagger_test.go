@@ -25,7 +25,7 @@ func TestTagArchive(t *testing.T) {
 
 	u := mem.New()
 	require.True(t, u.Capabilities().Tags, "mem is Tags-capable")
-	seq, err := devseq.NewSequencer(ctx, u, self, clock)
+	seq, err := devseq.NewSequencer(ctx, u, ranke.Seed([]byte(self.ID().String())), self, clock)
 	require.NoError(t, err, "NewSequencer")
 
 	em, err := ranke.NewClaim(ranke.TypeSource("email"), self).

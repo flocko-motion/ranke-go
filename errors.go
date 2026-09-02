@@ -183,12 +183,13 @@ var (
 	// contributor edge alone, so height 1 is the only value that re-derives.
 	ErrArchiveFirstTableHeight = errors.New("ranke.verify: an archive's first branch-table claim must have height 1 (`V-ARCHIVEHEIGHT`)")
 	// --- Bookmarks (𝒰_hist, foundation paper §Bookmarks) ---
-	errBookmarkNoHead   = errors.New("ranke.Bookmarks.Append: nil head id")
-	errBookmarkNoSigner = errors.New("ranke: no contributor with a signing key to sign a bookmark under")
-	errBookmarkNoSeed   = errors.New("ranke.Bookmarks.Append: no seed — index 0 was never appended or given")
-	errBookmarkNilSlot  = errors.New("ranke: nil id_seq(i,s) slot")
-	errBookmarkEncode   = errors.New("ranke.SignBookmark: encode bookmark")
-	errBookmarkSeedGen  = errors.New("ranke.MintSeed: generate seed")
+	errBookmarkNoHead     = errors.New("ranke.Bookmarks.Append: nil head id")
+	errBookmarkNoSigner   = errors.New("ranke: no contributor with a signing key to sign a bookmark under")
+	errBookmarkNoSeed     = errors.New("ranke.NewBookmarks: a list is keyed on a non-empty seed (`V-IDSEQ`)")
+	errBookmarkNilSlot    = errors.New("ranke: nil id_seq(i,s) slot")
+	errBookmarkNoUniverse = errors.New("ranke: a bookmark list needs the Universe holding its 𝒰_hist")
+	errBookmarkEncode     = errors.New("ranke.SignBookmark: encode bookmark")
+	errBookmarkSeedGen    = errors.New("ranke.MintSeed: generate seed")
 	// The shape and authorship a stored record must have to be a bookmark at all.
 	errBookmarkForm    = errors.New("ranke: a bookmark's payload is the three-element S([i, s, k]) (`V-BMENV`)")
 	errBookmarkHeaders = errors.New("ranke: a bookmark's protected header carries alg and kid alone, its unprotected header nothing (`V-BMENV`)")

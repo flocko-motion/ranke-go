@@ -139,7 +139,7 @@ func OpenList(ctx context.Context, root string, m *Manifest, list string, u rank
 	if open == nil {
 		return nil, fmt.Errorf("%w: bookmark list %q names no entry to open it from", errCheck, list)
 	}
-	return ranke.OpenBookmarks(ctx, store, u, open)
+	return ranke.OpenBookmarks(ctx, u, open)
 }
 
 // acceptsBookmark reports whether the library takes one record as the bookmark its

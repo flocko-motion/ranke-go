@@ -68,7 +68,7 @@ func openArchive(ctx context.Context, dir string) (ranke.Universe, ranke.Archive
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", errOpen, err)
 	}
-	marks, err := ranke.OpenBookmarks(ctx, u.Bookmarks(), u, id)
+	marks, err := ranke.OpenBookmarks(ctx, u, id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: open bookmark list in %s: %w", errOpen, dir, err)
 	}
