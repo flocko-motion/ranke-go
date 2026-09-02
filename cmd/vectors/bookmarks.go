@@ -3,8 +3,8 @@
 // job:     the 𝒰_hist cases — one valid bookmark list every implementation must open, plus a record
 // per rule a bookmark can break: its envelope, its signature, its slot, its k, and its list's
 // contiguity
-// limits:  builds records, not lists on disk; the head each one records comes from the toy graph
-// (-> graph.go)
+// limits:  builds records, not lists on disk; the head each one records comes from the conformance
+// graph (-> graph.go)
 package main
 
 import (

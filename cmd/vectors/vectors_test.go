@@ -111,11 +111,11 @@ func TestBookmarkSlotsAreDistinctPerList(t *testing.T) {
 	}
 }
 
-// TestToyGraphIsAnArchive: the set carries a bookmark list, and only an archive has
+// TestConformanceGraphIsAnArchive: the set carries a bookmark list, and only an archive has
 // one. Opening it the way §Backup prescribes — one bookmark id to the latest head it
 // records — must reach a branch table (`V-ARCHIVE`). CheckClaims verifies claim by
 // claim, so this archive-scoped rule is out of its reach entirely.
-func TestToyGraphIsAnArchive(t *testing.T) {
+func TestConformanceGraphIsAnArchive(t *testing.T) {
 	ctx := context.Background()
 	dir, m := generate(t)
 

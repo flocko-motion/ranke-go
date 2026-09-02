@@ -99,11 +99,23 @@ that works here:
   {{.TestImports}}' ./...` is authoritative. A text search is not: it misses
   build constraints and cannot tell a test import from a real one.
 
-# Releasing a change that moves every id
+# Releasing a change that moves every id, or adds a record kind
 
 An encoder change — a new record key, an alias, anything touching `S(v)` or the
-envelope around it — moves every claim id in every archive. Two artifacts then have
-to catch up, and they catch up in different places.
+envelope around it — moves every claim id in every archive. A new *kind* of record
+moves no id at all and still needs the set regenerated: the suite asserts over the
+cases the published set carries, so a kind it lacks is checked by every gate here
+and by nothing downstream. Read on in both cases. Two artifacts then have to catch
+up, and they catch up in different places.
+
+**`cmd/vectors` is the conformance suite; the spec's annex is not.** The conformance
+graph it builds is the artifact every implementation is judged against, designed for
+corner coverage: one case per ADT shape, one per rule a record can break. `make verify`'s
+`rule-vectors` gate is what says whether that coverage is complete, and
+`scripts/rule-vectors.allow` carries each rule still without a case. §Annex — The
+Reference Archive in `docs/papers/spec/ranke-spec.typ` is the papers' showcase, the
+archive their examples are narrated against; it does not govern this set, whatever
+its own text says about materialisation.
 
 The **scenario bundles** are local: `make update-references`, read the diff, confirm
 each scenario still reports every claim valid, and commit them with the change.

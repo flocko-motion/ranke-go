@@ -1,7 +1,7 @@
 // package: main / vectors_graph
 // type:    cmd
-// job:     the toy graph every implementation must verify — one claim per ADT shape, small enough
-// that a reader can check each record against §4.1 by eye
+// job:     the conformance graph every implementation must verify — one claim per ADT shape, small
+// enough that a reader can check each record against §4.1 by eye
 // limits:  valid records only; the rejected ones derive from these (-> broken.go)
 package main
 
@@ -19,10 +19,10 @@ var externalBlob = []byte("externalized content, addressed by hash")
 // rootSeed derives the identity that signs most of the set, patched records included.
 const rootSeed = "ranke-vectors/root"
 
-// toyGraph builds the claims that must verify: a contributor, a source note, a
+// conformanceGraph builds the claims that must verify: a contributor, a source note, a
 // derived claim citing it, external content, node fields, a dated claim, the
 // archive's empty branch table and one revision of it, and a second contributor.
-func (g *gen) toyGraph(ctx context.Context) error {
+func (g *gen) conformanceGraph(ctx context.Context) error {
 	root, who, err := contributorClaim(ctx, signer(rootSeed), epoch)
 	if err != nil {
 		return err

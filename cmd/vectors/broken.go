@@ -3,8 +3,8 @@
 // job:     the records every implementation must reject, each isolating one failure — a wrong id, a
 // record stored bare where an envelope belongs, an unresolvable contributor, a declared height that
 // is not the derived one, content that misses its hash
-// limits:  derives from the toy graph (-> graph.go); each case breaks one thing, so a rejection
-// names a cause
+// limits:  derives from the conformance graph (-> graph.go); each case breaks one thing, so a
+// rejection names a cause
 package main
 
 import (

@@ -1,7 +1,7 @@
 // package: main / vectors
 // type:    cmd
-// job:     generates the cross-implementation reference artifacts — a toy graph of claim records,
-// the archive's bookmark list, plus records that must be rejected, described by a manifest
+// job:     generates the cross-implementation reference artifacts — a conformance graph of claim
+// records, the archive's bookmark list, plus records that must be rejected, described by a manifest
 // limits:  renders bytes only; the artifacts are the spec's, and which of them are correct is
 // settled against the paper, not against this program
 package main
@@ -65,8 +65,8 @@ func run(ctx context.Context, dir string, p vectors.Provenance) error {
 			return err
 		}
 	}
-	if err := g.toyGraph(ctx); err != nil {
-		return fmt.Errorf("toy graph: %w", err)
+	if err := g.conformanceGraph(ctx); err != nil {
+		return fmt.Errorf("conformance graph: %w", err)
 	}
 	if err := g.bookmarkCases(); err != nil {
 		return fmt.Errorf("bookmarks: %w", err)
