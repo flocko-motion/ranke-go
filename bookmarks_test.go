@@ -228,7 +228,7 @@ func TestOpenBookmarksRejectsWhatIsNoBookmark(t *testing.T) {
 	putClaims(t, u, head)
 	raw, err := SignBookmark(self, 0, []byte("real-seed"), head.ID())
 	require.NoError(t, err)
-	wrong, err := IdSeq(0, []byte("attacker-chosen-seed"))
+	wrong, err := IdSeq(0, []byte("another-lists-seed"))
 	require.NoError(t, err)
 	require.NoError(t, hist.Put(ctx, wrong, raw))
 	_, err = OpenBookmarks(ctx, hist, u, wrong)
@@ -332,6 +332,18 @@ func TestBookmarksReportsADamagedSlot(t *testing.T) {
 			_, err = r.Latest(ctx)
 			require.ErrorIs(t, err, errBookmarkSlotRead,
 				"a damaged slot must be reported, not read as the end of the list")
+
+			// Asked for the slot directly, the damage is what is reported. Collapsing it
+			// into a range error would name the wrong problem: the entry IS there.
+			_, err = NewBookmarks(hist, u, seed).GetAtIndex(ctx, 1)
+			require.ErrorIs(t, err, errBookmarkSlotRead)
+			require.NotErrorIs(t, err, errBookmarkIndexRange,
+				"the record is present and unreadable, not outside the list's range")
+
+			// And the whole-list walk reports damage rather than the gap it would leave.
+			_, err = NewBookmarks(hist, u, seed).GetBulk(ctx, 0, 2)
+			require.ErrorIs(t, err, errBookmarkSlotRead)
+			require.NotErrorIs(t, err, errBookmarkIndexRange)
 
 			// The legitimate entry below the damage is still readable on its own.
 			fresh := NewBookmarks(hist, u, seed)
@@ -465,6 +477,14 @@ func TestBookmarksGetBulkRange(t *testing.T) {
 	require.ErrorIs(t, err, errBookmarkRangeInvalid)
 	_, err = r.GetBulk(ctx, 3, 1)
 	require.ErrorIs(t, err, errBookmarkRangeInvalid)
+
+	// An empty half-open range is well formed, and reads no slot: from == toExcluding
+	// asks for nothing, including past the end where a read would have errored.
+	for _, from := range []int{0, 2, 9} {
+		got, err := r.GetBulk(ctx, from, from)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
 
 	// A negative index has no slot, and uint64(-1) is a real one: a record planted
 	// there must not answer for it.

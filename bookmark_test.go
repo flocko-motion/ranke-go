@@ -189,13 +189,13 @@ func sealedBookmark(t *testing.T, self Contributor, payload []byte, shape func(*
 	return raw
 }
 
-// TestVerifyBookmarkRejectsAForgedSignature is `V-BMSIG`: id_seq(i,s) grants access to
-// a slot, never trust in what sits there. A record naming one contributor as kid and
-// signed under another's key is refused, however well-formed it is.
-func TestVerifyBookmarkRejectsAForgedSignature(t *testing.T) {
+// TestVerifyBookmarkRejectsASignatureFromAnotherKey is `V-BMSIG`: a record naming one
+// contributor as kid and signed under another's key is not a bookmark of that
+// contributor's, whatever else about it is well formed.
+func TestVerifyBookmarkRejectsASignatureFromAnotherKey(t *testing.T) {
 	ctx := context.Background()
 	u := NewMemoryUniverse()
-	self, attacker := contributor(t), contributor(t)
+	self, other := contributor(t), contributor(t)
 	putClaims(t, u, self)
 	head := bmHead(t, self, time.Now())
 	putClaims(t, u, head)
@@ -204,8 +204,8 @@ func TestVerifyBookmarkRejectsAForgedSignature(t *testing.T) {
 		Index: 0, Seed: []byte("forged-seed"), Head: head.ID().rawBytes(),
 	})
 	require.NoError(t, err)
-	// The attacker's key over a payload whose kid names the registered contributor.
-	raw, err := signCOSE(attacker.SigningKey(), payload, cose.ProtectedHeader{
+	// The other key over a payload whose kid names the registered contributor.
+	raw, err := signCOSE(other.SigningKey(), payload, cose.ProtectedHeader{
 		cose.HeaderLabelKeyID: self.ID().rawBytes(),
 	})
 	require.NoError(t, err)

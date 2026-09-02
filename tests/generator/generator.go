@@ -65,7 +65,7 @@ func fill(master int64, tag string, index, n int) []byte {
 
 // Clock hands out increasing timestamps from a fixed base, so created_at (which
 // feeds the id) is reproducible and satisfies the §Claims monotonicity rule.
-// One Clock is the time source for the generator, History, and Sequencer alike.
+// One Clock is the time source for the generator and Sequencer alike.
 type Clock struct {
 	t    time.Time
 	step time.Duration

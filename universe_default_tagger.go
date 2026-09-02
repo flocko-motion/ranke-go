@@ -76,7 +76,7 @@ func DefaultTag(ctx context.Context, u Universe, head Id) error {
 
 // TagArchive descends a's branch-table spine and tags each revision's branch
 // closures oldest→newest
-func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]HistoryItem, error) {
+func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]SpineItem, error) {
 	arc, ok := a.(*archive)
 	if !ok {
 		return nil, errNotArchive
@@ -115,12 +115,12 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 	}
 
 	// 2: iterate the untagged spine oldest→newest, revisions base..n.
-	history := make([]HistoryItem, 0, len(spine))
+	items := make([]SpineItem, 0, len(spine))
 	revision := base
 	for i := len(spine) - 1; i >= 0; i, revision = i-1, revision+1 {
 		bt := spine[i]
 		revisionStr := strconv.FormatUint(revision, 10)
-		history = append(history, NewHistoryItem(bt.ID(), int(revision), int(bt.Node().Height()), bt.Node().CreatedAt()))
+		items = append(items, NewSpineItem(bt.ID(), int(revision), int(bt.Node().Height()), bt.Node().CreatedAt()))
 
 		// 2.1: accumulate every branch's membership for this revision into one shared
 		// map, so a claim on several branches gets each _b_<branch> before the flush.
@@ -144,5 +144,5 @@ func TagArchive(ctx context.Context, a Archive, opts ...TagArchiveOptions) ([]Hi
 			return nil, err
 		}
 	}
-	return history, nil
+	return items, nil
 }

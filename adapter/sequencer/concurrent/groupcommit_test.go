@@ -90,7 +90,7 @@ func enqueueAll(s *Sequencer, ms []*mergable) []*pending {
 
 // TestGroupCommitIsOneRevisionPerBatch is the throughput claim made concrete: a
 // batch of contributions waiting at step 6 is merged in a SINGLE operation — one
-// branch-table claim, one history entry — however many are queued. That is what
+// branch-table claim, one spine entry — however many are queued. That is what
 // keeps the sequencing thread from becoming the bottleneck, since the cost of a
 // commit is per-batch, not per-contribution.
 func TestGroupCommitIsOneRevisionPerBatch(t *testing.T) {
