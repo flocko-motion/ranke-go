@@ -23,6 +23,7 @@ func NewMemoryUniverse() Universe {
 		claims:  make(map[string][]byte),
 		content: make(map[string][]byte),
 		tags:    make(map[string]map[string]string),
+		marks:   &memoryBookmarks{records: make(map[string][]byte)},
 	}
 }
 
@@ -31,6 +32,7 @@ type memoryUniverse struct {
 	claims  map[string][]byte            // canonical CBOR by id
 	content map[string][]byte            // content by hash
 	tags    map[string]map[string]string // id → tag key → value (side-map)
+	marks   *memoryBookmarks             // 𝒰_hist, sharing this Universe's lifetime
 }
 
 func (u *memoryUniverse) GetClaims(ctx context.Context, ids []Id, opts ...GetOption) ([]Claim, error) {
@@ -266,12 +268,16 @@ func (u *memoryUniverse) CopyContents(ctx context.Context, src Universe, refs []
 	return DefaultCopyContents(ctx, u, src, refs, opts...)
 }
 
+// Bookmarks returns the 𝒰_hist held in this Universe's own maps, so a bookmark
+// lives exactly as long as the claims it locates.
+func (u *memoryUniverse) Bookmarks() BookmarkStore { return u.marks }
+
 // Capabilities: a map can overwrite, delete, and enumerate, and serves raw
 // claim CBOR and content blobs; it is not persistent (lost on process exit).
 // It holds the archive verbatim, so it defaults to the authoritative tier (an
 // in-memory source of truth — durable only for the process lifetime).
 func (u *memoryUniverse) Capabilities() Capabilities {
-	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true, Tier: StorageTierAuthoritative}
+	return Capabilities{Overwrite: true, Delete: true, Enumerate: true, RawClaims: true, ExternalContent: true, Tags: true, Bookmarks: true, Tier: StorageTierAuthoritative}
 }
 
 // Sync fills from src (a no-op when src is nil — memory already holds it).

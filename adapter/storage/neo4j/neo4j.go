@@ -502,8 +502,15 @@ func (u *neo4jUniverse) SetClaimsTags(ctx context.Context, clearTags []string, t
 	return nil
 }
 
+// Bookmarks refuses: this graph holds neither raw CBOR nor unbounded content, so
+// AllowsTier bars it from authoritative — it is a projection you drop and reindex,
+// and an archive's only locator cannot live in something rebuildable. Stacked over
+// a store that does hold 𝒰_hist, the stack answers instead.
+func (u *neo4jUniverse) Bookmarks() ranke.BookmarkStore { return ranke.UnsupportedBookmarks() }
+
 // Capabilities: a graph DB can overwrite, delete, and enumerate, is durable,
-// answers queries natively (Cypher), and holds branch tags.
+// answers queries natively (Cypher), and holds branch tags. Bookmarks stays false
+// (see Bookmarks).
 func (u *neo4jUniverse) Capabilities() ranke.Capabilities {
 	return ranke.Capabilities{
 		Overwrite:   true,

@@ -473,10 +473,11 @@ func (s *stack) Tag(ctx context.Context, head ranke.Id) error {
 
 // Capabilities derives the stack's from its layers: Overwrite needs every
 // synchronous layer and Delete every layer, while the rest need one layer to
-// have it (ContentCap the largest, or 0 for an unbounded one). Tier is authoritative.
+// have it (ContentCap the largest, or 0 for an unbounded one). Persistent and
+// Bookmarks need that layer to be authoritative. Tier is authoritative.
 func (s *stack) Capabilities() ranke.Capabilities {
 	overwrite, del := true, true
-	var enumerate, persistent, reverseWalk, rawClaims, externalContent, tags bool
+	var enumerate, persistent, reverseWalk, rawClaims, externalContent, tags, bookmarks bool
 	var contentCap uint64
 	for _, l := range s.layers {
 		c := l.caps
@@ -509,6 +510,11 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		if c.Tier == ranke.StorageTierAuthoritative && c.Persistent {
 			persistent = true
 		}
+		// Like Persistent: a cache holding the locator does not make the stack hold
+		// it, since dropping and reindexing that layer would take the archive with it.
+		if c.Tier == ranke.StorageTierAuthoritative && c.Bookmarks {
+			bookmarks = true
+		}
 	}
 	if externalContent {
 		contentCap = 0 // an unbounded layer means the stack holds any size
@@ -523,6 +529,7 @@ func (s *stack) Capabilities() ranke.Capabilities {
 		ExternalContent: externalContent,
 		ContentCap:      contentCap,
 		Tags:            tags,
+		Bookmarks:       bookmarks,
 		Tier:            ranke.StorageTierAuthoritative,
 	}
 }

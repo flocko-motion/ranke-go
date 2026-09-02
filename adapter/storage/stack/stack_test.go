@@ -354,15 +354,15 @@ func at(u ranke.Universe, t ranke.StorageTier) ranke.Universe {
 
 func TestCapabilitiesDerivation(t *testing.T) {
 	// All-mem: every field but Persistent (mem is ephemeral). mem keeps verbatim
-	// claim bytes and holds tags, and a stack with an authoritative layer reports
-	// itself authoritative.
+	// claim bytes, holds tags and carries 𝒰_hist, and a stack with an authoritative
+	// layer reports itself authoritative.
 	st, err := stack.NewStack(mem.New(), mem.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := ranke.Capabilities{
 		Overwrite: true, Delete: true, Enumerate: true, RawClaims: true,
-		ExternalContent: true, Tags: true, Tier: ranke.StorageTierAuthoritative,
+		ExternalContent: true, Tags: true, Bookmarks: true, Tier: ranke.StorageTierAuthoritative,
 	}
 	if got := st.Capabilities(); got != want {
 		t.Fatalf("all-mem stack caps = %+v, want %+v", got, want)

@@ -243,6 +243,7 @@ func (m *metered) Sync(ctx context.Context, src ranke.Universe, id ranke.Id) <-c
 	return m.inner.Sync(ctx, src, id)
 }
 
+func (m *metered) Bookmarks() ranke.BookmarkStore   { return m.inner.Bookmarks() }
 func (m *metered) Capabilities() ranke.Capabilities { return m.inner.Capabilities() }
 func (m *metered) Close() error                     { return m.inner.Close() }
 
